@@ -1,0 +1,9 @@
+venv
+*.pth
+*.pt
+*.yaml
+data/sock_*
+*.jpg
+__pycache__
+temp
+flux
