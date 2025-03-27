@@ -3,6 +3,7 @@
 #include <utility>
 #include <vector>
 #include <filesystem>
+#include <io.cpp>
 
 #define STRINGIFY(x) #x
 #define MACRO_STRINGIFY(x) STRINGIFY(x)
@@ -11,7 +12,7 @@ namespace fs = std::filesystem;
 
 #define null nullptr
 
-constexpr std::string INVALID_DS_ENV_VAR = "INVALIDATE_DATASET";
+constexpr const char *INVALID_DS_ENV_VAR = "INVALIDATE_DATASET";
 
 enum class FileType {
     JPG,
@@ -35,7 +36,7 @@ private:
     std::string dictName;
 };
 
-bool existsEnvVar(const std::string& name) {
+bool existsEnvVar(const std::string &name) {
     return std::getenv(name.c_str()) != null;
 }
 
@@ -47,6 +48,34 @@ public:
         py::function createDatasetFunction
     ) : rootDir(std::move(rootDir)), subDirs(std::move(subDirs)),
         createDatasetFunction(std::move(createDatasetFunction)) {
+
+        io_uring ring;
+        off_t insize;
+        int ret;
+
+        int infd = open("/home/workstation/Downloads/OpenSock/dataloader/noxfile.py", O_RDONLY);
+        if (infd < 0) {
+            perror("open infile");
+            return;
+        }
+
+        int outfd = open("/home/workstation/Downloads/OpenSock/dataloader/noxfile.py2", O_WRONLY | O_CREAT | O_TRUNC, 0644);
+        if (outfd < 0) {
+            perror("open outfile");
+            return;
+        }
+
+        if (setup_context(QD, &ring))
+            return;
+
+        if (get_file_size(infd, &insize))
+            return;
+
+        ret = copy_file(infd, outfd, &ring, insize);
+
+        close(infd);
+        close(outfd);
+        io_uring_queue_exit(&ring);
     }
 
     void init() const {

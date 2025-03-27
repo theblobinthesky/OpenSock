@@ -7,6 +7,7 @@ import pytest as t
 def test_version():
     assert m.__version__ == "0.0.1"
 
+
 def test_wrong_constructor_args():
     with t.raises(TypeError):
         ds = m.Dataset(1)
@@ -25,10 +26,11 @@ def get_dataset():
         init_ds_func
     )
 
+    ds.init()
+
     return ds
 
 
 def test_constructor():
-    ds = get_dataset()
-    ds.init()
+    get_dataset()
     assert False
