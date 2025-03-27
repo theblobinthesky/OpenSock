@@ -8,3 +8,11 @@ __pycache__
 temp
 flux
 wandb
+*.gz
+*.whl
+build
+.idea
+dist
+.nox
+.pytest_cache
+cmake-build-debug
