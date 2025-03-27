@@ -1,10 +1,13 @@
-import os, jax, jax.nn as nn, jax.numpy as jnp, jax.lax as lax
+import jax, jax.nn as nn, jax.numpy as jnp, jax.lax as lax
 import jax.nn.initializers as init
 from config import TrainConfig, DataConfig, ModelConfig
 from data import SimpleYOLOPreprocessor
-from train import train_model, load_params
+from train import train_model
+from utils import non_maximum_supression, average_precision
+from utils import quality_focal_loss, distribution_focal_loss, general_iou_loss
 
 DIM_NUMS = ('NHWC', 'HWIO', 'NHWC')
+MAX_NUMBER_OF_BBOXES = 10_000
 
 class Initializer:
     def __init__(self):
@@ -16,12 +19,19 @@ class Initializer:
         self.key = k1
         return self.kernel_init(k2, shape)
 
-def batch_norm():
-    pass
-    
+init_fn = Initializer()
+
+def batch_norm(x: jnp.ndarray) -> jnp.ndarray:
+    # TODO: Implement the proper batchnorm!
+    mean = jnp.mean(x, axis=(0, 1, 2), keepdims=True)
+    var = jnp.var(x, axis=(0, 1, 2), keepdims=True)
+    return (x - mean) / jnp.sqrt(var + 1e-5)
+
 def conv(config: ModelConfig, params: dict, x: jnp.ndarray, stride: int=1) -> jnp.ndarray:
-    x = lax.conv_general_dilated(x, params['conv_weights'], (stride, stride), 'SAME', dimension_numbers=DIM_NUMS)
-    x = batch_norm()
+    # print(f"{x.shape=}, {params['weights'].shape=}")
+    x = lax.conv_general_dilated(x, params['weights'], (stride, stride), 'SAME', dimension_numbers=DIM_NUMS)
+    x = x + params['biases']
+    x = batch_norm(x)
     x = nn.silu(x)
     
     return x
@@ -52,7 +62,7 @@ def init_residual(chs: int) -> dict:
 # See https://arxiv.org/pdf/1911.11929
 def csp(config: ModelConfig, params: dict, x: jnp.array, n: int=1) -> jnp.array:
     y = [conv(config, params['conv1'], x), conv(config, params['conv2'], x)]
-    y.extend(residual(config, params[f"residual{i}"], y[-1]) for i in range(n))
+    y.extend(residual(config, params['residuals'][f"residual{i}"], y[-1]) for i in range(n))
     x = conv(config, params['conv3'], jnp.concat(y, axis=-1))
     
     return x
@@ -68,31 +78,45 @@ def init_csp(chs_in: int, chs_out: int, n: int=1) -> dict:
         }
     }  
 
-def spp(config: ModelConfig, params: dict, x: jnp.array) -> jnp.array:
+def max_pool_2d(x: jnp.ndarray, kernel_size: int, stride: int, padding: int) -> jnp.ndarray:
+    x = lax.reduce_window(
+        operand=x, 
+        init_value=-jnp.inf, 
+        computation=lax.max, 
+        window_dimensions=(1, kernel_size, kernel_size, 1), 
+        window_strides=(1, stride, stride, 1), 
+        padding=[(0, 0), (padding, padding), (padding, padding), (0, 0)]
+    )
+
+    return x
+
+def spp(config: ModelConfig, params: dict, x: jnp.array, pool_kernel_size: int=5) -> jnp.array:
     x = conv(config, params['conv1'], x)
-    pool1 = max_pool_2d(x, ...todoparams)
-    pool2 = max_pool_2d(pool1, ...todoparams)
-    pool3 = max_pool_2d(pool2, ...todoparams)
+    pool1 = max_pool_2d(x, kernel_size=pool_kernel_size, stride=1, padding=pool_kernel_size // 2)
+    pool2 = max_pool_2d(pool1, kernel_size=pool_kernel_size, stride=1, padding=pool_kernel_size // 2)
+    pool3 = max_pool_2d(pool2, kernel_size=pool_kernel_size, stride=1, padding=pool_kernel_size // 2)
     x = jnp.concat([x, pool1, pool2, pool3], axis=-1)
     return conv(config, params['conv2'], x)
 
 def init_spp(chs_in: int, chs_out: int) -> dict:
     return {
-        'conv1': init_conv(chs_in, chs_out),
-        'conv2': init_conv(chs_in, chs_out)
+        'conv1': init_conv(chs_in, chs_out // 2),
+        'conv2': init_conv(chs_in * 2, chs_out)
     }
 
-def dark_net_layer(config: ModelConfig, params: dict, x: jnp.ndarray) -> jnp.ndarray:
+def dark_net_layer(config: ModelConfig, params: dict, x: jnp.ndarray, n: int=1) -> jnp.ndarray:
     x = conv(config, params['conv'], x, stride=2)
-    x = csp(config, params['csp'], x)
+    x = csp(config, params['csp'], x, n=n)
     return x
 
 def dark_net(config: ModelConfig, params: dict, x: jnp.ndarray) -> jnp.ndarray:
+    depth: list[int] = config['depth']
+
     p1 = conv(config, params['p1_conv'], x, stride=2)
-    p2 = dark_net_layer(config, params['p2'], p1) 
-    p3 = dark_net_layer(config, params['p3'], p2) 
-    p4 = dark_net_layer(config, params['p4'], p3) 
-    p5 = dark_net_layer(config, params['p5'], p4) 
+    p2 = dark_net_layer(config, params['p2'], p1, n=depth[0]) 
+    p3 = dark_net_layer(config, params['p3'], p2, n=depth[1]) 
+    p4 = dark_net_layer(config, params['p4'], p3, n=depth[2]) 
+    p5 = dark_net_layer(config, params['p5'], p4, n=depth[0]) 
     p5 = spp(config, params['p5']['spp'], p5)
     
     return p3, p4, p5
@@ -129,15 +153,17 @@ def upsample(x: jnp.ndarray, scale: int=2):
     return x
 
 def dark_fpn(config: ModelConfig, params: dict, x: jnp.ndarray) -> jnp.ndarray:
+    depth: list[int] = config['depth']
+
     p3, p4, p5 = x
   
     # Pyramid: Up
-    h1 = csp(config, params['h1'], jnp.concat([p4, upsample(p5)], axis=-1)) 
-    h2 = csp(config, params['h2'], jnp.concat([p3, upsample(h1)], axis=-1))
+    h1 = csp(config, params['h1'], jnp.concat([p4, upsample(p5)], axis=-1), n=depth[0]) 
+    h2 = csp(config, params['h2'], jnp.concat([p3, upsample(h1)], axis=-1), n=depth[0])
   
     # Pyramid: Down
-    h4 = csp(config, params['h4'], jnp.concat([p4, conv(config, params['h3'], h2, stride=2)], axis=-1))
-    h6 = csp(config, params['h6'], jnp.concat([p5, conv(config, params['h5'], h4, stride=2)], axis=-1))
+    h4 = csp(config, params['h4'], jnp.concat([p4, conv(config, params['h3'], h2, stride=2)], axis=-1), n=depth[0])
+    h6 = csp(config, params['h6'], jnp.concat([p5, conv(config, params['h5'], h4, stride=2)], axis=-1), n=depth[0])
     
     return h2, h4, h6 
     
@@ -164,13 +190,24 @@ def detection_head_layer(config: ModelConfig, params: dict, s: jnp.ndarray) -> j
 
 def detection_head(config: ModelConfig, params: dict, x: list[jnp.ndarray]) -> jnp.ndarray:
     scales = []
+    dfl_channels = config['dfl_channels']
+
     for class_params, box_params, s in zip(params['class_head'], params['box_head'], x):
-        scales.append(detection_head_layer(config, class_params, s))
-        scales.append(detection_head_layer(config, box_params, s))
+        class_pred = nn.sigmoid(detection_head_layer(config, class_params, s))
 
-    return jnp.concat(scales, axis=-1)
+        box_pred = detection_head_layer(config, box_params, s)
+        b, h, w, _ = box_pred.shape
+        box_pred = box_pred.reshape((b, h, w, 4, dfl_channels))
+        box_pred = nn.softmax(box_pred, axis=-1)
 
-def init_detection_head(config: ModelConfig, filters: list):
+        scales.append((class_pred, box_pred))
+
+    return scales
+
+def init_detection_head(config: ModelConfig):
+    width: list[int] = config['width']
+    filters: list[int] = (width[3], width[4], width[5])
+    
     num_classes = config['num_classes']
     dfl_channels = config['dfl_channels']
     
@@ -196,12 +233,34 @@ def init_detection_head(config: ModelConfig, filters: list):
         ]
     }
 
-def yolo(config: ModelConfig, params: dict, x: jnp.ndarray) -> jnp.ndarray:
+def yolo(config: ModelConfig, params: dict, x: jnp.ndarray, train: bool=False) -> jnp.ndarray:
     x = dark_net(config, params['backbone'], x)
     x = dark_fpn(config, params['feature_pyramid_network'], x)
-    x = detection_head(config, params['detection_head'], list(x))
+    scales = detection_head(config, params['detection_head'], list(x))
 
-    return x
+    if train:
+        return scales
+    else:
+        bboxes = []
+        scores = []
+
+        for (class_target, bbox_target) in scales:
+            def expectations(target: jnp.ndarray, horizontal_mode: bool) -> jnp.ndarray:
+                scale_min, scale_max = oconfig['bbox_width_range'] if horizontal_mode else oconfig['bbox_height_range']
+                expectations = target.mean(-1)
+                bbox_scales = scale_min + expectations * (scale_max - scale_min)
+                return bbox_scales
+
+            side_exps = [expectations(bbox_target[:, :, :, i], hori_mode) for i, hori_mode in [(0, True), (1, True), (2, False), (3, False)]]
+            indices = jnp.nonzero(class_target >= oconfig['score_threshold'])
+            # TODO: Atm. nothing makes use of that. Do i really have to pass the counts through everywhere?
+            bboxes.append(jnp.concat([side_exp[:, None][indices][:, None] for side_exp in side_exps], axis=1))
+            scores.append(class_target[indices])
+
+        bboxes = jnp.concat(bboxes, axis=0)
+        scores = jnp.concat(scores, axis=-1)
+        bboxes, scores, non_maximum_supression(bboxes, scores, threshold=oconfig['nms_threshold'])
+        return scales, bboxes, scores
 
 def init_yolo(config: ModelConfig):
     return {
@@ -209,68 +268,92 @@ def init_yolo(config: ModelConfig):
         'feature_pyramid_network': init_dark_fpn(config),
         'detection_head': init_detection_head(config)
     }
-    
-def init_params(mconfig: ModelConfig, init_fn: Initializer) -> dict[str, jnp.ndarray]:
-    
-    return params   
-
 
 # TODO For inference: fuse the batch norm into the predeceeding convolution.
-# TODO For inference: The detection head.
 
 if __name__ == "__main__":
     dconfig = DataConfig()
     tconfig = TrainConfig()
     mconfig = ModelConfig()
-    
-    init_fn = Initializer()
-    params = init_yolo(mconfig, init_fn)
-    yolo(mconfig, params, jnp.zeros((2, 800, 800, 3)))
-    
-    ds_preproc = SimpleYOLOPreprocessor(
-        videos_dir="path/to/mov_files",
-        annotations_dir="path/to/json_files",
-        output_dir="path/to/output_dataset"
-    )
-    
-    dataset = ds_preproc.create_dataset(batch_size=16)
 
-    
-    exit(0)
-    
+    if True: 
+        oconfig = mconfig.object_detector
 
-    if 'VIZ' in os.environ:
-        test_dataset = get_test_dataset(dconfig, tconfig)
+        ds_preproc = SimpleYOLOPreprocessor(
+            videos_dir="../data/sock_videos",
+            annotations_dir="../data/sock_video_results",
+            output_dir="../data/temp/yolo_ds"
+        )
+        
+        train_dataset, valid_dataset = ds_preproc.create_train_valid_datasets(
+            batch_size=tconfig.batch_size, 
+            img_size=(64, 64),
+            valid_split=0.02
+        )
+        params = init_yolo(mconfig.object_detector)
 
-        import matplotlib.pyplot as plt
-        batch = test_dataset.get_next_batch()
+        width_min, width_max = oconfig['bbox_width_range']
+        height_min, height_max = oconfig['bbox_height_range']
+        dfl_channels = oconfig['dfl_channels']
 
-        def pad(x):
-            h, w, _ = x.shape
-            return jnp.concat([x, jnp.zeros((h, w, 1))], axis=-1)
+        def rescale_and_clip(sizes: jnp.ndarray, size_min: float, size_max: float):
+            sizes = jnp.clip((sizes - size_min) / (size_max - size_min), 0.0, 1.0)
+            sizes = (dfl_channels - 1) * sizes
 
-        params = load_params(tconfig.model_path)
-        img, uv = batch["img"], batch["uv"]
-        x = vit_basic(mconfig, params, img)
+            floor = jnp.floor(sizes)
+            fract = 1.0 - (sizes - floor)
 
-        for b in range(tconfig.batch_size):
-            _, ax = plt.subplots(1, 3)
-            ax[0].imshow(img[b])
-            ax[1].imshow(pad(uv[b, :, :, :2]))
-            ax[2].imshow(pad(x[b]))
-            plt.show()
+            return jnp.astype(floor, jnp.uint32), fract
 
-    else:
-        train_dataset = get_train_dataset(dconfig, tconfig)
-        valid_dataset = get_valid_dataset(dconfig, tconfig)
+        def get_loss_from_scales(batch: jnp.ndarray, scales: jnp.ndarray) -> jnp.ndarray:
+            bboxes, classes = batch['bboxes'], batch['classes']
+            num_classes = oconfig['num_classes']
 
-        init_fn = Initializer()
-        params = init_params(mconfig, init_fn)
-        import train
-        train._save_model(params, "model.pkl")
+            total_class_loss = jnp.zeros(())
+            total_bbox_loss = jnp.zeros(())
+
+            for (class_pred, bbox_pred) in scales:
+                b, h, w, _ = class_pred.shape
+                left, right, top, bottom = bboxes[..., 0], bboxes[..., 2], bboxes[..., 1], bboxes[..., 3]
+                left, right, top, bottom = left * w, right * w, top * h, bottom * h
+                cx, cy = (left + right) / 2.0, (top + bottom) / 2.0
+                cx, cy = jnp.round(cx), jnp.round(cy)
+                cxi, cyi = cx.astype(jnp.uint32), cy.astype(jnp.uint32)
+
+                # Class target
+                mask = jnp.zeros((b, h, w, 1), dtype=jnp.bool_)
+                mask.at[jnp.arange(b)[:, None], cyi, cxi, 0].set(True)
+                class_target = mask
+                # Make sure to mask
+                # TODO: Add multi class support.
+
+                # BBox target
+                bbox_targets = [
+                    rescale_and_clip(cx - left, width_min, width_max),
+                    rescale_and_clip(right - cx, width_min, width_max),
+                    rescale_and_clip(cy - top, height_min, height_max),
+                    rescale_and_clip(bottom - cy, height_min, height_max),
+                ]
+
+                # total_class_loss += quality_focal_loss(class_target, class_pred, tconfig.focal_loss['exponent'])
+                total_bbox_loss += distribution_focal_loss(cxi, cyi, bbox_targets, bbox_pred)
+                # total_bbox_loss += general_iou_loss(bbox_targets, bbox_pred, mask)
+
+            # TODO: Weight parameter.
+            total_class_loss /= len(scales)
+            total_bbox_loss /= len(scales)
+            return tconfig.bbox_loss_weight * total_bbox_loss + (1.0 - tconfig.bbox_loss_weight) * total_class_loss
 
         def loss_fn(params, batch):
-            x = vit_basic(mconfig, params, batch["img"])
-            return jnp.mean(jnp.abs(x - batch["uv"][..., :2]))
+            scales = yolo(mconfig.object_detector, params, batch['img'], train=True)
+            return get_loss_from_scales(batch, scales)
 
-        train_model(tconfig, dconfig, train_dataset, valid_dataset, params, loss_fn)
+        def validation_fn(params, batch):
+            scales, bboxes, scores = yolo(mconfig.object_detector, params, batch['img'], train=False)
+
+            return {
+                'loss': get_loss_from_scales(batch, scales),
+                'AP': average_precision(batch['bboxes'], bboxes, scores)
+            }
+
+    train_model("obj_detector", tconfig, dconfig, mconfig, train_dataset, valid_dataset, params, loss_fn, validation_fn)

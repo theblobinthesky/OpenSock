@@ -1,9 +1,14 @@
 class TrainConfig:
-    pass 
-    
+    def __init__(self):
+        self.lr: float = 1e-3
+        self.num_epochs: int = 10
+        self.batch_size: int = 1
+        self.model_path: str = "model.pkl"
+        self.focal_loss: dict = { 'exponent': 2.0, 'pos_class_weight': 0.25 }
+        self.bbox_loss_weight: float = 0.5
+
 class DataConfig:
     pass 
-
 
 def yolo_v8_config(num_classes: int, depth, width):
     return {
@@ -11,6 +16,10 @@ def yolo_v8_config(num_classes: int, depth, width):
         'width': width,
         'num_classes': num_classes,
         'dfl_channels': 16,
+        'bbox_width_range': (0.05, 0.2),
+        'bbox_height_range': (0.05, 0.2),
+        'score_threshold': 0.5,
+        'nms_threshold': 0.5
     }
 
 def yolo_v8_n(num_classes: int):
@@ -27,7 +36,6 @@ def yolo_v8_l(num_classes: int):
 
 def yolo_v8_x(num_classes: int):
     return yolo_v8_config(num_classes, [3, 6, 6], [3, 80, 160, 320, 640, 640])
-
 
 class ModelConfig:
     object_detector = yolo_v8_x(1)

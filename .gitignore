@@ -7,3 +7,4 @@ data/sock_*
 __pycache__
 temp
 flux
+wandb

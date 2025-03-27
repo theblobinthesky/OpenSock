@@ -1,7 +1,5 @@
-import os, shutil
-import json
-import cv2
-import tensorflow as tf
+import os, shutil, json, cv2, numpy as np
+# import tensorflow as tf
 from typing import Tuple
 from tqdm import tqdm
 
@@ -29,9 +27,9 @@ class SimpleYOLOPreprocessor:
             json_path = os.path.join(self.annotations_dir, f"{video_name}.json")
             
             if not os.path.exists(json_path):
+                print(f"Annotation '{json_path}' does not exist. Skipping!")
                 continue
                 
-            # Process video and extract frames with annotations
             cap = cv2.VideoCapture(os.path.join(self.videos_dir, video_file))
             
             with open(json_path, 'r') as f:
@@ -51,52 +49,79 @@ class SimpleYOLOPreprocessor:
                 img_path = os.path.join(self.output_dir, "images", f"{video_name}_{frame_idx:06d}.jpg")
                 cv2.imwrite(img_path, frame)
                 
-                # Create YOLO label
-                label_path = os.path.join(self.output_dir, "labels", f"{video_name}_{frame_idx:06d}.txt")
-                
-                height, width = frame.shape[:2]
-                with open(label_path, 'w') as f:
-                    for _, obj_data in frame_data.items():
-                        x, y, w, h = obj_data['bbox']
-                        
-                        # Convert to YOLO format: class_id x_center y_center width height
-                        x_center = (x + w/2) / width
-                        y_center = (y + h/2) / height
-                        w_norm = w / width
-                        h_norm = h / height
-                        
-                        f.write(f"0 {x_center} {y_center} {w_norm} {h_norm}\n")
+                # Save labels as a numpy array with absolute bbox coordinates: [class, x, y, w, h]
+                label_path = os.path.join(self.output_dir, "labels", f"{video_name}_{frame_idx:06d}.npy")
+                labels = []
+                for _, obj_data in frame_data.items():
+                    x, y, w, h = obj_data['bbox']
+                    labels.append([0, x, y, w, h])
+                labels = np.array(labels, dtype=np.float32)
+                np.save(label_path, labels)
             
             cap.release()
     
+    def _load_data(self, img_size: Tuple[int, int]):
+        # def load_data(img_path):
+        #     def _load(path):
+        #         # Convert the Tensor string to a normal Python string
+        #         path = path.numpy().decode('utf-8')
+        #         # Read and decode image
+        #         img_raw = tf.io.read_file(path).numpy()
+        #         img_decoded = tf.image.decode_jpeg(img_raw, channels=3).numpy()
+        #         orig_shape = img_decoded.shape[:2]  # (height, width)
+        #         # Resize image
+        #         img_resized = tf.image.resize(img_decoded, img_size).numpy()
+        #         img_resized = img_resized / 255.0
+
+        #         # Load labels from corresponding .npy file
+        #         label_path = path.replace("images", "labels").replace(".jpg", ".npy")
+        #         labels = np.load(label_path).astype(np.float32)
+        #         # Compute scaling factors to adjust bbox coordinates
+        #         scale_x = 1.0 / orig_shape[1]
+        #         scale_y = 1.0 / orig_shape[0]
+        #         labels_scaled = labels.copy()
+        #         labels_scaled[:, 1] *= scale_x
+        #         labels_scaled[:, 2] *= scale_y
+        #         labels_scaled[:, 3] *= scale_x
+        #         labels_scaled[:, 4] *= scale_y
+        #         bboxes = labels_scaled[:, 1:5]
+        #         classes = labels_scaled[:, 0]
+        #         return img_resized.astype(np.float32), bboxes.astype(np.float32), classes.astype(np.float32)
+            
+        #     img, bboxes, classes = tf.py_function(
+        #         func=_load, 
+        #         inp=[img_path], 
+        #         Tout=[tf.float32, tf.float32, tf.float32]
+        #     )
+        #     # Optionally, set static shapes if you know them.
+        #     return img, (bboxes, classes)
+        # return load_data
+        pass
+
     def create_dataset(self, batch_size: int = 16, img_size: Tuple[int, int] = (640, 640)):
-        img_paths = tf.data.Dataset.list_files(os.path.join(self.output_dir, "images", "*.jpg"))
+        # img_paths = tf.data.Dataset.list_files(os.path.join(self.output_dir, "images", "*.jpg"))
+        # load_data_fn = self._load_data(img_size)
+        # dataset = img_paths.map(load_data_fn, num_parallel_calls=tf.data.AUTOTUNE)
+        # dataset = dataset.batch(batch_size).prefetch(tf.data.AUTOTUNE)
+        # return dataset
+        pass
+
+    def create_train_valid_datasets(self, batch_size: int = 16, img_size: Tuple[int, int] = (640, 640),
+                                    valid_split: float = 0.1, seed: int = 42):
+        return None, None
+        # # Gather all image paths
+        # all_img_paths = tf.io.gfile.glob(os.path.join(self.output_dir, "images", "*.jpg"))
+        # np.random.seed(seed)
+        # np.random.shuffle(all_img_paths)
+        # split_index = int(len(all_img_paths) * (1 - valid_split))
+        # train_paths = all_img_paths[:split_index]
+        # valid_paths = all_img_paths[split_index:]
         
-        def load_data(img_path):
-            # Get corresponding label path
-            label_path = tf.strings.regex_replace(img_path, "images", "labels")
-            label_path = tf.strings.regex_replace(label_path, ".jpg", ".txt")
-            
-            # Load and preprocess image
-            img = tf.io.read_file(img_path)
-            img = tf.image.decode_jpeg(img, channels=3)
-            img = tf.image.resize(img, img_size)
-            img = img / 255.0
-            
-            # Load and parse label
-            label_raw = tf.io.read_file(label_path)
-            labels = tf.strings.split(label_raw, '\n')
-            labels = tf.strings.split(labels, ' ')
-            
-            # Convert strings to numbers (excluding empty lines)
-            mask = tf.strings.length(labels) > 0
-            labels = tf.boolean_mask(labels, mask)
-            labels = tf.strings.to_number(labels, out_type=tf.float32)
-            labels = tf.reshape(labels, [-1, 5])  # Reshape to [num_objects, 5]
-            
-            return img, labels
-        
-        dataset = img_paths.map(load_data, num_parallel_calls=tf.data.AUTOTUNE)
-        dataset = dataset.batch(batch_size).prefetch(tf.data.AUTOTUNE)
-        
-        return dataset
+        # train_ds = tf.data.Dataset.from_tensor_slices(train_paths)
+        # valid_ds = tf.data.Dataset.from_tensor_slices(valid_paths)
+        # load_data_fn = self._load_data(img_size)
+        # train_ds = train_ds.map(load_data_fn, num_parallel_calls=tf.data.AUTOTUNE)
+        # valid_ds = valid_ds.map(load_data_fn, num_parallel_calls=tf.data.AUTOTUNE)
+        # train_ds = train_ds.batch(batch_size).prefetch(tf.data.AUTOTUNE)
+        # valid_ds = valid_ds.batch(batch_size).prefetch(tf.data.AUTOTUNE)
+        # return train_ds, valid_ds

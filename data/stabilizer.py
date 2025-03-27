@@ -89,7 +89,9 @@ class Stabilizer:
         return frame, False, None, None
 
     def get_interesting_frames(self, cap, skip_frames: int, output_size: Tuple[int, int],
-                            diff_threshold: float, no_change_threshold: float = 0.01,
+                            diff_threshold: float,
+                            max_interesting_frames: int,
+                            no_change_threshold: float = 0.01,
                             consecutive_static_required: int = 3) -> list[int]:
         def _process(frame: np.ndarray):
             frame = cv2.resize(frame, output_size, interpolation=cv2.INTER_AREA)
@@ -133,5 +135,10 @@ class Stabilizer:
                 static_count = 0  # reset if difference is in-between
 
             frame_idx += 1
+        
+        if len(frames) > max_interesting_frames:
+            np.random.shuffle(frames)
+            frames = frames[:max_interesting_frames]
+            frames = sorted(frames)
 
         return frames

@@ -12,6 +12,7 @@ from video_tracker import VideoTracker
 TEMP_DIR = "temp"
 IOU_THRESH = 0.9
 TRACK_SKIP = 20
+MAX_INTERESTING_FRAMES = 180
 
 def visualize_tracking(dir: str, video_name: str, video_path: str, video_tracker: VideoTracker, stabilizer: Stabilizer) -> None:
     data = video_tracker.import_master_track(dir, video_name)
@@ -203,7 +204,7 @@ def process_video(
         print(f"Error: Could not open video file {video_path}")
         return
     
-    interesting_frames = stabilizer.get_interesting_frames(cap, skip_frames, image_tracker.target_size, diff_threshold)
+    interesting_frames = stabilizer.get_interesting_frames(cap, skip_frames, image_tracker.target_size, diff_threshold, MAX_INTERESTING_FRAMES)
     track_frames = interesting_frames[::TRACK_SKIP]
     print(f"Found {len(interesting_frames)} interesting frames and {len(track_frames)} track frames.")
     
@@ -295,8 +296,11 @@ def main() -> None:
     # Get list of video files
     video_files = [f for f in os.listdir(args.input_dir) 
                   if f.lower().endswith(('.mp4', '.avi', '.mov', '.mkv'))]
+    video_files = sorted(video_files)
     
-    if not video_files:
+    if video_files:
+        print(f"Processing the video files: {video_files}")
+    else:
         print(f"No videos found in {args.input_dir}")
         return
     
