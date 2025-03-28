@@ -1,14 +1,13 @@
-#if defined(PLATFORM_LINUX)
-#include <stdio.h>
+#if false and defined(PLATFORM_LINUX)
+#include <cstdio>
 #include <fcntl.h>
-#include <string.h>
-#include <stdlib.h>
+#include <cstring>
 #include <unistd.h>
-#include <assert.h>
+#include <cassert>
 #include <sys/stat.h>
 #include <sys/ioctl.h>
 #include <liburing.h>
-#include "types.h"
+#include "utils.h"
 
 #define QD  2
 #define BS (16 * 1024)
@@ -64,7 +63,7 @@ static void queue_prepped(int infd, int outfd, io_uring *ring, io_data *data) {
 }
 
 static int queue_read(int infd, io_uring *ring, off_t size, off_t offset) {
-    io_data *data = (io_data *)malloc(size + sizeof(*data));
+    io_data *data = static_cast<io_data *>(malloc(size + sizeof(*data)));
     if (!data)
         return 1;
 
@@ -98,13 +97,13 @@ static void queue_write(int infd, int outfd, io_uring *ring, io_data *data) {
 }
 
 int copy_file(int infd, int outfd, io_uring *ring, off_t insize) {
-    uint32_t reads, writes;
     io_uring_cqe *cqe;
-    off_t write_left, offset;
     int ret;
 
-    write_left = insize;
-    writes = reads = offset = 0;
+    off_t write_left = insize;
+    off_t offset = 0;
+    uint32_t reads = 0;
+    uint32_t writes = 0;
 
     while (insize > 0 || write_left > 0) {
         int had_reads = reads;
@@ -189,5 +188,4 @@ int copy_file(int infd, int outfd, io_uring *ring, off_t insize) {
 
     return 0;
 }
-
 #endif
