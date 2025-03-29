@@ -42,7 +42,6 @@ def test_get_eroneous_dataset(tmp_path):
 def test_get_dataset(tmp_path):
     ds = get_dataset(tmp_path, eroneous=False)
     ds = ds.getDataset()
-    print(ds)
     assert len(ds) == 4
     assert all(len(entry) == 3 for entry in ds)
 

@@ -5,6 +5,8 @@
 #include <cstring>
 #include <jpeglib.h>
 #include <setjmp.h>
+#define STB_IMAGE_RESIZE_IMPLEMENTATION
+#include "stb_image_resize2.h"
 
 // Custom error manager structure.
 struct my_error_mgr {
@@ -31,6 +33,7 @@ ImageData readJpegFile(const std::string &path) {
 
     jpeg_decompress_struct cinfo = {};
     cinfo.err = jpeg_std_error(&jerr.pub);
+    cinfo.out_color_space = JCS_EXT_RGB;
     jerr.pub.error_exit = my_error_exit;
 
     if (setjmp(jerr.setjmp_buffer)) {
@@ -80,9 +83,12 @@ ImageData readJpegFile(const std::string &path) {
     return imgData;
 }
 
-ImageData rescaleToSize(const ImageData &image) {
-
-
-    return {};
+void resizeImage(const ImageData &image, unsigned char *outputBuffer,
+                      size_t outputWidth,
+                      size_t outputHeight) {
+    stbir_resize_uint8_srgb(image.data.data(), image.width, image.height,
+                            image.width * 3, outputBuffer,
+                            static_cast<int>(outputWidth),
+                            static_cast<int>(outputHeight),
+                            static_cast<int>(outputWidth) * 3, STBIR_RGB);
 }
-

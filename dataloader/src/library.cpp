@@ -35,9 +35,10 @@ PYBIND11_MODULE(_core, m) {
             .def("getDataset", &Dataset::getDataset);
 
     py::class_<DataLoader>(m, "DataLoader")
-            .def(py::init<Dataset, int, py::function>())
+            .def(py::init<Dataset, int, py::function, int, int>())
             .def("getNextBatch", &DataLoader::getNextBatch)
             .def("__len__", &DataLoader::getNumberOfBatches);
+    // TODO Comment(getNextBatch): Important convention is that memory of the last batch gets invalid when you call getNextBatch!
 
 #ifdef VERSION_INFO
     m.attr("__version__") = MACRO_STRINGIFY(VERSION_INFO);

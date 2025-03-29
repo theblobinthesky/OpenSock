@@ -9,8 +9,10 @@ struct ImageData {
     int height;
 };
 
-ImageData readJpegFile(const std::string& path);
+ImageData readJpegFile(const std::string &path);
 
-ImageData resizeImage(const ImageData &image);
+void resizeImage(const ImageData &image, unsigned char *outputBuffer,
+                 size_t outputWidth,
+                 size_t outputHeight);
 
 #endif //JPEG_UTILS_H

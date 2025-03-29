@@ -2,55 +2,63 @@ import os
 import requests
 import tarfile
 import io
+from PIL import Image
+import numpy as np
 from glob import glob
 import native_dataloader as m
 import pytest as pt
 
 JPG_DATASET_URL = "https://storage.googleapis.com/download.tensorflow.org/example_images/flower_photos.tgz"
 JPG_DATASET_DIR = os.path.join("temp", "jpg_dataset")
-HEIGHT, WIDTH = 600, 600
+HEIGHT, WIDTH = 300, 300
+NUM_THREADS, PREFETCH_SIZE = 16, 32
 
 def ensure_jpg_dataset():
-    # Create the persistent directory if it doesn't exist.
     os.makedirs(JPG_DATASET_DIR, exist_ok=True)
-    
-    # Check if the directory is empty
     if not os.listdir(JPG_DATASET_DIR):
         response = requests.get(JPG_DATASET_URL)
         response.raise_for_status()
-        # Extract the dataset into JPG_DATASET_DIR
         with tarfile.open(fileobj=io.BytesIO(response.content), mode="r:gz") as tar:
             tar.extractall(path=JPG_DATASET_DIR, filter=lambda tarinfo, _: tarinfo)
-
-        for path in glob('temp/jpg_dataset/flower_photos/*/*.jpg'):
-            name = os.path.basename(path)
-            os.rename(path, f"temp/jpg_dataset/flower_photos/{name}.jpg")
         
-    return "temp/jpg_dataset", "flower_photos"
+    return "temp/jpg_dataset/flower_photos", "daisy"
 
 def get_dataloader(batch_size: int):
     def init_ds_fn():
         pass
 
     root_dir, sub_dir = ensure_jpg_dataset()
-    ds = m.Dataset(root_dir, [m.Subdirectory(sub_dir, m.FileType.JPG, "img", 300, 300)])
-    dl = m.DataLoader(ds, batch_size, HEIGHT, WIDTH, init_ds_fn)
-    return dl
+    ds = m.Dataset(root_dir, [m.Subdirectory(sub_dir, m.FileType.JPG, "img", HEIGHT, WIDTH)])
+    dl = m.DataLoader(ds, batch_size, init_ds_fn, NUM_THREADS, PREFETCH_SIZE)
+    return ds, dl
 
 def test_get_length():
     bs = 16
-    dl = get_dataloader(batch_size=bs)
+    _, dl = get_dataloader(batch_size=bs)
     assert len(dl) == (633 + bs - 1) // bs
 
-# def test_perf():
-#     def performance_benchmark(dl: m.DataLoader):
-#         for _ in range(len(dl)):
-#             batch = dl.getNextBatch()
-#             batch = {key: value.shape for key, value in batch.items()}
-#             print(batch)
+def test_correctness():
+    bs = 16
+    ds, dl = get_dataloader(batch_size=bs)
+    ds.init() # TODO: Fix copy bug.
+    dsPaths = ds.getDataset()
 
-#     dl = get_dataloader(batch_size=16)
+    batch = dl.getNextBatch()
+    for i, batch_paths in enumerate(dsPaths[:16]):
+        path = batch_paths[0]
+        pil_img = Image.open(path).convert("RGB")
+        pil_img = np.array(pil_img.resize((WIDTH, HEIGHT)), np.float32)
+        native_img = batch["img"][i]
+        native_img = native_img.astype(np.float32)
 
-#     performance_benchmark(dl)
-#     # benchmark(performance_benchmark, dl)
-#     assert False
+        err = np.mean(np.abs(native_img - pil_img))
+        assert np.all(err < 5), f"Error too high for image {path}"
+
+def test_perf(benchmark):
+    def performance_benchmark(dl: m.DataLoader):
+        for _ in range(len(dl)):
+            batch = dl.getNextBatch()
+            batch = {key: value.shape for key, value in batch.items()}
+
+    _, dl = get_dataloader(batch_size=16)
+    benchmark(performance_benchmark, dl)

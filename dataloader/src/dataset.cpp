@@ -45,6 +45,14 @@ std::string Subdirectory::getDictName() const {
     return dictName;
 }
 
+size_t Subdirectory::getImageHeight() const {
+    return imageHeight;
+}
+
+size_t Subdirectory::getImageWidth() const {
+    return imageWidth;
+}
+
 std::string replaceAll(std::string str, const std::string &from,
                        const std::string &to) {
     size_t pos = 0;
