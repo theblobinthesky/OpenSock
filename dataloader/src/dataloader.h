@@ -13,26 +13,26 @@
 #define CHS 3
 
 // TODO: Align everything!
-class CircularMemoryArena {
+class PinnedMemoryArena {
 public:
-    CircularMemoryArena();
+    PinnedMemoryArena();
 
-    explicit CircularMemoryArena(size_t _total_size);
+    explicit PinnedMemoryArena(size_t _total_size);
 
-    CircularMemoryArena &operator=(CircularMemoryArena &&arena) noexcept;
+    PinnedMemoryArena &operator=(PinnedMemoryArena &&arena) noexcept;
 
-    CircularMemoryArena(const CircularMemoryArena &arena) = delete;
+    PinnedMemoryArena(const PinnedMemoryArena &arena) = delete;
 
-    CircularMemoryArena(CircularMemoryArena &&arena) noexcept;
+    PinnedMemoryArena(PinnedMemoryArena &&arena) noexcept;
 
-    ~CircularMemoryArena();
+    ~PinnedMemoryArena();
 
     uint8_t *allocate(size_t size);
 
     size_t getOffset() const;
 
 private:
-    uint8_t *data;
+    uint8_t *data{};
     size_t total_size;
     size_t offset;
 };
@@ -55,7 +55,7 @@ private:
 
 class ListOfAllocations {
 public:
-    explicit ListOfAllocations(CircularMemoryArena *memoryArena);
+    explicit ListOfAllocations(PinnedMemoryArena *memoryArena);
 
     ListOfAllocations &operator=(ListOfAllocations &&allocs) noexcept;
 
@@ -65,7 +65,7 @@ public:
 
     uint8_t *allocate(size_t size);
 
-    CircularMemoryArena *memoryArena;
+    PinnedMemoryArena *memoryArena;
     std::vector<uint8_t *> ptrs;
     std::vector<size_t> sizes;
 };
@@ -125,7 +125,7 @@ private:
     std::vector<ListOfAllocations> prefetchCache;
     std::condition_variable prefetchCacheNotify;
     std::mutex prefetchCacheMutex;
-    CircularMemoryArena memoryArena;
+    PinnedMemoryArena memoryArena;
     size_t outputBatchMemorySize;
     ThreadPool threadPool;
     std::atomic_bool shutdown;

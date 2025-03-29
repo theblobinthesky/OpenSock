@@ -32,6 +32,8 @@ public:
 
     [[nodiscard]] size_t getImageWidth() const;
 
+    [[nodiscard]] size_t calculateImageSize() const;
+
 private:
     std::string subdir;
     FileType filesType;

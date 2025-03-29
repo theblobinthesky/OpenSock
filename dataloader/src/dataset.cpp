@@ -53,6 +53,10 @@ size_t Subdirectory::getImageWidth() const {
     return imageWidth;
 }
 
+[[nodiscard]] size_t Subdirectory::calculateImageSize() const {
+    return imageHeight * imageWidth * 3;
+}
+
 std::string replaceAll(std::string str, const std::string &from,
                        const std::string &to) {
     size_t pos = 0;

@@ -1,8 +1,9 @@
 #include "dataloader.h"
 #include "image.h"
+#include <filesystem>
 #include <pybind11/numpy.h>
 #include <unsupported/Eigen/CXX11/Tensor>
-#include <filesystem>
+#include <cuda_runtime.h>
 
 #define CHS 3
 
@@ -10,18 +11,22 @@ namespace py = pybind11;
 namespace fs = std::filesystem;
 
 // TODO: Align everything!
-CircularMemoryArena::CircularMemoryArena(): data(nullptr), total_size(0),
-                                            offset(0) {
+PinnedMemoryArena::PinnedMemoryArena(): total_size(0),
+                                        offset(0) {
 }
 
-CircularMemoryArena::CircularMemoryArena(const size_t _total_size) : total_size(
-        _total_size),
-    offset(0) {
-    data = new uint8_t[_total_size];
+PinnedMemoryArena::PinnedMemoryArena(const size_t _total_size) : total_size(
+        _total_size), offset(0) {
+    const cudaError_t err = cudaMallocHost(&data, _total_size);
+    if (err != cudaSuccess) {
+        throw std::runtime_error("cudaMallocHost failed");
+    }
+
+    std::printf("Allocated %luMB of pinned memory.\n", _total_size / 1024 / 1024);
 }
 
-CircularMemoryArena &CircularMemoryArena::operator=(
-    CircularMemoryArena &&arena) noexcept {
+PinnedMemoryArena &PinnedMemoryArena::operator=(
+    PinnedMemoryArena &&arena) noexcept {
     offset = arena.offset;
     total_size = arena.total_size;
     data = arena.data;
@@ -32,21 +37,21 @@ CircularMemoryArena &CircularMemoryArena::operator=(
     return *this;
 }
 
-CircularMemoryArena::CircularMemoryArena(
-    CircularMemoryArena &&arena) noexcept : data(arena.data),
-                                            total_size(arena.total_size),
-                                            offset(arena.offset) {
+PinnedMemoryArena::PinnedMemoryArena(
+    PinnedMemoryArena &&arena) noexcept : data(arena.data),
+                                          total_size(arena.total_size),
+                                          offset(arena.offset) {
     arena.data = null;
     arena.offset = arena.total_size = 0;
 }
 
-CircularMemoryArena::~CircularMemoryArena() {
-    delete[] data;
+PinnedMemoryArena::~PinnedMemoryArena() {
+    cudaFreeHost(data);
 }
 
 // TODO: Make sure to leave more space in a future version of this allocator
 // so threads don't contend for the same cache line potentially.
-uint8_t *CircularMemoryArena::allocate(const size_t size) {
+uint8_t *PinnedMemoryArena::allocate(const size_t size) {
     uint8_t *ptr = data + offset;
     offset += size;
 
@@ -58,13 +63,13 @@ uint8_t *CircularMemoryArena::allocate(const size_t size) {
     return ptr;
 }
 
-size_t CircularMemoryArena::getOffset() const {
+size_t PinnedMemoryArena::getOffset() const {
     return offset;
 }
 
 
 ListOfAllocations::ListOfAllocations(
-    CircularMemoryArena *_memoryArena): memoryArena(_memoryArena) {
+    PinnedMemoryArena *_memoryArena): memoryArena(_memoryArena) {
 }
 
 ListOfAllocations &ListOfAllocations::operator=(
@@ -202,7 +207,7 @@ DataLoader::DataLoader(
     }
 
     const auto mas = outputBatchMemorySize * _prefetchSize;
-    memoryArena = CircularMemoryArena(mas);
+    memoryArena = PinnedMemoryArena(mas);
 
     threadPool.start();
 }
@@ -232,13 +237,9 @@ void DataLoader::threadMain() {
         for (size_t i = 0; i < subDirs.size(); i++) {
             const Subdirectory &subDir = subDirs[i];
 
-            size_t channels = 3;
-            size_t imageSize = subDir.getImageHeight() * subDir.getImageWidth()
-                               *
-                               channels;
-            size_t batchBufferSize = batchSize * imageSize;
+            const size_t imageSize = subDir.calculateImageSize();
             prefetchCacheMutex.lock();
-            uint8_t *batchBuffer = allocations.allocate(batchBufferSize);
+            uint8_t *batchBuffer = allocations.allocate(batchSize * imageSize);
             prefetchCacheMutex.unlock();
 
             // Load the remaining images.
@@ -263,8 +264,8 @@ py::dict DataLoader::getNextBatch() {
     prefetchCacheNotify.wait(
         lock, [this] { return !prefetchCache.empty(); });
 
-    const ListOfAllocations batch = std::move(prefetchCache.back());
-    prefetchCache.pop_back();
+    const ListOfAllocations batch = std::move(prefetchCache.front());
+    prefetchCache.erase(prefetchCache.begin());
     lock.unlock();
     prefetchSemaphore.release();
 
@@ -275,10 +276,6 @@ py::dict DataLoader::getNextBatch() {
         uint8_t *batchData = batch.ptrs[i];
         // const uint32_t *batchSize = batch.ptrs[i];
 
-        size_t channels = 3;
-        size_t imageSize = subDir.getImageHeight() * subDir.getImageWidth() *
-                           channels;
-
         // Create a capsule that will free the batchBuffer when the numpy array is garbage collected.
         py::capsule freeWhenDone(batchData, [](void *batchData) {
         });
@@ -288,13 +285,13 @@ py::dict DataLoader::getNextBatch() {
             static_cast<ssize_t>(batchSize),
             static_cast<long>(subDir.getImageHeight()),
             static_cast<long>(subDir.getImageWidth()),
-            static_cast<long>(channels)
+            static_cast<long>(CHS)
         };
 
         std::vector strides = {
-            static_cast<ssize_t>(imageSize),
-            static_cast<ssize_t>(subDir.getImageWidth() * channels),
-            static_cast<ssize_t>(channels),
+            static_cast<ssize_t>(subDir.calculateImageSize()),
+            static_cast<ssize_t>(subDir.getImageWidth() * CHS),
+            static_cast<ssize_t>(CHS),
             static_cast<ssize_t>(1)
         };
 

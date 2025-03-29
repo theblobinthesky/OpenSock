@@ -26,7 +26,9 @@ def dev(session: nox.Session) -> None:
         "pip",
         "install",
         "-e.",
-        "-Ccmake.define.CMAKE_EXPORT_COMPILE_COMMANDS=1",
+#        "-Ccmake.define.CMAKE_EXPORT_COMPILE_COMMANDS=1",
+#        "-Ccmake.define.CMAKE_EXPORT_LINK_COMMANDS=1",
+        "-Ccmake.define.CMAKE_VERBOSE_MAKEFILE=on",
         "-Ccmake.define.CMAKE_BUILD_TYPE=Debug",
         "-Cbuild-dir=build",
     )
@@ -38,6 +40,7 @@ def release(session: nox.Session) -> None:
         "install",
         "-e.",
         "-Ccmake.define.CMAKE_EXPORT_COMPILE_COMMANDS=1",
+        "-Ccmake.define.CMAKE_EXPORT_LINK_COMMANDS=1",
         "-Ccmake.define.CMAKE_BUILD_TYPE=Release",
         "-Cbuild-dir=build",
     )
