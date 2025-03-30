@@ -30,7 +30,7 @@ def dev(session: nox.Session) -> None:
 #        "-Ccmake.define.CMAKE_EXPORT_LINK_COMMANDS=1",
         "-Ccmake.define.CMAKE_VERBOSE_MAKEFILE=on",
         "-Ccmake.define.CMAKE_BUILD_TYPE=Debug",
-        "-Cbuild-dir=build",
+        "-Cbuild-dir=build"
     )
 
 @nox.session(venv_backend="none")

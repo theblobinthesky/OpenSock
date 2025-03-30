@@ -9,30 +9,36 @@
 #include <atomic>
 #include <functional>
 #include <pybind11/pybind11.h>
+#include <cuda_runtime.h>
 
 #define CHS 3
 
+enum class MemoryArenaType {
+    PINNED_HOST, GPU_DEVICE
+};
+
 // TODO: Align everything!
-class PinnedMemoryArena {
+class MemoryArena {
 public:
-    PinnedMemoryArena();
+    MemoryArena();
 
-    explicit PinnedMemoryArena(size_t _total_size);
+    explicit MemoryArena(MemoryArenaType type, size_t _total_size);
 
-    PinnedMemoryArena &operator=(PinnedMemoryArena &&arena) noexcept;
+    MemoryArena &operator=(MemoryArena &&arena) noexcept;
 
-    PinnedMemoryArena(const PinnedMemoryArena &arena) = delete;
+    MemoryArena(const MemoryArena &arena) = delete;
 
-    PinnedMemoryArena(PinnedMemoryArena &&arena) noexcept;
+    MemoryArena(MemoryArena &&arena) noexcept;
 
-    ~PinnedMemoryArena();
+    ~MemoryArena();
 
     uint8_t *allocate(size_t size);
 
-    size_t getOffset() const;
+    [[nodiscard]] uint8_t *getData() const;
 
 private:
-    uint8_t *data{};
+    MemoryArenaType type;
+    uint8_t *data;
     size_t total_size;
     size_t offset;
 };
@@ -55,7 +61,7 @@ private:
 
 class ListOfAllocations {
 public:
-    explicit ListOfAllocations(PinnedMemoryArena *memoryArena);
+    explicit ListOfAllocations(MemoryArena *memoryArena);
 
     ListOfAllocations &operator=(ListOfAllocations &&allocs) noexcept;
 
@@ -65,14 +71,16 @@ public:
 
     uint8_t *allocate(size_t size);
 
-    PinnedMemoryArena *memoryArena;
+    [[nodiscard]] uint32_t getOffset(size_t i) const;
+
+    MemoryArena *memoryArena;
     std::vector<uint8_t *> ptrs;
     std::vector<size_t> sizes;
 };
 
 class ThreadPool {
 public:
-    explicit ThreadPool(const std::function<void()> &_threadMain,
+    explicit ThreadPool(const std::function<void(size_t)> &_threadMain,
                         size_t _threadCount);
 
     void start();
@@ -86,14 +94,33 @@ public:
     ~ThreadPool() noexcept;
 
 private:
-    std::function<void()> threadMain;
+    std::function<void(size_t)> threadMain;
     size_t threadCount;
     std::vector<std::thread> threads;
     std::atomic_uint32_t shutdownCounter;
     std::mutex shutdownMutex;
     std::condition_variable shutdownNotify;
 
-    void extendedThreadMain();
+    void extendedThreadMain(size_t threadIdx);
+};
+
+class GPUState {
+public:
+    GPUState(size_t numStreams);
+
+    ~GPUState();
+
+    void copy(size_t streamIndex, uint8_t *gpuBuffer, uint8_t *buffer, uint32_t size) const;
+
+    void sync(size_t streamIndex);
+
+private:
+    std::vector<cudaStream_t> streams;
+};
+
+struct ThreadAllocationsPair {
+    size_t threadIdx;
+    ListOfAllocations allocations;
 };
 
 class DataLoader {
@@ -107,6 +134,7 @@ public:
     );
 
     DataLoader(const DataLoader &dl) = delete;
+
     DataLoader(DataLoader &&dl) = delete;
 
     ~DataLoader();
@@ -117,20 +145,22 @@ public:
 
 private:
     Dataset dataset;
-    size_t batchSize;
+    const size_t batchSize;
     size_t numberOfBatches;
     pybind11::function createDatasetFunction;
     Semaphore prefetchSemaphore;
     std::mutex datasetMutex;
-    std::vector<ListOfAllocations> prefetchCache;
+    std::vector<ThreadAllocationsPair> prefetchCache;
     std::condition_variable prefetchCacheNotify;
     std::mutex prefetchCacheMutex;
-    PinnedMemoryArena memoryArena;
+    MemoryArena pinnedMemoryArena;
+    MemoryArena gpuMemoryArena;
     size_t outputBatchMemorySize;
+    GPUState gpu;
     ThreadPool threadPool;
     std::atomic_bool shutdown;
 
-    void threadMain();
+    void threadMain(size_t threadIdx);
 };
 
 #endif //DATALOADER_H

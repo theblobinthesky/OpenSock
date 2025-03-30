@@ -9,8 +9,10 @@ New benchmark:
 * 3.8497s
 * 
 
-
 Memory bandwidth utilization in GB/s:
 JAX (default): 7.25
 CUDA (pinned): 19.41
 CUDA (malloc): 9.07
+
+New benchmark in GB/s:
+JAX (default): 5.25

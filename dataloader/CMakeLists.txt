@@ -16,6 +16,7 @@ pkg_check_modules(URING REQUIRED liburing)
 find_package(Eigen3 REQUIRED NO_MODULE)
 find_package(JPEG REQUIRED)
 find_package(CUDAToolkit REQUIRED)
+find_package(dlpack CONFIG REQUIRED)
 
 message(CMAKE_CXX_STANDARD="${CMAKE_CXX_STANDARD}")
 message(URING_LIBRARIES="${URING_LIBRARIES}")
@@ -37,6 +38,7 @@ target_link_libraries(_core PRIVATE ${URING_LIBRARIES})
 target_link_libraries(_core PRIVATE Eigen3::Eigen)
 target_link_libraries(_core PRIVATE JPEG::JPEG)
 target_link_libraries(_core PRIVATE CUDA::cudart)
+target_link_libraries(_core PRIVATE dlpack::dlpack)
 target_compile_options(_core PRIVATE -fvisibility=hidden -Wall -Wextra -Wpedantic -Werror -Wno-unused-parameter)
 
 # Pass parameters to the program:
