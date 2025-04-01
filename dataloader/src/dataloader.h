@@ -13,34 +13,47 @@
 
 #define CHS 3
 
-enum class MemoryArenaType {
-    PINNED_HOST, GPU_DEVICE
+struct Allocation {
+    uint8_t *host;
+    uint8_t *gpu;
 };
 
-// TODO: Align everything!
 class MemoryArena {
 public:
-    MemoryArena();
+    static void initialize(size_t totalSize);
 
-    explicit MemoryArena(MemoryArenaType type, size_t _total_size);
+    static MemoryArena *getInstance();
 
-    MemoryArena &operator=(MemoryArena &&arena) noexcept;
+    MemoryArena &operator=(MemoryArena &&arena) = delete;
+
+    MemoryArena &operator=(const MemoryArena &) = delete;
 
     MemoryArena(const MemoryArena &arena) = delete;
 
-    MemoryArena(MemoryArena &&arena) noexcept;
+    MemoryArena(MemoryArena &&arena) = delete;
 
-    ~MemoryArena();
+    Allocation allocate(size_t size);
 
-    uint8_t *allocate(size_t size);
+    void free();
 
-    [[nodiscard]] uint8_t *getData() const;
+    void destroy();
+
+    [[nodiscard]] size_t getOffset(const Allocation &allocation) const;
+
+    [[nodiscard]] uint8_t *getGpuData() const;
 
 private:
-    MemoryArenaType type;
-    uint8_t *data;
-    size_t total_size;
+    explicit MemoryArena(size_t _totalSize);
+
+    void freeAll();
+
+    static MemoryArena *memoryArena;
+    uint8_t *hostData;
+    uint8_t *gpuData;
+    size_t totalSize;
     size_t offset;
+    size_t extRefCounter{};
+    std::atomic_bool destroyed;
 };
 
 class Semaphore {
@@ -61,7 +74,7 @@ private:
 
 class ListOfAllocations {
 public:
-    explicit ListOfAllocations(MemoryArena *memoryArena);
+    ListOfAllocations() = default;
 
     ListOfAllocations &operator=(ListOfAllocations &&allocs) noexcept;
 
@@ -69,12 +82,11 @@ public:
 
     ListOfAllocations(ListOfAllocations &&arena) noexcept;
 
-    uint8_t *allocate(size_t size);
+    Allocation allocate(size_t size);
 
     [[nodiscard]] uint32_t getOffset(size_t i) const;
 
-    MemoryArena *memoryArena;
-    std::vector<uint8_t *> ptrs;
+    std::vector<Allocation> allocations;
     std::vector<size_t> sizes;
 };
 
@@ -106,13 +118,14 @@ private:
 
 class GPUState {
 public:
-    GPUState(size_t numStreams);
+    explicit GPUState(size_t numStreams);
 
     ~GPUState();
 
-    void copy(size_t streamIndex, uint8_t *gpuBuffer, uint8_t *buffer, uint32_t size) const;
+    void copy(size_t streamIndex, uint8_t *gpuBuffer, uint8_t *buffer,
+              uint32_t size) const;
 
-    void sync(size_t streamIndex);
+    void sync(size_t streamIndex) const;
 
 private:
     std::vector<cudaStream_t> streams;
@@ -147,14 +160,11 @@ private:
     Dataset dataset;
     const size_t batchSize;
     size_t numberOfBatches;
-    pybind11::function createDatasetFunction;
     Semaphore prefetchSemaphore;
     std::mutex datasetMutex;
     std::vector<ThreadAllocationsPair> prefetchCache;
     std::condition_variable prefetchCacheNotify;
     std::mutex prefetchCacheMutex;
-    MemoryArena pinnedMemoryArena;
-    MemoryArena gpuMemoryArena;
     size_t outputBatchMemorySize;
     GPUState gpu;
     ThreadPool threadPool;

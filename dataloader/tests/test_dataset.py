@@ -36,12 +36,11 @@ def get_dataset(tmp_path: PosixPath, eroneous: bool):
 
 def test_get_eroneous_dataset(tmp_path):
     ds = get_dataset(tmp_path, eroneous=True)
-    ds = ds.getDataset()
+    ds = ds.get_dataset()
     assert len(ds) == 0
 
 def test_get_dataset(tmp_path):
     ds = get_dataset(tmp_path, eroneous=False)
-    ds = ds.getDataset()
+    ds = ds.get_dataset()
     assert len(ds) == 4
     assert all(len(entry) == 3 for entry in ds)
-

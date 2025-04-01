@@ -8,112 +8,105 @@
 namespace py = pybind11;
 namespace fs = std::filesystem;
 
-// TODO: Align everything!
-MemoryArena::MemoryArena(): type(MemoryArenaType::PINNED_HOST), data(null),
-                            total_size(0),
-                            offset(0) {
+MemoryArena *MemoryArena::memoryArena;
+
+void MemoryArena::initialize(const size_t totalSize) {
+    memoryArena = new MemoryArena(totalSize);
 }
 
-MemoryArena::MemoryArena(MemoryArenaType type, const size_t _total_size)
-    : type(type), data(null), total_size(_total_size), offset(0) {
-    cudaError_t err = cudaErrorUnknown;
-
-    switch (type) {
-        case MemoryArenaType::PINNED_HOST:
-            err = cudaMallocHost(&data, total_size);
-            break;
-        case MemoryArenaType::GPU_DEVICE:
-            err = cudaMalloc(&data, total_size);
-            break;
+MemoryArena *MemoryArena::getInstance() {
+    if (memoryArena == null) {
+        throw std::runtime_error("MemoryArena is not initialized.");
     }
 
-    if (err != cudaSuccess) {
-        throw std::runtime_error("cudaMalloc failed");
-    }
-}
-
-MemoryArena &MemoryArena::operator=(
-    MemoryArena &&arena) noexcept {
-    offset = arena.offset;
-    total_size = arena.total_size;
-    data = arena.data;
-
-    arena.offset = 0;
-    arena.total_size = 0;
-    arena.data = null;
-    return *this;
-}
-
-MemoryArena::MemoryArena(
-    MemoryArena &&arena) noexcept : data(arena.data),
-                                    total_size(arena.total_size),
-                                    offset(arena.offset) {
-    arena.data = null;
-    arena.offset = arena.total_size = 0;
-}
-
-MemoryArena::~MemoryArena() {
-    switch (type) {
-        case MemoryArenaType::PINNED_HOST:
-            cudaFreeHost(data);
-            break;
-        case MemoryArenaType::GPU_DEVICE:
-            cudaFree(data);
-            break;
-    }
+    return memoryArena;
 }
 
 // TODO: Make sure to leave more space in a future version of this allocator
 // so threads don't contend for the same cache line potentially.
-uint8_t *MemoryArena::allocate(const size_t size) {
-    uint8_t *ptr = data + offset;
+Allocation MemoryArena::allocate(const size_t size) {
+    uint8_t *hostPtr = hostData + offset;
+    uint8_t *gpuPtr = gpuData + offset;
     offset += size;
 
-    if (offset > total_size) {
+    if (offset > totalSize) {
         throw std::runtime_error(
             "Tried to allocate beyond the size of the memory arena.");
     }
 
-    offset = offset % total_size;
-    return ptr;
+    offset = offset % totalSize;
+    extRefCounter++;
+    return {
+        .host = hostPtr,
+        .gpu = gpuPtr
+    };
 }
 
-uint8_t *MemoryArena::getData() const {
-    return data;
+void MemoryArena::free() {
+    extRefCounter--;
+
+    if (destroyed && extRefCounter == 0) {
+    }
 }
 
-ListOfAllocations::ListOfAllocations(
-    MemoryArena *_memoryArena): memoryArena(_memoryArena) {
+void MemoryArena::destroy() {
+    if (extRefCounter == 0) {
+        destroyed = true;
+    }
+}
+
+MemoryArena::MemoryArena(const size_t _totalSize)
+    : hostData(null), gpuData(null), totalSize(_totalSize), offset(0) {
+    cudaError_t err = cudaMallocHost(&hostData, totalSize);
+    if (err != cudaSuccess) {
+        throw std::runtime_error("cudaHostMalloc failed");
+    }
+
+    err = cudaMalloc(&gpuData, totalSize);
+    if (err != cudaSuccess) {
+        throw std::runtime_error(
+            "cudaMalloc failed to allocate " + std::to_string(
+                totalSize / 1024 / 1024) + "MB");
+    }
+}
+
+void MemoryArena::freeAll() {
+    cudaFreeHost(hostData);
+    cudaFree(gpuData);
+}
+
+size_t MemoryArena::getOffset(const Allocation &allocation) const {
+    return allocation.host - hostData;
+}
+
+uint8_t *MemoryArena::getGpuData() const {
+    return gpuData;
 }
 
 ListOfAllocations &ListOfAllocations::operator=(
     ListOfAllocations &&allocs) noexcept {
-    memoryArena = allocs.memoryArena;
-    ptrs = std::move(allocs.ptrs);
+    allocations = std::move(allocs.allocations);
     sizes = std::move(allocs.sizes);
-
-    allocs.memoryArena = null;
 
     return *this;
 }
 
 ListOfAllocations::ListOfAllocations(
-    ListOfAllocations &&allocs) noexcept : memoryArena(allocs.memoryArena),
-                                           ptrs(std::move(allocs.ptrs)),
+    ListOfAllocations &&allocs) noexcept : allocations(
+                                               std::move(allocs.allocations)),
                                            sizes(std::move(allocs.sizes)) {
-    allocs.memoryArena = null;
 }
 
-uint8_t *ListOfAllocations::allocate(const size_t size) {
-    uint8_t *ptr = memoryArena->allocate(size);
+Allocation ListOfAllocations::allocate(const size_t size) {
+    Allocation allocation = MemoryArena::getInstance()->allocate(size);
 
-    ptrs.push_back(ptr);
+    allocations.push_back(allocation);
     sizes.push_back(size);
-    return ptr;
+    return allocation;
 }
 
 uint32_t ListOfAllocations::getOffset(size_t i) const {
-    return ptrs[i] - memoryArena->getData();
+    return MemoryArena::getInstance()->getOffset(allocations[i]);
 }
 
 Semaphore::Semaphore(const int initial)
@@ -171,28 +164,41 @@ void ThreadPool::extendedThreadMain(const size_t threadIdx) {
 GPUState::GPUState(size_t numStreams) {
     for (size_t i = 0; i < numStreams; i++) {
         cudaStream_t stream;
-        cudaStreamCreate(&stream);
+        if (const cudaError_t err = cudaStreamCreate(&stream);
+            err != cudaSuccess) {
+            throw std::runtime_error("cudaStreamCreate failed.");
+        }
+
         streams.push_back(stream);
     }
 }
 
 GPUState::~GPUState() {
     for (cudaStream_t stream: streams) {
-        cudaStreamDestroy(stream);
+        if (const auto err = cudaStreamDestroy(stream); err != cudaSuccess) {
+            std::printf("cudaStreamDestroy failed.\n");
+            std::terminate();
+        }
     }
 }
 
 void GPUState::copy(size_t streamIndex, uint8_t *gpuBuffer, uint8_t *buffer,
                     uint32_t size) const {
-    cudaMemcpyAsync(gpuBuffer, buffer, size,
-                    cudaMemcpyHostToDevice, streams[streamIndex]);
+    const auto err = cudaMemcpyAsync(gpuBuffer, buffer, size,
+                                     cudaMemcpyHostToDevice,
+                                     streams[streamIndex]);
+    if (err != cudaSuccess) {
+        throw std::runtime_error("cudaMemcpyAsync failed.");
+    }
 }
 
 
-void GPUState::sync(size_t streamIndex) {
-    cudaStreamSynchronize(streams[streamIndex]);
+void GPUState::sync(const size_t streamIndex) const {
+    if (const auto err = cudaStreamSynchronize(streams[streamIndex]);
+        err != cudaSuccess) {
+        throw std::runtime_error("cudaStreamSynchronize failed.");
+    }
 }
-
 
 bool existsEnvVar(const std::string &name) {
     return std::getenv(name.c_str()) != null;
@@ -201,18 +207,17 @@ bool existsEnvVar(const std::string &name) {
 DataLoader::DataLoader(
     Dataset _dataset,
     const int _batchSize,
-    py::function _createDatasetFunction,
+    py::function createDatasetFunction,
     const int _numThreads,
     const int _prefetchSize
 ) : dataset(std::move(_dataset)),
     batchSize(_batchSize),
-    createDatasetFunction(std::move(_createDatasetFunction)),
     prefetchSemaphore(_prefetchSize),
     outputBatchMemorySize(0),
     gpu(_numThreads),
     threadPool([this](const size_t threadIdx) { threadMain(threadIdx); },
                _numThreads)
-// TODO: This initialized incorreclty before the defensive programming.
+// TODO: This initialized incorrectly before the defensive programming.
 {
     if (batchSize <= 0 || _numThreads <= 0 || _prefetchSize <= 0) {
         throw std::runtime_error(
@@ -241,9 +246,7 @@ DataLoader::DataLoader(
                 getImageWidth() * 3 * sizeof(float);
     }
 
-    const auto mas = outputBatchMemorySize * _prefetchSize;
-    pinnedMemoryArena = MemoryArena(MemoryArenaType::PINNED_HOST, mas);
-    gpuMemoryArena = MemoryArena(MemoryArenaType::GPU_DEVICE, mas);
+    MemoryArena::initialize(outputBatchMemorySize * _prefetchSize);
 
     threadPool.start();
 }
@@ -269,7 +272,7 @@ void DataLoader::threadMain(const size_t threadIdx) {
         const std::vector<Subdirectory> &subDirs = dataset.getSubDirs();
 
         // For each subdirectory, load all images and assemble into one numpy array.
-        ListOfAllocations allocations(&pinnedMemoryArena);
+        ListOfAllocations allocations;
         for (size_t i = 0; i < subDirs.size(); i++) {
             const Subdirectory &subDir = subDirs[i];
 
@@ -277,9 +280,8 @@ void DataLoader::threadMain(const size_t threadIdx) {
             prefetchCacheMutex.lock();
             const size_t batchBufferSize =
                     batchSize * imageSize * sizeof(float);
-            const auto batchBuffer = reinterpret_cast<float *>(allocations.
-                allocate(
-                    batchBufferSize));
+            const auto batchAlloc = allocations.allocate(batchBufferSize);
+            const auto batchBuffer = reinterpret_cast<float *>(batchAlloc.host);
             const auto batchBufferOld = new uint8_t[batchSize * imageSize];
             prefetchCacheMutex.unlock();
 
@@ -310,8 +312,7 @@ void DataLoader::threadMain(const size_t threadIdx) {
             delete[] batchBufferOld;
 
             // Start async upload to gpu memory as soon as possible.
-            uint8_t *gpuBatchData = gpuMemoryArena.allocate(batchBufferSize);
-            gpu.copy(threadIdx, gpuBatchData,
+            gpu.copy(threadIdx, batchAlloc.gpu,
                      reinterpret_cast<uint8_t *>(batchBuffer), batchBufferSize);
         }
 
@@ -334,20 +335,20 @@ py::dict DataLoader::getNextBatch() {
     prefetchCacheNotify.wait(
         lock, [this] { return !prefetchCache.empty(); });
 
-    const ThreadAllocationsPair batch = std::move(prefetchCache.front());
+    const auto [threadIdx, allocations] = std::move(prefetchCache.front());
     prefetchCache.erase(prefetchCache.begin());
     lock.unlock();
     prefetchSemaphore.release();
 
     py::dict pyBatch;
-    auto subDirs = dataset.getSubDirs(); // TODO: Prevent copy.
+    const auto subDirs = dataset.getSubDirs(); // TODO: Prevent copy.
     for (size_t i = 0; i < subDirs.size(); i++) {
         const Subdirectory &subDir = subDirs[i];
-        const uint32_t batchOffset = batch.allocations.getOffset(i);
+        const uint32_t batchOffset = allocations.getOffset(i);
 
         const auto *dlMngTensor = new DLManagedTensor{
             .dl_tensor = {
-                .data = gpuMemoryArena.getData(),
+                .data = MemoryArena::getInstance()->getGpuData(),
                 .device = {
                     .device_type = kDLCUDA,
                     .device_id = 0 // This hardcodes GPU0.
@@ -383,10 +384,12 @@ py::dict DataLoader::getNextBatch() {
                 delete[] dlManagedTensor->dl_tensor.shape;
                 delete[] dlManagedTensor->dl_tensor.strides;
                 delete dlManagedTensor;
+
+                MemoryArena::getInstance()->free();
             });
     }
 
-    gpu.sync(batch.threadIdx);
+    gpu.sync(threadIdx);
     return pyBatch;
 }
 
