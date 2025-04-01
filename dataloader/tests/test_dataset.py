@@ -23,12 +23,13 @@ def get_dataset(tmp_path: PosixPath, eroneous: bool):
             file = subdir / f"file{f}.{ext}"
             file.write_text("Hello World!")
 
+    sh = (100, 100, 3)
     ds = m.Dataset(
         str(tmp_path),
         [
-            m.Subdirectory("subdir0", m.FileType.EXR, "dictname1", 100, 100),
-            m.Subdirectory("subdir1", m.FileType.JPG, "dictname2", 100, 100),
-            m.Subdirectory("subdir2", m.FileType.NPY, "dictname3", 100, 100),
+            m.Subdirectory("subdir0", m.FileType.EXR, "dictname1", sh),
+            m.Subdirectory("subdir1", m.FileType.JPG, "dictname2", sh),
+            m.Subdirectory("subdir2", m.FileType.NPY, "dictname3", sh),
         ],
     )
     ds.init()

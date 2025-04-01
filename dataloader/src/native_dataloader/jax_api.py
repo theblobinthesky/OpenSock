@@ -3,6 +3,7 @@ from typing import Callable, List
 import jax, jax.numpy as jnp
 from . import _core as m  # Import native module as m
 
+
 class DLManagedTensorWrapper:
     def __init__(self, capsule):
         self._capsule = capsule
@@ -14,6 +15,7 @@ class DLManagedTensorWrapper:
         # Return (device_type, device_id); here CUDA=2 and GPU id=0.
         kDLCUDA = 2
         return (kDLCUDA, 0)
+
 
 class JaxSingleton:
     _instance = None
@@ -27,6 +29,7 @@ class JaxSingleton:
     def init(self):
         # Ensure Jax is using GPU; otherwise raise an error.
         device = jax.devices('gpu')[0]
+
         def jax_has_gpu():
             try:
                 _ = jax.device_put(jax.numpy.ones(1), device=device)
@@ -41,21 +44,23 @@ class JaxSingleton:
         x = jax.device_put(x, device)
         assert x.mean() == 0.0
 
+
 class FileType(Enum):
     EXR = m.FileType.EXR
     JPG = m.FileType.JPG
     NPY = m.FileType.NPY
 
+
 class Subdirectory:
     def __init__(self, path: str, file_type: FileType, dict_name: str,
-                 image_width: int, image_height: int):
+                 shape: tuple[int]):
         """Wrap native Subdirectory."""
-        self._native = m.Subdirectory(path, file_type.value, dict_name,
-                                      image_width, image_height)
+        self._native = m.Subdirectory(path, file_type.value, dict_name, shape)
 
     def native(self) -> m.Subdirectory:
         """Return native Subdirectory."""
         return self._native
+
 
 class Dataset:
     def __init__(self, root_dir: str, sub_dirs: List[Subdirectory]):
@@ -78,6 +83,7 @@ class Dataset:
         """Return the number of samples."""
         return len(self._native)
 
+
 class DataLoader:
     def __init__(self, dataset: Dataset, batch_size: int,
                  init_fn: Callable[[], None],
@@ -94,7 +100,9 @@ class DataLoader:
 
     def get_next_batch(self) -> dict:
         """Return next batch as a dict of jax arrays."""
+
         def from_dlpack(x):
             return jax.dlpack.from_dlpack(DLManagedTensorWrapper(x))
+
         batch = self._native.getNextBatch()
         return {key: from_dlpack(x) for key, x in batch.items()}

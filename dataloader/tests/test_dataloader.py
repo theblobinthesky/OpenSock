@@ -7,6 +7,7 @@ import numpy as np
 import native_dataloader as m
 import pytest as pt
 import jax.numpy as jnp
+import numpy as np
 
 JPG_DATASET_URL = "https://storage.googleapis.com/download.tensorflow.org/example_images/flower_photos.tgz"
 JPG_DATASET_DIR = os.path.join("temp", "jpg_dataset")
@@ -23,12 +24,12 @@ def ensure_jpg_dataset():
         
     return "temp/jpg_dataset/flower_photos", "daisy"
 
-def get_dataloader(batch_size: int):
-    def init_ds_fn():
-        pass
+def init_ds_fn():
+    pass
 
+def get_dataloader(batch_size: int):
     root_dir, sub_dir = ensure_jpg_dataset()
-    ds = m.Dataset(root_dir, [m.Subdirectory(sub_dir, m.FileType.JPG, "img", HEIGHT, WIDTH)])
+    ds = m.Dataset(root_dir, [m.Subdirectory(sub_dir, m.FileType.JPG, "img", (HEIGHT, WIDTH, 3))])
     dl = m.DataLoader(ds, batch_size, init_ds_fn, NUM_THREADS, PREFETCH_SIZE)
     return ds, dl
 
@@ -37,7 +38,7 @@ def test_get_length():
     _, dl = get_dataloader(batch_size=bs)
     assert len(dl) == (633 + bs - 1) // bs
 
-def test_correctness():
+def test_correctness_jpg():
     bs = 16
     ds, dl = get_dataloader(batch_size=bs)
     ds.init() # TODO: Fix copy bug.
@@ -52,6 +53,20 @@ def test_correctness():
 
         err = np.mean(np.abs(batch['img'][i] - pil_img))
         assert np.all(err < 5 / 255.0), f"Error too high for image {path}"
+
+def test_correctness_npy(tmp_path):
+    subdir = tmp_path / "subdir"
+    subdir.mkdir()
+
+    for i in range(16):
+        testFile = tmp_path / "subdir" / f"file{i}"
+        np.save(testFile, np.ones((1, 3, 3, 4), dtype=np.float32))
+
+    sd = m.Subdirectory("subdir", m.FileType.NPY, "np", (3, 3, 4))
+    ds = m.Dataset(str(tmp_path), [sd])
+    dl = m.DataLoader(ds, 16, init_ds_fn, NUM_THREADS, PREFETCH_SIZE)
+    batch = dl.get_next_batch()['np']
+    assert np.all(np.ones((16, 3, 3, 4)) == batch)
 
 def test_two_dataloaders_simultaneously():
     bs = 16

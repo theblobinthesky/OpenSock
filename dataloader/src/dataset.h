@@ -17,8 +17,8 @@ enum class FileType {
 
 class Subdirectory {
 public:
-    Subdirectory(std::string _subdir, const FileType _filesType,
-                 std::string _dictName, int image_height, int image_width);
+    Subdirectory(std::string _subdir, FileType _filesType,
+                 std::string _dictName, std::vector<int> _shape);
 
     [[nodiscard]] std::string getPath(const std::string &root) const;
 
@@ -28,19 +28,21 @@ public:
 
     [[nodiscard]] std::string getDictName() const;
 
-    [[nodiscard]] size_t getImageHeight() const;
+    [[nodiscard]] std::vector<int> getShape() const;
 
-    [[nodiscard]] size_t getImageWidth() const;
+    [[nodiscard]] size_t getShapeSize() const;
 
-    [[nodiscard]] size_t calculateImageSize() const;
+    [[nodiscard]] FileType getFilesType() const;
 
 private:
     std::string subdir;
     FileType filesType;
     std::string dictName;
-    int imageHeight;
-    int imageWidth;
+    std::vector<int> shape;
 };
+
+#define IMAGE_HEIGHT(subDir) static_cast<size_t>(subDir.getShape()[0])
+#define IMAGE_WIDTH(subDir) static_cast<size_t>(subDir.getShape()[1])
 
 class Dataset {
 public:

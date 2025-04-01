@@ -1,5 +1,6 @@
 #include "dataloader.h"
 #include "image.h"
+#include "cnpy.h"
 #include <filesystem>
 #include <dlpack/dlpack.h>
 
@@ -252,9 +253,12 @@ DataLoader::DataLoader(
                       batchSize;
 
     for (const Subdirectory &subDir: dataset.getSubDirs()) {
-        outputBatchMemorySize += batchSize * subDir.getImageHeight() *
-                subDir.
-                getImageWidth() * 3 * sizeof(float);
+        size_t itemMemorySize = sizeof(float);
+        for (const int dim: subDir.getShape()) {
+            itemMemorySize *= dim;
+        }
+
+        outputBatchMemorySize += batchSize * itemMemorySize;
     }
 
     MemoryArena::initialize(outputBatchMemorySize * _prefetchSize);
@@ -288,40 +292,74 @@ void DataLoader::threadMain() {
         for (size_t i = 0; i < subDirs.size(); i++) {
             const Subdirectory &subDir = subDirs[i];
 
-            const size_t imageSize = subDir.calculateImageSize();
+            const size_t itemSize = subDir.getShapeSize();
             prefetchCacheMutex.lock();
             const size_t batchBufferSize =
-                    batchSize * imageSize * sizeof(float);
+                    batchSize * itemSize * sizeof(float);
             const auto batchAlloc = allocations.allocate(batchBufferSize);
             const auto batchBuffer = reinterpret_cast<float *>(batchAlloc.host);
-            const auto batchBufferOld = new uint8_t[batchSize * imageSize];
             prefetchCacheMutex.unlock();
 
-            // Load the remaining images.
-            for (size_t j = 0; j < batchSize; j++) {
-                ImageData imgData = readJpegFile(batchPaths[j][i]);
-                resizeImage(imgData, batchBufferOld + j * imageSize,
-                            subDir.getImageWidth(),
-                            subDir.getImageHeight());
-            }
+            switch (subDir.getFilesType()) {
+                case FileType::JPG: {
+                    const auto batchBufferOld = new uint8_t[
+                        batchSize * itemSize];
 
-            for (size_t b = 0; b < batchSize; b++) {
-                for (size_t y = 0; y < subDir.getImageHeight(); y++) {
-                    for (size_t j = 0; j < subDir.getImageWidth(); j++) {
-                        for (size_t c = 0; c < 3; c++) {
-                            const size_t idx = b * imageSize
-                                               + y * subDir.getImageWidth() * 3
-                                               + j * 3
-                                               + c;
-                            batchBuffer[idx] =
-                                    static_cast<float>(batchBufferOld[idx])
-                                    / 255.0f;
+                    for (size_t j = 0; j < batchSize; j++) {
+                        ImageData imgData = readJpegFile(batchPaths[j][i]);
+                        resizeImage(imgData, batchBufferOld + j * itemSize,
+                                    IMAGE_WIDTH(subDir), IMAGE_HEIGHT(subDir));
+                    }
+
+                    for (size_t b = 0; b < batchSize; b++) {
+                        for (size_t y = 0; y < IMAGE_HEIGHT(subDir); y++) {
+                            for (size_t j = 0; j < IMAGE_WIDTH(subDir); j++) {
+                                for (size_t c = 0; c < 3; c++) {
+                                    const size_t idx = b * itemSize
+                                        + y * IMAGE_WIDTH(subDir) * 3
+                                        + j * 3
+                                        + c;
+                                    batchBuffer[idx] =
+                                            static_cast<float>(batchBufferOld[
+                                                idx])
+                                            / 255.0f;
+                                }
+                            }
                         }
                     }
+
+                    delete[] batchBufferOld;
+                }
+                break;
+                case FileType::NPY: {
+                    for (size_t j = 0; j < batchSize; j++) {
+                        // Load the NPY file from the path
+                        cnpy::NpyArray arr = cnpy::npy_load(batchPaths[j][i]);
+                        // Ensure the file contains float data
+                        if (arr.word_size != sizeof(float)) {
+                            throw std::runtime_error("NPY file " + batchPaths[j][i] + " does not contain float data.");
+                        }
+                        // Compute the total number of elements in the array
+                        size_t npy_num_elements = 1;
+                        for (const unsigned long d : arr.shape) {
+                            npy_num_elements *= d;
+                        }
+                        if (npy_num_elements != itemSize) {
+                            throw std::runtime_error("NPY file " + batchPaths[j][i] +
+                                                     " has mismatched size. Expected " +
+                                                     std::to_string(itemSize) + ", got " +
+                                                     std::to_string(npy_num_elements));
+                        }
+                        // Copy the float data into the batch buffer
+                        auto* npy_data = arr.data<float>();
+                        std::memcpy(batchBuffer + j * itemSize, npy_data, itemSize * sizeof(float));
+                    }
+                }
+                break;
+                default: {
+                    throw std::runtime_error("Should never get here!");
                 }
             }
-
-            delete[] batchBufferOld;
 
             // Start async upload to gpu memory as soon as possible.
             gpu.copy(batchAlloc.gpu, reinterpret_cast<uint8_t *>(batchBuffer),
@@ -362,6 +400,21 @@ py::dict DataLoader::getNextBatch() {
         const Subdirectory &subDir = subDirs[i];
         const uint32_t batchOffset = allocations.getOffset(i);
 
+        std::vector<int> shape = subDir.getShape();
+
+        const auto shapeArr = new int64_t[shape.size() + 1];
+        shapeArr[0] = static_cast<int64_t>(batchSize);
+        for (size_t s = 0; s < shape.size(); s++) {
+            shapeArr[s + 1] = shape[s];
+        }
+
+        int64_t lastStride = 1;
+        const auto stridesArr = new int64_t[shape.size() + 1];
+        for (int s = static_cast<int>(shape.size()); s >= 0; s--) {
+            stridesArr[s] = lastStride;
+            lastStride *= shapeArr[s];
+        }
+
         const auto *dlMngTensor = new DLManagedTensor{
             .dl_tensor = {
                 .data = MemoryArena::getInstance()->getGpuData(),
@@ -375,18 +428,8 @@ py::dict DataLoader::getNextBatch() {
                     .bits = 32,
                     .lanes = 1
                 },
-                .shape = new int64_t[]{
-                    static_cast<int64_t>(batchSize),
-                    static_cast<int64_t>(subDir.getImageHeight()),
-                    static_cast<int64_t>(subDir.getImageWidth()),
-                    CHS
-                },
-                .strides = new int64_t[]{
-                    static_cast<int64_t>(subDir.calculateImageSize()),
-                    static_cast<int64_t>(subDir.getImageWidth() * CHS),
-                    CHS,
-                    1
-                },
+                .shape = shapeArr,
+                .strides = stridesArr,
                 .byte_offset = batchOffset
             },
             .manager_ctx = null,

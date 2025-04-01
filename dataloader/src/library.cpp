@@ -27,7 +27,8 @@ PYBIND11_MODULE(_core, m) {
             .export_values();
 
     py::class_<Subdirectory>(m, "Subdirectory")
-            .def(py::init<std::string, const FileType, std::string, int, int>());
+            .def(py::init<std::string, const FileType, std::string, std::vector<
+                int> >());
 
     py::class_<Dataset>(m, "Dataset")
             .def(py::init<std::string, std::vector<Subdirectory> >())

@@ -13,14 +13,32 @@ Subdirectory::Subdirectory(
     std::string _subdir,
     const FileType _filesType,
     std::string _dictName,
-    int _imageHeight,
-    int _imageWidth
+    std::vector<int> _shape
 ) : subdir(std::move(_subdir)), filesType(_filesType),
-    dictName(std::move(_dictName)), imageHeight(_imageHeight),
-    imageWidth(_imageWidth) {
-    if (imageHeight <= 0 || imageWidth <= 0) {
-        throw std::runtime_error(
-            "Image dimensions need to be strictly positive.");
+    dictName(std::move(_dictName)), shape(std::move(_shape)) {
+    for (const int dim: shape) {
+        if (dim <= 0) {
+            throw std::invalid_argument(
+                "Dimensions need to be strictly positive.");
+        }
+    }
+
+    if (filesType == FileType::JPG) {
+        if (shape.size() != 3) {
+            throw std::invalid_argument("Jpeg images have shape (h, w, 3).");
+        }
+
+        if (shape[2] != 3) {
+            throw std::invalid_argument("Jpeg images must have RGB channels.");
+        }
+    } else if (filesType == FileType::NPY) {
+        if (shape.empty()) {
+            throw std::invalid_argument(
+                "Jpeg images have at least 1 dimension.");
+        }
+    } else {
+        // throw std::runtime_error(
+        //     "File types other than jpg and npy are not supported.");
     }
 }
 
@@ -45,17 +63,21 @@ std::string Subdirectory::getDictName() const {
     return dictName;
 }
 
-size_t Subdirectory::getImageHeight() const {
-    return imageHeight;
+std::vector<int> Subdirectory::getShape() const {
+    return shape;
 }
 
-size_t Subdirectory::getImageWidth() const {
-    return imageWidth;
+[[nodiscard]] size_t Subdirectory::getShapeSize() const {
+    size_t totalSize = 1;
+    for (const int dim: shape) {
+        totalSize *= dim;
+    }
+
+    return totalSize;
 }
 
-[[nodiscard]] size_t Subdirectory::calculateImageSize() const {
-    return imageHeight * imageWidth * 3;
-}
+[[nodiscard]] FileType Subdirectory::getFilesType() const {
+    return filesType;}
 
 std::string replaceAll(std::string str, const std::string &from,
                        const std::string &to) {
