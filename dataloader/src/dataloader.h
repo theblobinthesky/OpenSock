@@ -92,7 +92,7 @@ public:
 
 class ThreadPool {
 public:
-    explicit ThreadPool(const std::function<void(size_t)> &_threadMain,
+    explicit ThreadPool(const std::function<void()> &_threadMain,
                         size_t _threadCount);
 
     void start();
@@ -106,33 +106,36 @@ public:
     ~ThreadPool() noexcept;
 
 private:
-    std::function<void(size_t)> threadMain;
+    std::function<void()> threadMain;
     size_t threadCount;
     std::vector<std::thread> threads;
     std::atomic_uint32_t shutdownCounter;
     std::mutex shutdownMutex;
     std::condition_variable shutdownNotify;
 
-    void extendedThreadMain(size_t threadIdx);
+    void extendedThreadMain();
 };
 
 class GPUState {
 public:
-    explicit GPUState(size_t numStreams);
+    explicit GPUState(size_t numBarriers);
 
     ~GPUState();
 
-    void copy(size_t streamIndex, uint8_t *gpuBuffer, uint8_t *buffer,
+    void copy(uint8_t *gpuBuffer, const uint8_t *buffer,
               uint32_t size) const;
 
-    void sync(size_t streamIndex) const;
+    void insertBarrier(size_t barrierIdx) const;
+
+    void sync(size_t barrierIdx) const;
 
 private:
-    std::vector<cudaStream_t> streams;
+    cudaStream_t stream;
+    std::vector<cudaEvent_t> barriers;
 };
 
-struct ThreadAllocationsPair {
-    size_t threadIdx;
+struct BarrierAllocationsPair {
+    size_t barrierIdx;
     ListOfAllocations allocations;
 };
 
@@ -141,7 +144,7 @@ public:
     DataLoader(
         Dataset _dataset,
         int _batchSize,
-        pybind11::function _createDatasetFunction,
+        const pybind11::function &createDatasetFunction,
         int _numThreads,
         int _prefetchSize
     );
@@ -159,18 +162,21 @@ public:
 private:
     Dataset dataset;
     const size_t batchSize;
+    const size_t numThreads;
+    const size_t prefetchSize;
     size_t numberOfBatches;
     Semaphore prefetchSemaphore;
     std::mutex datasetMutex;
-    std::vector<ThreadAllocationsPair> prefetchCache;
+    std::vector<BarrierAllocationsPair> prefetchCache;
     std::condition_variable prefetchCacheNotify;
+    std::atomic_int lastBarrierIdx;
     std::mutex prefetchCacheMutex;
     size_t outputBatchMemorySize;
     GPUState gpu;
     ThreadPool threadPool;
     std::atomic_bool shutdown;
 
-    void threadMain(size_t threadIdx);
+    void threadMain();
 };
 
 #endif //DATALOADER_H

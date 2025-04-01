@@ -11,7 +11,7 @@ import jax.numpy as jnp
 JPG_DATASET_URL = "https://storage.googleapis.com/download.tensorflow.org/example_images/flower_photos.tgz"
 JPG_DATASET_DIR = os.path.join("temp", "jpg_dataset")
 HEIGHT, WIDTH = 300, 300
-NUM_THREADS, PREFETCH_SIZE = 8, 8
+NUM_THREADS, PREFETCH_SIZE = 16, 16
 
 def ensure_jpg_dataset():
     os.makedirs(JPG_DATASET_DIR, exist_ok=True)

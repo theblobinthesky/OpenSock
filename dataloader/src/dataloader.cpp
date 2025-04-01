@@ -131,7 +131,7 @@ void Semaphore::disable() {
     disabled = true;
 }
 
-ThreadPool::ThreadPool(const std::function<void(size_t)> &_threadMain,
+ThreadPool::ThreadPool(const std::function<void()> &_threadMain,
                        const size_t _threadCount) : threadMain(_threadMain),
                                                     threadCount(_threadCount),
                                                     shutdownCounter(0) {
@@ -139,7 +139,7 @@ ThreadPool::ThreadPool(const std::function<void(size_t)> &_threadMain,
 
 void ThreadPool::start() {
     for (size_t i = 0; i < threadCount; i++) {
-        threads.emplace_back(&ThreadPool::extendedThreadMain, this, i);
+        threads.emplace_back(&ThreadPool::extendedThreadMain, this);
     }
 }
 
@@ -149,8 +149,8 @@ ThreadPool::~ThreadPool() noexcept {
     }
 }
 
-void ThreadPool::extendedThreadMain(const size_t threadIdx) {
-    if (threadMain) threadMain(threadIdx);
+void ThreadPool::extendedThreadMain() {
+    if (threadMain) threadMain();
 
     ++shutdownCounter;
     shutdownNotify.notify_all();
@@ -161,42 +161,51 @@ void ThreadPool::extendedThreadMain(const size_t threadIdx) {
         });
 }
 
-GPUState::GPUState(size_t numStreams) {
-    for (size_t i = 0; i < numStreams; i++) {
-        cudaStream_t stream;
-        if (const cudaError_t err = cudaStreamCreate(&stream);
-            err != cudaSuccess) {
-            throw std::runtime_error("cudaStreamCreate failed.");
+GPUState::GPUState(const size_t numBarriers) : stream{} {
+    if (const cudaError_t err = cudaStreamCreate(&stream);
+        err != cudaSuccess) {
+        throw std::runtime_error("cudaStreamCreate failed.");
+    }
+
+    for (size_t i = 0; i < numBarriers; i++) {
+        cudaEvent_t barrierEvent;
+        if (cudaEventCreate(&barrierEvent) != cudaSuccess) {
+            throw std::runtime_error("cudaEventCreate failed.");
         }
 
-        streams.push_back(stream);
+        barriers.push_back(barrierEvent);
     }
 }
 
 GPUState::~GPUState() {
-    for (cudaStream_t stream: streams) {
-        if (const auto err = cudaStreamDestroy(stream); err != cudaSuccess) {
-            std::printf("cudaStreamDestroy failed.\n");
-            std::terminate();
-        }
+    if (const auto err = cudaStreamDestroy(stream); err != cudaSuccess) {
+        std::printf("cudaStreamDestroy failed.\n");
+        std::terminate();
+    }
+
+    for (cudaEvent_t barrier: barriers) {
+        cudaEventDestroy(barrier);
     }
 }
 
-void GPUState::copy(size_t streamIndex, uint8_t *gpuBuffer, uint8_t *buffer,
-                    uint32_t size) const {
-    const auto err = cudaMemcpyAsync(gpuBuffer, buffer, size,
-                                     cudaMemcpyHostToDevice,
-                                     streams[streamIndex]);
-    if (err != cudaSuccess) {
+void GPUState::copy(uint8_t *gpuBuffer,
+                    const uint8_t *buffer,
+                    const uint32_t size) const {
+    if (cudaMemcpyAsync(gpuBuffer, buffer, size,
+                        cudaMemcpyHostToDevice, stream) != cudaSuccess) {
         throw std::runtime_error("cudaMemcpyAsync failed.");
     }
 }
 
+void GPUState::insertBarrier(const size_t barrierIdx) const {
+    if (cudaEventRecord(barriers[barrierIdx], stream) != cudaSuccess) {
+        throw std::runtime_error("cudaEventRecord failed.");
+    }
+}
 
-void GPUState::sync(const size_t streamIndex) const {
-    if (const auto err = cudaStreamSynchronize(streams[streamIndex]);
-        err != cudaSuccess) {
-        throw std::runtime_error("cudaStreamSynchronize failed.");
+void GPUState::sync(const size_t barrierIdx) const {
+    if (cudaEventSynchronize(barriers[barrierIdx]) != cudaSuccess) {
+        throw std::runtime_error("cudaEventSynchronize failed.");
     }
 }
 
@@ -207,15 +216,17 @@ bool existsEnvVar(const std::string &name) {
 DataLoader::DataLoader(
     Dataset _dataset,
     const int _batchSize,
-    py::function createDatasetFunction,
+    const py::function &createDatasetFunction,
     const int _numThreads,
     const int _prefetchSize
 ) : dataset(std::move(_dataset)),
     batchSize(_batchSize),
+    numThreads(_numThreads),
+    prefetchSize(_prefetchSize),
     prefetchSemaphore(_prefetchSize),
     outputBatchMemorySize(0),
-    gpu(_numThreads),
-    threadPool([this](const size_t threadIdx) { threadMain(threadIdx); },
+    gpu(_prefetchSize),
+    threadPool([this] { this->threadMain(); },
                _numThreads)
 // TODO: This initialized incorrectly before the defensive programming.
 {
@@ -256,7 +267,7 @@ DataLoader::~DataLoader() {
     prefetchSemaphore.disable();
 }
 
-void DataLoader::threadMain(const size_t threadIdx) {
+void DataLoader::threadMain() {
     while (!shutdown) {
         prefetchSemaphore.acquire();
         if (shutdown) {
@@ -269,6 +280,7 @@ void DataLoader::threadMain(const size_t threadIdx) {
                     batchSize);
         datasetMutex.unlock();
 
+        const size_t barrierIdx = lastBarrierIdx++ % prefetchSize;
         const std::vector<Subdirectory> &subDirs = dataset.getSubDirs();
 
         // For each subdirectory, load all images and assemble into one numpy array.
@@ -312,13 +324,15 @@ void DataLoader::threadMain(const size_t threadIdx) {
             delete[] batchBufferOld;
 
             // Start async upload to gpu memory as soon as possible.
-            gpu.copy(threadIdx, batchAlloc.gpu,
-                     reinterpret_cast<uint8_t *>(batchBuffer), batchBufferSize);
+            gpu.copy(batchAlloc.gpu, reinterpret_cast<uint8_t *>(batchBuffer),
+                     batchBufferSize);
         }
+
+        gpu.insertBarrier(barrierIdx);
 
         prefetchCacheMutex.lock();
         prefetchCache.push_back({
-            .threadIdx = threadIdx,
+            .barrierIdx = barrierIdx,
             .allocations = std::move(allocations)
         });
         prefetchCacheMutex.unlock();
@@ -328,6 +342,7 @@ void DataLoader::threadMain(const size_t threadIdx) {
 }
 
 void deleter(DLManagedTensor *self) {
+    MemoryArena::getInstance()->free();
 }
 
 py::dict DataLoader::getNextBatch() {
@@ -335,8 +350,9 @@ py::dict DataLoader::getNextBatch() {
     prefetchCacheNotify.wait(
         lock, [this] { return !prefetchCache.empty(); });
 
-    const auto [threadIdx, allocations] = std::move(prefetchCache.front());
+    const auto [barrierIdx, allocations] = std::move(prefetchCache.front());
     prefetchCache.erase(prefetchCache.begin());
+
     lock.unlock();
     prefetchSemaphore.release();
 
@@ -384,12 +400,19 @@ py::dict DataLoader::getNextBatch() {
                 delete[] dlManagedTensor->dl_tensor.shape;
                 delete[] dlManagedTensor->dl_tensor.strides;
                 delete dlManagedTensor;
-
-                MemoryArena::getInstance()->free();
             });
     }
 
-    gpu.sync(threadIdx);
+    for (size_t i = 0; i < prefetchCache.size(); i++) {
+        const auto &pair = prefetchCache[i];
+        if (pair.barrierIdx == barrierIdx) {
+            std::printf("Idiot index ++ (%lu, %lu, idx %lu, size %lu) \n",
+                        pair.barrierIdx,
+                        barrierIdx, i, prefetchCache.size() + 1);
+        }
+    }
+
+    gpu.sync(barrierIdx);
     return pyBatch;
 }
 
