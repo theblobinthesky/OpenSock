@@ -1,6 +1,6 @@
 from __future__ import annotations
 from ._core import __doc__, __version__
-from .jax_api import FileType, Subdirectory, Dataset, DataLoader
+from .jax_api import FileType, Head, Dataset, DataLoader
 
 __all__ = ["__doc__", "__version__",
-           "FileType", "Subdirectory", "Dataset", "DataLoader"]
+           "FileType", "Head", "Dataset", "DataLoader"]

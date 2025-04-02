@@ -26,20 +26,27 @@ PYBIND11_MODULE(_core, m) {
             .value("NPY", FileType::NPY)
             .export_values();
 
-    py::class_<Subdirectory>(m, "Subdirectory")
-            .def(py::init<std::string, const FileType, std::string, std::vector<
-                int> >());
+    py::class_<Head>(m, "Head")
+            .def(py::init<const FileType, std::string, std::vector<int> >());
 
     py::class_<Dataset>(m, "Dataset")
-            .def(py::init<std::string, std::vector<Subdirectory> >())
-            .def("init", &Dataset::init)
-            .def("getDataset", &Dataset::getDataset);
+            .def(py::init<std::string, std::vector<Head>,
+                std::vector<std::string>,
+                const pybind11::function>())
+
+            .def(py::init<std::string, std::vector<Head>,
+                std::vector<std::vector<std::string> > >())
+
+            .def("splitTrainValidationTest", &Dataset::splitTrainValidationTest)
+            .def("getEntries", &Dataset::getEntries)
+            .def("getNextBatch", &Dataset::getNextBatch);
 
     py::class_<DataLoader>(m, "DataLoader")
-            .def(py::init<Dataset, int, py::function, int, int>())
+            .def(py::init<Dataset, int, int, int>())
             .def("getNextBatch", &DataLoader::getNextBatch)
             .def("__len__", &DataLoader::getNumberOfBatches);
     // TODO Comment(getNextBatch): Important convention is that memory of the last batch gets invalid when you call getNextBatch!
+    // Idk about that. Jax has a different idea of this convention!
 
 #ifdef VERSION_INFO
     m.attr("__version__") = MACRO_STRINGIFY(VERSION_INFO);

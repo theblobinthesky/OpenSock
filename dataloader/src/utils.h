@@ -9,4 +9,11 @@
 #define debugLog(...)
 #endif
 
+inline bool existsEnvVar(const std::string &name) {
+    return std::getenv(name.c_str()) != null;
+}
+
+#define INVALID_DS_ENV_VAR "INVALIDATE_DATASET"
+
+
 #endif

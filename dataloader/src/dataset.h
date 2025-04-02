@@ -3,11 +3,7 @@
 #include <vector>
 #include <filesystem>
 #include <format>
-#include <random>
 #include <pybind11/stl.h>
-#include "utils.h"
-
-constexpr const char *INVALID_DS_ENV_VAR = "INVALIDATE_DATASET";
 
 enum class FileType {
     JPG,
@@ -15,16 +11,11 @@ enum class FileType {
     NPY
 };
 
-class Subdirectory {
+class Head {
 public:
-    Subdirectory(std::string _subdir, FileType _filesType,
-                 std::string _dictName, std::vector<int> _shape);
-
-    [[nodiscard]] std::string getPath(const std::string &root) const;
+    Head(FileType _filesType, std::string _dictName, std::vector<int> _shape);
 
     [[nodiscard]] std::string getExt() const;
-
-    [[nodiscard]] std::string getSubdir() const;
 
     [[nodiscard]] std::string getDictName() const;
 
@@ -35,7 +26,6 @@ public:
     [[nodiscard]] FileType getFilesType() const;
 
 private:
-    std::string subdir;
     FileType filesType;
     std::string dictName;
     std::vector<int> shape;
@@ -46,25 +36,34 @@ private:
 
 class Dataset {
 public:
-    Dataset(std::string _rootDir, std::vector<Subdirectory> _subDirs);
+    Dataset(std::string _rootDir, std::vector<Head> _heads,
+            std::vector<std::string> _subDirs,
+            const pybind11::function &createDatasetFunction
+    );
 
-    void init();
+    Dataset(std::string _rootDir, std::vector<Head> _heads,
+            std::vector<std::vector<std::string> > _entries
+    );
 
-    void splitTrainValidationTest();
+    std::tuple<Dataset, Dataset, Dataset> splitTrainValidationTest(
+        float trainPercentage, float validPercentage);
 
     [[nodiscard]] std::vector<std::vector<std::string> > getNextBatch(
-        const size_t batchSize) const;
-
-    [[nodiscard]] std::vector<std::vector<std::string> > getDataset() const;
+        size_t batchSize) const;
 
     [[nodiscard]] std::string getRootDir() const;
 
-    [[nodiscard]] std::vector<Subdirectory> getSubDirs() const;
+    [[nodiscard]] std::vector<Head> getHeads() const;
+
+    [[nodiscard]] std::vector<std::vector<std::string> > getEntries() const;
 
 private:
+    void init();
+
     std::string rootDir;
-    std::vector<Subdirectory> subDirs;
-    std::vector<std::vector<std::string> > dataset;
+    std::vector<Head> heads;
+    std::vector<std::string> subDirs;
+    std::vector<std::vector<std::string> > entries;
     size_t offset;
 };
 

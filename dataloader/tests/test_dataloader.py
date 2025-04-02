@@ -29,23 +29,22 @@ def init_ds_fn():
 
 def get_dataloader(batch_size: int):
     root_dir, sub_dir = ensure_jpg_dataset()
-    ds = m.Dataset(root_dir, [m.Subdirectory(sub_dir, m.FileType.JPG, "img", (HEIGHT, WIDTH, 3))])
-    dl = m.DataLoader(ds, batch_size, init_ds_fn, NUM_THREADS, PREFETCH_SIZE)
-    return ds, dl
+    ds = m.Dataset.from_subdirs(root_dir, [m.Head(m.FileType.JPG, "img", (HEIGHT, WIDTH, 3))], [sub_dir], init_ds_fn)
+    dl = m.DataLoader(ds, batch_size, NUM_THREADS, PREFETCH_SIZE)
+    return ds, dl, root_dir
 
 def test_get_length():
     bs = 16
-    _, dl = get_dataloader(batch_size=bs)
+    _, dl, _ = get_dataloader(batch_size=bs)
     assert len(dl) == (633 + bs - 1) // bs
 
 def test_correctness_jpg():
     bs = 16
-    ds, dl = get_dataloader(batch_size=bs)
-    ds.init() # TODO: Fix copy bug.
-    dsPaths = ds.get_dataset()
+    ds, dl, root_dir = get_dataloader(batch_size=bs)
 
     batch = dl.get_next_batch()
-    for i, batch_paths in enumerate(dsPaths[:16]):
+    entries = [[f"{root_dir}{sub_path}" for sub_path in item] for item in ds.entries]
+    for i, batch_paths in enumerate(entries[:16]):
         path = batch_paths[0]
         pil_img = Image.open(path).convert("RGB")
         pil_img = np.array(pil_img.resize((WIDTH, HEIGHT)), np.float32)
@@ -62,16 +61,22 @@ def test_correctness_npy(tmp_path):
         testFile = tmp_path / "subdir" / f"file{i}"
         np.save(testFile, np.ones((1, 3, 3, 4), dtype=np.float32))
 
-    sd = m.Subdirectory("subdir", m.FileType.NPY, "np", (3, 3, 4))
-    ds = m.Dataset(str(tmp_path), [sd])
-    dl = m.DataLoader(ds, 16, init_ds_fn, NUM_THREADS, PREFETCH_SIZE)
+    ds = m.Dataset.from_subdirs(
+        str(tmp_path), 
+        [m.Head(m.FileType.NPY, "np", (3, 3, 4))],
+        ["subdir"],
+        init_ds_fn
+    )
+
+    dl = m.DataLoader(ds, 16, NUM_THREADS, PREFETCH_SIZE)
+
     batch = dl.get_next_batch()['np']
     assert np.all(np.ones((16, 3, 3, 4)) == batch)
 
 def test_two_dataloaders_simultaneously():
     bs = 16
-    _, dl = get_dataloader(batch_size=bs)
-    _, dl2 = get_dataloader(batch_size=bs)
+    _, dl, _ = get_dataloader(batch_size=bs)
+    _, dl2, _ = get_dataloader(batch_size=bs)
 
     b1 = dl.get_next_batch()
     b2 = dl2.get_next_batch()
@@ -89,5 +94,5 @@ def test_perf(benchmark):
             x = batch['img']
             total_mean += x.mean()
 
-    _, dl = get_dataloader(batch_size=16)
+    _, dl, _ = get_dataloader(batch_size=16)
     benchmark(performance_benchmark, dl)

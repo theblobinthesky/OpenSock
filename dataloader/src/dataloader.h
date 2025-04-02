@@ -144,7 +144,6 @@ public:
     DataLoader(
         Dataset _dataset,
         int _batchSize,
-        const pybind11::function &createDatasetFunction,
         int _numThreads,
         int _prefetchSize
     );

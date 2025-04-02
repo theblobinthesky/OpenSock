@@ -1,4 +1,5 @@
 #include "dataloader.h"
+#include "utils.h"
 #include "image.h"
 #include "cnpy.h"
 #include <filesystem>
@@ -210,14 +211,9 @@ void GPUState::sync(const size_t barrierIdx) const {
     }
 }
 
-bool existsEnvVar(const std::string &name) {
-    return std::getenv(name.c_str()) != null;
-}
-
 DataLoader::DataLoader(
     Dataset _dataset,
     const int _batchSize,
-    const py::function &createDatasetFunction,
     const int _numThreads,
     const int _prefetchSize
 ) : dataset(std::move(_dataset)),
@@ -241,20 +237,12 @@ DataLoader::DataLoader(
             "Prefetch size must be larger or equal than the number of threads.");
     }
 
-    if (!fs::exists(dataset.getRootDir()) || existsEnvVar(
-            INVALID_DS_ENV_VAR)) {
-        fs::remove_all(dataset.getRootDir());
-        createDatasetFunction();
-    }
-
-    dataset.init();
-
-    numberOfBatches = (dataset.getDataset().size() + batchSize - 1) /
+    numberOfBatches = (dataset.getEntries().size() + batchSize - 1) /
                       batchSize;
 
-    for (const Subdirectory &subDir: dataset.getSubDirs()) {
+    for (const Head &head: dataset.getHeads()) {
         size_t itemMemorySize = sizeof(float);
-        for (const int dim: subDir.getShape()) {
+        for (const int dim: head.getShape()) {
             itemMemorySize *= dim;
         }
 
@@ -285,14 +273,14 @@ void DataLoader::threadMain() {
         datasetMutex.unlock();
 
         const size_t barrierIdx = lastBarrierIdx++ % prefetchSize;
-        const std::vector<Subdirectory> &subDirs = dataset.getSubDirs();
+        const std::vector<Head> &heads = dataset.getHeads();
 
         // For each subdirectory, load all images and assemble into one numpy array.
         ListOfAllocations allocations;
-        for (size_t i = 0; i < subDirs.size(); i++) {
-            const Subdirectory &subDir = subDirs[i];
+        for (size_t i = 0; i < heads.size(); i++) {
+            const Head &head = heads[i];
 
-            const size_t itemSize = subDir.getShapeSize();
+            const size_t itemSize = head.getShapeSize();
             prefetchCacheMutex.lock();
             const size_t batchBufferSize =
                     batchSize * itemSize * sizeof(float);
@@ -300,7 +288,7 @@ void DataLoader::threadMain() {
             const auto batchBuffer = reinterpret_cast<float *>(batchAlloc.host);
             prefetchCacheMutex.unlock();
 
-            switch (subDir.getFilesType()) {
+            switch (head.getFilesType()) {
                 case FileType::JPG: {
                     const auto batchBufferOld = new uint8_t[
                         batchSize * itemSize];
@@ -308,15 +296,15 @@ void DataLoader::threadMain() {
                     for (size_t j = 0; j < batchSize; j++) {
                         ImageData imgData = readJpegFile(batchPaths[j][i]);
                         resizeImage(imgData, batchBufferOld + j * itemSize,
-                                    IMAGE_WIDTH(subDir), IMAGE_HEIGHT(subDir));
+                                    IMAGE_WIDTH(head), IMAGE_HEIGHT(head));
                     }
 
                     for (size_t b = 0; b < batchSize; b++) {
-                        for (size_t y = 0; y < IMAGE_HEIGHT(subDir); y++) {
-                            for (size_t j = 0; j < IMAGE_WIDTH(subDir); j++) {
+                        for (size_t y = 0; y < IMAGE_HEIGHT(head); y++) {
+                            for (size_t j = 0; j < IMAGE_WIDTH(head); j++) {
                                 for (size_t c = 0; c < 3; c++) {
                                     const size_t idx = b * itemSize
-                                        + y * IMAGE_WIDTH(subDir) * 3
+                                        + y * IMAGE_WIDTH(head) * 3
                                         + j * 3
                                         + c;
                                     batchBuffer[idx] =
@@ -337,22 +325,26 @@ void DataLoader::threadMain() {
                         cnpy::NpyArray arr = cnpy::npy_load(batchPaths[j][i]);
                         // Ensure the file contains float data
                         if (arr.word_size != sizeof(float)) {
-                            throw std::runtime_error("NPY file " + batchPaths[j][i] + " does not contain float data.");
+                            throw std::runtime_error(
+                                "NPY file " + batchPaths[j][i] +
+                                " does not contain float data.");
                         }
                         // Compute the total number of elements in the array
                         size_t npy_num_elements = 1;
-                        for (const unsigned long d : arr.shape) {
+                        for (const unsigned long d: arr.shape) {
                             npy_num_elements *= d;
                         }
                         if (npy_num_elements != itemSize) {
-                            throw std::runtime_error("NPY file " + batchPaths[j][i] +
-                                                     " has mismatched size. Expected " +
-                                                     std::to_string(itemSize) + ", got " +
-                                                     std::to_string(npy_num_elements));
+                            throw std::runtime_error(
+                                "NPY file " + batchPaths[j][i] +
+                                " has mismatched size. Expected " +
+                                std::to_string(itemSize) + ", got " +
+                                std::to_string(npy_num_elements));
                         }
                         // Copy the float data into the batch buffer
-                        auto* npy_data = arr.data<float>();
-                        std::memcpy(batchBuffer + j * itemSize, npy_data, itemSize * sizeof(float));
+                        auto *npy_data = arr.data<float>();
+                        std::memcpy(batchBuffer + j * itemSize, npy_data,
+                                    itemSize * sizeof(float));
                     }
                 }
                 break;
@@ -395,12 +387,12 @@ py::dict DataLoader::getNextBatch() {
     prefetchSemaphore.release();
 
     py::dict pyBatch;
-    const auto subDirs = dataset.getSubDirs(); // TODO: Prevent copy.
-    for (size_t i = 0; i < subDirs.size(); i++) {
-        const Subdirectory &subDir = subDirs[i];
+    const auto &heads = dataset.getHeads(); // TODO: Prevent copy.
+    for (size_t i = 0; i < heads.size(); i++) {
+        const Head &head = heads[i];
         const uint32_t batchOffset = allocations.getOffset(i);
 
-        std::vector<int> shape = subDir.getShape();
+        std::vector<int> shape = head.getShape();
 
         const auto shapeArr = new int64_t[shape.size() + 1];
         shapeArr[0] = static_cast<int64_t>(batchSize);
@@ -436,7 +428,7 @@ py::dict DataLoader::getNextBatch() {
             .deleter = &deleter
         };
 
-        pyBatch[subDir.getDictName().c_str()] = py::capsule(
+        pyBatch[head.getDictName().c_str()] = py::capsule(
             dlMngTensor, "dltensor", [](void *ptr) {
                 const auto *dlManagedTensor = static_cast<DLManagedTensor *>(
                     ptr);

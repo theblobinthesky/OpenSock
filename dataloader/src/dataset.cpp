@@ -1,20 +1,20 @@
 #include "dataset.h"
 #include "io.h"
+#include <utility>
 #include <vector>
 #include <filesystem>
 #include <format>
-#include <jpeglib.h>
 #include <random>
+#include <utils.h>
 
 namespace py = pybind11;
 namespace fs = std::filesystem;
 
-Subdirectory::Subdirectory(
-    std::string _subdir,
+Head::Head(
     const FileType _filesType,
     std::string _dictName,
     std::vector<int> _shape
-) : subdir(std::move(_subdir)), filesType(_filesType),
+) : filesType(_filesType),
     dictName(std::move(_dictName)), shape(std::move(_shape)) {
     for (const int dim: shape) {
         if (dim <= 0) {
@@ -23,30 +23,31 @@ Subdirectory::Subdirectory(
         }
     }
 
-    if (filesType == FileType::JPG) {
-        if (shape.size() != 3) {
-            throw std::invalid_argument("Jpeg images have shape (h, w, 3).");
-        }
+    if (shape.empty()) {
+        throw std::invalid_argument(
+            "Tensors have at least 1 dimension.");
+    }
 
-        if (shape[2] != 3) {
-            throw std::invalid_argument("Jpeg images must have RGB channels.");
+    switch (filesType) {
+        case FileType::JPG: {
+            if (shape.size() != 3) {
+                throw std::invalid_argument(
+                    "Jpeg images have shape (h, w, 3).");
+            }
+
+            if (shape[2] != 3) {
+                throw std::invalid_argument(
+                    "Jpeg images must have RGB channels.");
+            }
         }
-    } else if (filesType == FileType::NPY) {
-        if (shape.empty()) {
-            throw std::invalid_argument(
-                "Jpeg images have at least 1 dimension.");
-        }
-    } else {
+        break;
+        default: break; // TODO
         // throw std::runtime_error(
         //     "File types other than jpg and npy are not supported.");
     }
 }
 
-std::string Subdirectory::getPath(const std::string &root) const {
-    return std::format("{}/{}", root, subdir);
-}
-
-std::string Subdirectory::getExt() const {
+std::string Head::getExt() const {
     switch (filesType) {
         case FileType::EXR: return "exr";
         case FileType::JPG: return "jpg";
@@ -55,19 +56,15 @@ std::string Subdirectory::getExt() const {
     }
 }
 
-std::string Subdirectory::getSubdir() const {
-    return subdir;
-}
-
-std::string Subdirectory::getDictName() const {
+std::string Head::getDictName() const {
     return dictName;
 }
 
-std::vector<int> Subdirectory::getShape() const {
+std::vector<int> Head::getShape() const {
     return shape;
 }
 
-[[nodiscard]] size_t Subdirectory::getShapeSize() const {
+[[nodiscard]] size_t Head::getShapeSize() const {
     size_t totalSize = 1;
     for (const int dim: shape) {
         totalSize *= dim;
@@ -76,8 +73,9 @@ std::vector<int> Subdirectory::getShape() const {
     return totalSize;
 }
 
-[[nodiscard]] FileType Subdirectory::getFilesType() const {
-    return filesType;}
+[[nodiscard]] FileType Head::getFilesType() const {
+    return filesType;
+}
 
 std::string replaceAll(std::string str, const std::string &from,
                        const std::string &to) {
@@ -88,28 +86,45 @@ std::string replaceAll(std::string str, const std::string &from,
     return str;
 }
 
-Dataset::Dataset(
-    std::string _rootDir,
-    std::vector<Subdirectory> _subDirs
-) : rootDir(std::move(_rootDir)), subDirs(std::move(_subDirs)), offset{} {
+void initRootDir(std::string &rootDir) {
     if (rootDir.empty()) {
-        throw std::runtime_error(
-            "Cannot instantiate a dataset with an empty root directory.");
+        throw std::runtime_error("Cannot instantiate a dataset with an empty root directory.");
     }
+
+    if (rootDir.ends_with('/')) {
+        rootDir.erase(rootDir.end() - 1);
+    }
+}
+
+Dataset::Dataset(std::string _rootDir, std::vector<Head> _heads,
+                 std::vector<std::string> _subDirs,
+                 const pybind11::function &createDatasetFunction
+) : rootDir(std::move(_rootDir)), heads(std::move(_heads)),
+    subDirs(std::move(_subDirs)), entries({}), offset(0) {
+    initRootDir(rootDir);
+
     if (subDirs.empty()) {
         throw std::runtime_error(
             "Cannot instantiate a dataset with not subdirectories.");
     }
-}
 
-void Dataset::init() {
-    auto files = listAllFiles(subDirs[0].getPath(rootDir));
+    if (!fs::exists(rootDir) || existsEnvVar(INVALID_DS_ENV_VAR)) {
+        fs::remove_all(rootDir);
+        createDatasetFunction();
+    }
+
+    auto files = listAllFiles(
+        std::format("{}/{}", rootDir, subDirs[0]) // TODO: Convention is no / in concat
+    );
+
     for (const auto &file: files) {
+        auto &h0 = heads[0];
         auto &s0 = subDirs[0];
+
         std::vector paths = {file};
         bool erroneousEntry = false;
 
-        if (!file.ends_with(s0.getExt())) {
+        if (!file.ends_with(h0.getExt())) {
             debugLog(
                 "Got erroneous dataset with anchor path '%s' that does not end on '%s'!\n",
                 file.c_str(), s0.getExt().c_str());
@@ -117,10 +132,12 @@ void Dataset::init() {
         }
 
         for (size_t s = 1; s < subDirs.size(); s++) {
+            auto &hS = heads[s];
             auto &sS = subDirs[s];
+
             std::string newFile(file);
-            newFile = replaceAll(newFile, s0.getSubdir(), sS.getSubdir());
-            newFile = replaceAll(newFile, s0.getExt(), sS.getExt());
+            newFile = replaceAll(newFile, s0, sS);
+            newFile = replaceAll(newFile, h0.getExt(), hS.getExt());
 
             if (!fs::exists(newFile)) {
                 debugLog("Could not find '%s'\n", newFile.c_str());
@@ -135,35 +152,106 @@ void Dataset::init() {
             debugLog("Got erroneous dataset with anchor path '%s'!\n",
                      file.c_str());
         } else {
-            dataset.push_back(std::move(paths));
+            entries.push_back(std::move(paths));
+        }
+    }
+
+    init();
+}
+
+Dataset::Dataset(std::string _rootDir, std::vector<Head> _heads,
+                 std::vector<std::vector<std::string> > _entries
+) : rootDir(std::move(_rootDir)), heads(std::move(_heads)), subDirs({}),
+    entries(std::move(_entries)), offset(0) {
+    initRootDir(rootDir);
+
+    if (entries.empty()) {
+        throw std::runtime_error(
+            "Cannot instantiate a dataset with an empty list of entires.");
+    }
+
+    const size_t lastSize = entries[0].size();
+    for (size_t i = 1; i < entries.size(); i++) {
+        if (entries[i].size() != lastSize) {
+            throw std::runtime_error("Entries are not of consistent size.");
+        }
+    }
+
+    init();
+}
+
+void Dataset::init() {
+    // Remove root directory, if necessary.
+    for (auto &item: entries) {
+        for (auto &subPath: item) {
+            if (subPath.size() >= rootDir.size()) {
+                if (std::memcmp(subPath.data(), rootDir.data(), rootDir.size()) == 0) {
+                    subPath.erase(0, rootDir.size());
+                }
+
+                if (const std::string path = std::format("{}{}", rootDir, subPath); !fs::exists(path)) {
+                    throw std::runtime_error(
+                        std::format("Path does not exist: '{}'.", path));
+                }
+            }
         }
     }
 
     auto rnd = std::default_random_engine{0};
-    std::ranges::shuffle(files, rnd);
+    std::ranges::shuffle(entries, rnd);
 }
 
-void Dataset::splitTrainValidationTest() {
+std::tuple<Dataset, Dataset, Dataset> Dataset::splitTrainValidationTest(
+    const float trainPercentage, const float validPercentage) {
+    if (trainPercentage <= 0.0f || validPercentage <= 0.0f) {
+        throw std::runtime_error(
+            "Train and validation set must contain more than 0% of elements.");
+    }
+
+    const int numTrain = static_cast<int>(std::round(trainPercentage * entries.size()));
+    const int numValid = static_cast<int>(std::round(validPercentage * entries.size()));
+
+    if (numTrain + numValid > static_cast<int>(entries.size())) {
+        throw std::runtime_error(
+            "Violated #train examples + #validation examples <= #all examples.");
+    }
+
+    const std::vector trainEntries(entries.begin(), entries.begin() + numTrain);
+    const std::vector validEntries(entries.begin() + numTrain, entries.begin() + numTrain + numValid);
+    const std::vector testEntries(entries.begin() + numTrain + numValid, entries.end());
+
+    return std::make_tuple<>(
+        Dataset(rootDir + "", std::vector(heads), trainEntries),
+        Dataset(rootDir + "", std::vector(heads), validEntries),
+        Dataset(rootDir + "", std::vector(heads), testEntries)
+    );
 }
 
 std::vector<std::vector<std::string> > Dataset::getNextBatch(
     const size_t batchSize) const {
     std::vector<std::vector<std::string> > batch;
+
     for (size_t i = offset; i < offset + batchSize; i++) {
-        batch.push_back(dataset[i % dataset.size()]);
+        std::vector<std::string> entry;
+
+        for (auto subPath: std::vector(entries[i % entries.size()])) {
+            entry.push_back(std::format("{}{}", rootDir, subPath));
+        }
+
+        batch.push_back(std::move(entry));
     }
 
     return batch;
-}
-
-std::vector<std::vector<std::string> > Dataset::getDataset() const {
-    return dataset;
 }
 
 std::string Dataset::getRootDir() const {
     return rootDir;
 }
 
-std::vector<Subdirectory> Dataset::getSubDirs() const {
-    return subDirs;
+std::vector<Head> Dataset::getHeads() const {
+    return heads;
+}
+
+std::vector<std::vector<std::string> > Dataset::getEntries() const {
+    return entries;
 }
