@@ -98,7 +98,8 @@ void initRootDir(std::string &rootDir) {
 
 Dataset::Dataset(std::string _rootDir, std::vector<Head> _heads,
                  std::vector<std::string> _subDirs,
-                 const pybind11::function &createDatasetFunction
+                 const pybind11::function &createDatasetFunction,
+                 bool isVirtualDataset
 ) : rootDir(std::move(_rootDir)), heads(std::move(_heads)),
     subDirs(std::move(_subDirs)), entries({}), offset(0) {
     initRootDir(rootDir);
@@ -108,7 +109,7 @@ Dataset::Dataset(std::string _rootDir, std::vector<Head> _heads,
             "Cannot instantiate a dataset with not subdirectories.");
     }
 
-    if (!fs::exists(rootDir) || existsEnvVar(INVALID_DS_ENV_VAR)) {
+    if (!fs::exists(rootDir) || (existsEnvVar(INVALID_DS_ENV_VAR) && isVirtualDataset)) {
         fs::remove_all(rootDir);
         createDatasetFunction();
     }

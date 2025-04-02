@@ -3,7 +3,16 @@ import os, shutil, json
 os.environ['TQDM_DISABLE'] = '1'
 import cv2
 import numpy as np
-import matplotlib.pyplot as plt
+import matplotlib.pyplot as plt 
+import logging
+logging.basicConfig(
+    level=logging.DEBUG,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler('autolabel.log'),
+        logging.StreamHandler()
+    ]
+)
 
 from stabilizer import Stabilizer
 from image_tracker import ImageTracker
@@ -19,7 +28,7 @@ def visualize_tracking(dir: str, video_name: str, video_path: str, video_tracker
     master_track = data['important_frames']
     
     if data.get('variant_frames') is not None:
-        print(f"Skipping {video_name} - variant frames already marked")
+        logging.debug(f"Skipping {video_name} - variant frames already marked")
         return
     
     variant_frames = []
@@ -31,7 +40,7 @@ def visualize_tracking(dir: str, video_name: str, video_path: str, video_tracker
     
     cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
-        print(f"Error: Could not open video {video_path}")
+        logging.debug(f"Error: Could not open video {video_path}")
         return
 
     window_name = "Sock Tracking"
@@ -43,7 +52,7 @@ def visualize_tracking(dir: str, video_name: str, video_path: str, video_tracker
             for obj_id, mask in masks.items():
                 if mask[y, x]:
                     deleted_obj_ids.add(obj_id)
-                    print(f"Deleted object {obj_id}")
+                    logging.debug(f"Deleted object {obj_id}")
                     display_frame()
                     break
     
@@ -129,10 +138,10 @@ def visualize_tracking(dir: str, video_name: str, video_path: str, video_tracker
             frame_idx = master_track[current_idx]['index']
             if frame_idx in variant_frames:
                 variant_frames.remove(frame_idx)
-                print(f"Removed frame {frame_idx} from variants")
+                logging.debug(f"Removed frame {frame_idx} from variants")
             else:
                 variant_frames.append(frame_idx)
-                print(f"Added frame {frame_idx} to variants")
+                logging.debug(f"Added frame {frame_idx} to variants")
             display_frame()
             
         elif key == ord('q'):
@@ -161,7 +170,7 @@ def visualize_tracking(dir: str, video_name: str, video_path: str, video_tracker
                 if str(obj_id) in frame['data']:
                     del frame['data'][str(obj_id)]
         data['num_objects'] -= len(deleted_obj_ids)
-        print(f"Removed {len(deleted_obj_ids)} objects from all frames")
+        logging.debug(f"Removed {len(deleted_obj_ids)} objects from all frames")
 
     # Save changes
     if variant_frames or deleted_obj_ids:
@@ -169,7 +178,7 @@ def visualize_tracking(dir: str, video_name: str, video_path: str, video_tracker
         json_path = video_tracker._get_json_file_path(dir, video_name)
         with open(json_path, 'w') as f:
             json.dump(data, f, indent=2)
-        print(f"Saved changes to {json_path}")
+        logging.debug(f"Saved changes to {json_path}")
                
             
 def extract_frames(temp_output_dir: str, cap, frame_indices: list[int], output_size: tuple[int, int]):
@@ -180,7 +189,7 @@ def extract_frames(temp_output_dir: str, cap, frame_indices: list[int], output_s
         cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
         ret, frame = cap.read()
         if not ret:
-            print("Failed to retrieve frame.")
+            logging.debug("Failed to retrieve frame.")
             return []
         
         frame = cv2.resize(frame, output_size, interpolation=cv2.INTER_AREA)
@@ -201,12 +210,12 @@ def process_video(
     
     cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
-        print(f"Error: Could not open video file {video_path}")
+        logging.debug(f"Error: Could not open video file {video_path}")
         return
     
     interesting_frames = stabilizer.get_interesting_frames(cap, skip_frames, image_tracker.target_size, diff_threshold, MAX_INTERESTING_FRAMES)
     track_frames = interesting_frames[::TRACK_SKIP]
-    print(f"Found {len(interesting_frames)} interesting frames and {len(track_frames)} track frames.")
+    logging.debug(f"Found {len(interesting_frames)} interesting frames and {len(track_frames)} track frames.")
     
     tracks = []
     obj_id_start = 0
@@ -215,12 +224,12 @@ def process_video(
         return list(range(obj_id_start, obj_id_start + len(interesting_frames)))
     
     for i, frame_idx in enumerate(track_frames):
-        print(f"Tracking frame {i + 1}/{len(track_frames)}")
+        logging.debug(f"Tracking frame {i + 1}/{len(track_frames)}")
         
         cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
         ret, frame = cap.read()
         if not ret:
-            print(f"Failed to read frame.")
+            logging.debug(f"Failed to read frame.")
             return
         
         masks = image_tracker._generate_masks(frame)
@@ -242,7 +251,7 @@ def process_video(
     cap.release()
     
     # Merge the dictionaries.
-    print("Merging and deduplicating tracks...")
+    logging.debug("Merging and deduplicating tracks...")
     master_track, num_objs = video_tracker.merge_into_master_track(len(interesting_frames), 4, obj_id_start, IOU_THRESH, tracks)
     video_tracker.export_master_track(interesting_frames, master_track, num_objs, output_dir, video_name)
 
@@ -265,7 +274,7 @@ def main() -> None:
     # Check if input directory exists
     if not os.path.exists(args.input_dir):
         os.makedirs(args.input_dir)
-        print(f"Created directory {args.input_dir} - please add your videos there and run again")
+        logging.debug(f"Created directory {args.input_dir} - please add your videos there and run again")
         return
     
     # Create output directory
@@ -299,9 +308,9 @@ def main() -> None:
     video_files = sorted(video_files)
     
     if video_files:
-        print(f"Processing the video files: {video_files}")
+        logging.debug(f"Processing the video files: {video_files}")
     else:
-        print(f"No videos found in {args.input_dir}")
+        logging.debug(f"No videos found in {args.input_dir}")
         return
     
     # Run visualization if requested
@@ -312,12 +321,12 @@ def main() -> None:
             json_path = os.path.join(args.output_dir, f"{video_name}.json")
             
             if os.path.exists(json_path):
-                print(f"\nVisualizing tracking results for: {video_file}")
+                logging.debug(f"\nVisualizing tracking results for: {video_file}")
                 visualize_tracking(args.output_dir, video_name, video_path, video_tracker, stabilizer)
     else:
         for video_file in video_files:
             video_path = os.path.join(args.input_dir, video_file)
-            print(f"\nProcessing video: {video_file}")
+            logging.debug(f"\nProcessing video: {video_file}")
             
             process_video(
                 video_path=video_path,
@@ -327,7 +336,7 @@ def main() -> None:
                 skip_frames=args.skip_frames,
             )
     
-    print("\nAll operations completed successfully!")
+    logging.debug("\nAll operations completed successfully!")
 
 
 if __name__ == "__main__":

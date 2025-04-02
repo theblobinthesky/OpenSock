@@ -38,7 +38,8 @@ class Dataset {
 public:
     Dataset(std::string _rootDir, std::vector<Head> _heads,
             std::vector<std::string> _subDirs,
-            const pybind11::function &createDatasetFunction
+            const pybind11::function &createDatasetFunction,
+            bool isVirtualDataset
     );
 
     Dataset(std::string _rootDir, std::vector<Head> _heads,

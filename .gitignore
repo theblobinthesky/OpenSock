@@ -16,3 +16,4 @@ dist
 .nox
 .pytest_cache
 cmake-build-debug
+*.log

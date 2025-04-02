@@ -58,9 +58,10 @@ class Dataset:
     @classmethod
     def from_subdirs(cls, root_dir: str, heads: List[Head],
                      sub_dirs: List[str],
-                     create_dataset_function: Callable) -> 'Dataset':
+                     create_dataset_function: Callable,
+                     is_virtual_dataset: bool=False) -> 'Dataset':
         native = m.Dataset(root_dir, [h._native for h in heads],
-                           sub_dirs, create_dataset_function)
+                           sub_dirs, create_dataset_function, is_virtual_dataset)
         return cls(native)
 
     @classmethod

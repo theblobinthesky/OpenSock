@@ -32,7 +32,8 @@ PYBIND11_MODULE(_core, m) {
     py::class_<Dataset>(m, "Dataset")
             .def(py::init<std::string, std::vector<Head>,
                 std::vector<std::string>,
-                const pybind11::function>())
+                const pybind11::function,
+                bool>())
 
             .def(py::init<std::string, std::vector<Head>,
                 std::vector<std::vector<std::string> > >())
