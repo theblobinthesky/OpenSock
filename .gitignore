@@ -5,7 +5,7 @@ venv
 data/sock_*
 *.jpg
 __pycache__
-temp
+temp*
 flux
 wandb
 *.gz

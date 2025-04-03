@@ -1,10 +1,11 @@
 + Dataloader accepts Custom Datasets
 + Dataset train/valid split and train/valid/test split
 - Dataloader is faster (again); remove the performance regression
-- Autolabel pipeline runs through the entire way
++ Autolabel pipeline runs through the entire way
 - Autolabel pipeline is robust to long occlusions without movement
-- Autolabel pipeline is robust to hidden aruco marker in some frames
-- Autolabel pipeline is now reusable for different datasets
++ Autolabel pipeline is robust to hidden aruco marker in some frames
++ Autolabel pipeline is now reusable for different datasets
++ Autolabel has new visualization with a display of tracks
 - Dataset API supports data processing function before passing to the jax code (on the cpu maybe??)
 - Premade data processing functions: Basic augmentations, DINOv2 embedding (on the cpu maybe??)
 + Fix invalidate files bug where it deletes the actual datasets!
