@@ -2,7 +2,7 @@ import jax, optax, pickle, os
 from tqdm import tqdm
 import jax.numpy as jnp
 from config import TrainConfig, DataConfig, ModelConfig
-# from data import Dataset
+from native_dataloader import Dataset, DataLoader
 from logger import Logger, MockLogger
 from typing import Callable
 from functools import partial
@@ -28,8 +28,8 @@ def train_model(purpose: str,
                 tconfig: TrainConfig,
                 dconfig: DataConfig,
                 mconfig: ModelConfig,
-                train_dataset_tf,
-                valid_dataset_tf,
+                train_dataset: Dataset,
+                valid_dataset: Dataset,
                 params: dict,
                 loss_fn: Callable[[dict[str, jnp.ndarray], dict[str, jnp.ndarray]], jnp.ndarray],
                 validation_fn: Callable[[dict[str, jnp.ndarray], dict[str, jnp.ndarray]], jnp.ndarray]
@@ -38,45 +38,40 @@ def train_model(purpose: str,
     opt_state = optim.init(params)
     last_valid_loss = float('inf')
 
+    train_dl = DataLoader(train_dataset, tconfig.batch_size, tconfig.train_dl_num_threads, tconfig.train_dl_prefetch_size)
+    valid_dl = DataLoader(valid_dataset, tconfig.batch_size, tconfig.valid_dl_num_threads, tconfig.valid_dl_prefetch_size)
+
     logger = Logger(purpose, dconfig, tconfig, mconfig) if 'LOG' in os.environ else MockLogger()
 
     for epoch in range(tconfig.num_epochs):
-        # train_dataset = iter(train_dataset_tf)
-        # valid_dataset = iter(valid_dataset_tf)
-
         epoch_loss = 0.0
-        tqdm_iter = tqdm(range(100))#len(train_dataset_tf)))
+        tqdm_iter = tqdm(len(train_dl))
         for _ in tqdm_iter:
-            # image, (bboxes, classes) = next(train_dataset)
-            # batch = {"img": image, "bboxes": bboxes, "classes": classes}
-            # batch = {k: jnp.array(v.numpy()) for k, v in batch.items()}
-            # print({k: v.shape for k, v in batch.items()})
-            batch = {
-                "img": jnp.zeros((1, 64, 64, 3)),
-                "bboxes": jnp.zeros((1, 30, 4)),
-                "classes": jnp.zeros((1, 30))
-            }
+            batch = train_dl.get_next_batch()
+            # batch = {
+            #     "img": jnp.zeros((1, 64, 64, 3)),
+            #     "bboxes": jnp.zeros((1, 30, 4)),
+            #     "classes": jnp.zeros((1, 30))
+            # }
 
             loss, params, opt_state = _train_step(params, batch, opt_state, optim, loss_fn)
 
             epoch_loss += loss
             tqdm_iter.set_description(f"Training loss: {loss:.4f}")
-        epoch_loss /= len(train_dataset_tf)
+        epoch_loss /= len(train_dl)
 
-        # valid_metrics = None
-        # tqdm_iter = tqdm(range(len(valid_dataset_tf)))
-        # for _ in tqdm(range(len(valid_dataset_tf))):
-        #     image, (bboxes, classes) = next(valid_dataset)
-        #     batch = {"img": image, "bboxes": bboxes, "classes": classes}
-        #     batch = {k: jnp.array(v.numpy()) for k, v in batch.items()}
+        valid_metrics = None
+        tqdm_iter = tqdm(range(len(valid_dl)))
+        for _ in tqdm(range(len(valid_dl))):
+            batch = valid_dl.get_next_batch()
 
-        #     metrics = validation_fn(params, batch)
-        #     if valid_metrics is None: valid_metrics = Counter(metrics)
-        #     else: valid_metrics += metrics
+            metrics = validation_fn(params, batch)
+            if valid_metrics is None: valid_metrics = Counter(metrics)
+            else: valid_metrics += metrics
 
-        #     tqdm_iter.set_description(f"Validation loss: {metrics['loss']:.4f}")
+            tqdm_iter.set_description(f"Validation loss: {metrics['loss']:.4f}")
 
-        valid_metrics = {key: value / len(valid_dataset_tf) for key, value in valid_metrics.items()}
+        valid_metrics = {key: value / len(valid_dl) for key, value in valid_metrics.items()}
         valid_loss = valid_metrics['loss']
 
         if (improv := last_valid_loss > valid_loss):

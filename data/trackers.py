@@ -118,11 +118,20 @@ class Stabilizer:
                     if curr <= idx <= nxt:
                         t = float(idx - curr) / (nxt - curr)
                         existing_dict[idx] = (1.0 - t) * ten_curr + t * ten_next
+
+            min_found_frame = np.min(np.array(found_frames))
+            max_found_frame = np.max(np.array(found_frames))
+            for idx in interesting_frames: 
+                if idx < min_found_frame:
+                    existing_dict[idx] = existing_dict[min_found_frame]
+                elif idx > max_found_frame:
+                    existing_dict[idx] = existing_dict[max_found_frame]
+                
         
         interpolate_all(primary_homographies)
         interpolate_all(primary_corners_dict)
 
-        if not list(secondary_midpoints.values()):
+        if len(list(secondary_midpoints.values())) == 0:
             print("No secondary marker detected.")
             return [primary_homographies[idx] for idx in sorted(primary_homographies.keys())]
 
@@ -144,14 +153,14 @@ class Stabilizer:
             H = self.compute_floor_plane_transform(primary_corners, secondary_midpoint, transformed_avg_midpoint)
             corrected_homographies[frame_idx] = H
 
-        # TODO: Remove this quick fix later.
+        # This quick fix assumes the camera is stationary.
         avg_homography = np.zeros((3, 3))
         for H in corrected_homographies.values():
             avg_homography += H
         avg_homography /= len(corrected_homographies)
 
         # [corrected_homographies[idx] for idx in sorted(corrected_homographies.keys())]
-        return [avg_homography for _ in sorted(corrected_homographies.keys())]
+        return [avg_homography for _ in corrected_homographies.keys()]
 
 
 def apply_homography(image: np.ndarray, homography: np.ndarray, size: tuple[int, int]) -> np.ndarray:
@@ -327,8 +336,41 @@ class VideoTracker:
         sorted_ids = sorted(unique_ids)
         id_map = {old_id: new_id for new_id, old_id in enumerate(sorted_ids)}
         master_track = [{id_map[old_id]: mask for old_id, mask in frame.items()} for frame in master_track]
+
+        # Convert to contours.
+        for frame in master_track:
+            for track_id, mask in list(frame.items()):
+                mask_uint8 = mask.astype(np.uint8).squeeze(0)
+                contours, _ = cv2.findContours(mask_uint8, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                if contours:
+                    largest_contour = max(contours, key=cv2.contourArea)
+                    area = cv2.contourArea(largest_contour)
+                    largest_contour = cv2.approxPolyDP(largest_contour, 1e-3 * cv2.arcLength(largest_contour, True), True)
+                    segmentation = largest_contour.reshape(-1, 2).flatten().tolist()
+                    x, y, w, h = cv2.boundingRect(largest_contour)
+                else:
+                    area = 0.0
+                    segmentation = []
+                    x, y, w, h = 0, 0, 0, 0
+
+
+                frame[track_id] = {
+                    "segmentation": segmentation,
+                    "area": area,
+                    "bbox": [x, y, w, h],
+                    "is_occluded": False
+                }
+
                     
         return master_track, len(sorted_ids)
+
+    def mark_occlusions(self, master_track: list):
+        for frame in master_track:
+            for track_id, data in list(frame.items()):
+                if len(data["segmentation"]) == 0:
+                    data["is_occluded"] = True
+
+        return master_track
 
     def _get_json_file_path(self, dir: str, filename: str):
         return f"{dir}/{filename}.json"
@@ -337,21 +379,12 @@ class VideoTracker:
         important_frames = []
         for frame_idx, frame, homography in zip(important_frame_indices, master_track, homographies):
             frame_data = {}
-            for track_id, mask in frame.items():
-                mask_uint8 = mask.astype(np.uint8).squeeze(0)
-                contours, _ = cv2.findContours(mask_uint8, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-                if contours:
-                    largest_contour = max(contours, key=cv2.contourArea)
-                    largest_contour = cv2.approxPolyDP(largest_contour, 1e-3 * cv2.arcLength(largest_contour, True), True)
-                    segmentation = largest_contour.reshape(-1, 2).flatten().tolist()
-                    x, y, w, h = cv2.boundingRect(largest_contour)
-                else:
-                    segmentation = []
-                    x, y, w, h = 0, 0, 0, 0
-                frame_data[str(track_id)] = {
-                    "segmentation": [segmentation],
-                    "bbox": [x, y, w, h],
-                    "area": float(np.sum(mask)),
+            for track_id, data in frame.items():
+               frame_data[str(track_id)] = {
+                    "segmentation": [data["segmentation"]],
+                    "bbox": data["bbox"],
+                    "area": data["area"],
+                    "is_occluded": data["is_occluded"]
                 }
             important_frames.append({
                 'index': frame_idx,

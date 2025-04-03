@@ -1,7 +1,7 @@
 import jax, jax.nn as nn, jax.numpy as jnp, jax.lax as lax
 import jax.nn.initializers as init
 from config import TrainConfig, DataConfig, ModelConfig
-from data import SimpleYOLOPreprocessor
+from data import get_obj_detection_dataset
 from train import train_model
 from utils import non_maximum_supression, average_precision
 from utils import quality_focal_loss, distribution_focal_loss, general_iou_loss
@@ -279,17 +279,12 @@ if __name__ == "__main__":
     if True: 
         oconfig = mconfig.object_detector
 
-        ds_preproc = SimpleYOLOPreprocessor(
-            videos_dir="../data/sock_videos",
-            annotations_dir="../data/sock_video_results",
-            output_dir="../data/temp/yolo_ds"
+        dataset = get_obj_detection_dataset(dconfig)
+        train_dataset, valid_dataset, test_dataset = dataset.split_train_validation_test(
+            train_percentage=0.8, 
+            valid_percentage=0.02
         )
         
-        train_dataset, valid_dataset = ds_preproc.create_train_valid_datasets(
-            batch_size=tconfig.batch_size, 
-            img_size=(64, 64),
-            valid_split=0.02
-        )
         params = init_yolo(mconfig.object_detector)
 
         width_min, width_max = oconfig['bbox_width_range']
@@ -306,7 +301,7 @@ if __name__ == "__main__":
             return jnp.astype(floor, jnp.uint32), fract
 
         def get_loss_from_scales(batch: jnp.ndarray, scales: jnp.ndarray) -> jnp.ndarray:
-            bboxes, classes = batch['bboxes'], batch['classes']
+            images, bboxes, masks, classes = batch['images'], batch['bboxes'], batch['masks'], batch['classes']
             num_classes = oconfig['num_classes']
 
             total_class_loss = jnp.zeros(())

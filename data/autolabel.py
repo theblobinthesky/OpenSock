@@ -4,6 +4,7 @@ import cv2
 import numpy as np
 import logging
 import time
+from config import BaseConfig
 
 logging.basicConfig(
     level=logging.DEBUG,
@@ -152,12 +153,18 @@ def process_video(video_path, output_dir, video_tracker, diff_threshold, skip_fr
         end = time.time()
         logging.debug(f"Tracked frame {i + 1}/{len(track_frames)}. {end - begin:.4f}s")
 
+
     cap.release()
 
     begin = time.time()
     master_track, num_objs = video_tracker.merge_into_master_track(len(interesting_frames), 4, obj_id_start, iou_thresh, tracks)
     end = time.time()
     logging.debug(f"Merged and deduplicated tracks. {end - begin:.4f}s")
+
+    begin = time.time()
+    video_tracker.mark_occlusions(master_track)
+    end = time.time()
+    logging.debug(f". {end - begin:.4f}s")
 
     begin = time.time()
     video_tracker.export_master_track(interesting_frames, homographies, master_track, num_objs, output_dir, video_name)
@@ -183,39 +190,25 @@ def _setup_sam2_model(sam2_checkpoint: str, sam2_config: str, device):
             f.write(requests.get(url).content)
 
     sam2 = build_sam2(f"/{os.path.abspath(sam2_config)}", sam2_checkpoint, device=device, apply_postprocessing=False)
-    sam2_video = build_sam2_video_predictor(f"/{os.path.abspath(sam2_config)}", sam2_checkpoint)
+    sam2_video = build_sam2_video_predictor(f"/{os.path.abspath(sam2_config)}", sam2_checkpoint, vos_optimized=False) # TODO: Bug. vos_optimized=True seems to not work for now.
     return sam2, sam2_video
 
+
 def label_automatically(
-    imagenet_class: int,
     classifier,
     classifier_transform,
-    input_dir: str,
-    output_dir: str,
-    diff_threshold=0.04,
-    skip_frames=5,
-    image_size=(1080, 1920),
-    output_warped_size=(540 // 2, 960 // 2),
-    aruco_dict_type=cv2.aruco.DICT_6X6_250,
-    aruco_marker_id=5,
-    secondary_aruco_marker_id=10,
-    marker_size_mm=80.0,
-    sam2_checkpoint="sam2.1_hiera_large.pt",
-    sam2_config="sam2.1_hiera_l.yaml",
-    track_skip=40,
-    max_interesting_frames=180,
-    iou_thresh=0.9
+    config: BaseConfig
 ):
-    if not os.path.exists(input_dir):
-        os.makedirs(input_dir)
-        logging.debug(f"Created directory {input_dir} - please add your videos there and run again")
+    if not os.path.exists(config.input_dir):
+        os.makedirs(config.input_dir)
+        logging.debug(f"Created directory {config.input_dir} - please add your videos there and run again")
         return
-    os.makedirs(output_dir, exist_ok=True)
+    os.makedirs(config.output_dir, exist_ok=True)
 
-    image_shape_gcd = np.gcd(image_size[0], image_size[1])
-    target_shape_gcd = np.gcd(output_warped_size[0], output_warped_size[1])
-    norm_image_shape = np.array(image_size, np.uint32) / image_shape_gcd
-    norm_target_shape = np.array(output_warped_size, np.uint32) / target_shape_gcd
+    image_shape_gcd = np.gcd(config.image_size[0], config.image_size[1])
+    target_shape_gcd = np.gcd(config.output_warped_size[0], config.output_warped_size[1])
+    norm_image_shape = np.array(config.image_size, np.uint32) / image_shape_gcd
+    norm_target_shape = np.array(config.output_warped_size, np.uint32) / target_shape_gcd
 
     if np.any(norm_image_shape != norm_target_shape):
         raise ValueError("The image shape does not have the same aspect ratio as the target shape.")
@@ -223,21 +216,21 @@ def label_automatically(
 
     import torch
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    sam2, sam2_video = _setup_sam2_model(sam2_checkpoint, sam2_config, device)
+    sam2, sam2_video = _setup_sam2_model(config.sam2_checkpoint, config.sam2_config, device)
 
     stabilizer = Stabilizer(
-        aruco_dict_type=aruco_dict_type,
-        aruco_marker_id=aruco_marker_id,
-        secondary_aruco_marker_id=secondary_aruco_marker_id,
-        output_warped_size=output_warped_size,
-        marker_size_mm=marker_size_mm
+        aruco_dict_type=config.aruco_dict_type,
+        aruco_marker_id=config.aruco_marker_id,
+        secondary_aruco_marker_id=config.secondary_aruco_marker_id,
+        output_warped_size=config.output_warped_size,
+        marker_size_mm=config.marker_size_mm
     )
 
     image_tracker = ImageTracker(
-        target_size=output_warped_size,
+        target_size=config.output_warped_size,
         stabilizer=stabilizer,
         sam2=sam2,
-        imagenet_class=imagenet_class,
+        imagenet_class=config.imagenet_class,
         classifier=classifier,
         classifier_transform=classifier_transform
     )
@@ -245,21 +238,21 @@ def label_automatically(
     video_tracker = VideoTracker(image_tracker, sam2_video=sam2_video)
 
     video_files = sorted(
-        [f for f in os.listdir(input_dir) if f.lower().endswith(('.mp4', '.avi', '.mov', '.mkv'))]
+        [f for f in os.listdir(config.input_dir) if f.lower().endswith(('.mp4', '.avi', '.mov', '.mkv'))]
     )
 
-    # video_files = video_files[:1] # TODO: revert
+    # video_files = video_files[1:2] # TODO: revert
 
     if not video_files:
-        logging.debug(f"No videos found in {input_dir}")
+        logging.debug(f"No videos found in {config.input_dir}")
         return
 
     for video_file in video_files:
-        video_path = os.path.join(input_dir, video_file)
+        video_path = os.path.join(config.input_dir, video_file)
         logging.debug(f"Processing video: {video_file}")
         process_video(
-            video_path, output_dir, video_tracker,
-            diff_threshold, skip_frames, track_skip, max_interesting_frames, iou_thresh,
-            image_size
+            video_path, config.output_dir, video_tracker,
+            config.diff_threshold, config.skip_frames, config.track_skip, config.max_interesting_frames, config.iou_thresh,
+            config.image_size
         )
     logging.debug("All operations completed successfully!")

@@ -52,17 +52,19 @@ class Head:
 
 
 class Dataset:
-    def __init__(self, native_dataset):
+    def __init__(self, post_process_fn, native_dataset):
+        self.post_process_fn = post_process_fn
         self._native = native_dataset
 
     @classmethod
     def from_subdirs(cls, root_dir: str, heads: List[Head],
                      sub_dirs: List[str],
                      create_dataset_function: Callable,
+                     post_process_fn: Callable[[dict[str, jnp.ndarray]], dict[str, jnp.ndarray]] = None,
                      is_virtual_dataset: bool=False) -> 'Dataset':
         native = m.Dataset(root_dir, [h._native for h in heads],
                            sub_dirs, create_dataset_function, is_virtual_dataset)
-        return cls(native)
+        return cls(post_process_fn, native)
 
     @classmethod
     def from_entries(cls, root_dir: str, heads: List[Head],
@@ -82,6 +84,10 @@ class Dataset:
     def get_next_batch(self, batch_size: int) -> List[List[str]]:
         """Return the next batch of file entries."""
         return self._native.getNextBatch(batch_size)
+
+    @property
+    def post_process_fn(self) -> Callable:
+        return self.post_process_fn
 
     @property
     def root_dir(self) -> str:
@@ -149,6 +155,7 @@ class DataLoader:
                  prefetch_size: int = 4):
         """Wrap native DataLoader and ensure Jax GPU is initialized."""
         JaxSingleton()
+        self.dataset = dataset
         self._native = m.DataLoader(dataset._native, batch_size, num_threads, prefetch_size)
 
     def __len__(self) -> int:
@@ -162,4 +169,9 @@ class DataLoader:
             return jax.dlpack.from_dlpack(DLManagedTensorWrapper(x))
 
         batch = self._native.getNextBatch()
-        return {key: from_dlpack(x) for key, x in batch.items()}
+        batch = {key: from_dlpack(x) for key, x in batch.items()}
+
+        if self.dataset is not None:
+            batch = self.dataset.post_process_fn(batch)
+
+        return batch
