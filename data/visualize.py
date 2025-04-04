@@ -9,6 +9,7 @@ from PyQt5.QtCore import Qt, QTimer, QRect, pyqtSignal, QPoint
 from PyQt5.QtGui import QImage, QPixmap, QPainter, QColor, QPen, QKeySequence, QPolygon
 from trackers import Stabilizer, ImageTracker, VideoTracker, apply_homography
 from config import BaseConfig
+from collections import deque
 
 logging.basicConfig(
     level=logging.DEBUG,
@@ -96,7 +97,7 @@ class FrameViewer(QWidget):
         painter.drawText(status_rect, Qt.AlignLeft | Qt.AlignVCenter, status)
         
         # Draw instructions with background
-        instructions = "j: mark variant | click object: delete | right: play forward | left: play backward | space: pause | q: quit"
+        instructions = "j: mark variant | u: undo deletion | click object: delete | right: play forward | left: play backward | space: pause | q: quit"
         instr_rect = QRect(10, 50, self.width() - 20, 25)
         painter.fillRect(instr_rect, QColor(0, 0, 0, 180))
         painter.setPen(QColor(0, 255, 0))
@@ -223,6 +224,9 @@ class TrackingVisualizer(QMainWindow):
         self.master_track = data['important_frames']
         self.variant_frames = data.get('variant_frames', [])
         self.deleted_obj_ids = set()
+        # Store deletion history for undo
+        self.deletion_history = deque(maxlen=50)  # Limit history to 50 items
+        
         self.current_idx = 0
         self.playing = False
         self.playing_backward = False
@@ -274,6 +278,7 @@ class TrackingVisualizer(QMainWindow):
         QShortcut(QKeySequence(Qt.Key_Right), self, self.start_playing_forward)
         QShortcut(QKeySequence(Qt.Key_Left), self, self.start_playing_backward)
         QShortcut(QKeySequence(Qt.Key_Space), self, self.stop_playing)
+        QShortcut(QKeySequence(Qt.Key_U), self, self.undo_deletion)  # Add undo shortcut
     
     def highlight_object(self, obj_id):
         self.highlighted_obj_id = obj_id
@@ -336,10 +341,29 @@ class TrackingVisualizer(QMainWindow):
         self.display_current_frame()
     
     def delete_object(self, obj_id):
+        # Add to deletion history before deleting
+        self.deletion_history.append(obj_id)
         self.deleted_obj_ids.add(obj_id)
         self.highlighted_obj_id = None  # Clear highlight after deletion
         logging.debug(f"Deleted object {obj_id}")
         self.display_current_frame()
+    
+    def undo_deletion(self):
+        if not self.deletion_history:
+            logging.debug("Nothing to undo")
+            return
+            
+        # Get the last deleted object ID
+        obj_id = self.deletion_history.pop()
+        
+        # Remove it from the deleted set
+        if obj_id in self.deleted_obj_ids:
+            self.deleted_obj_ids.remove(obj_id)
+            logging.debug(f"Undid deletion of object {obj_id}")
+            
+            # Highlight the restored object
+            self.highlighted_obj_id = obj_id
+            self.display_current_frame()
     
     def play_next_frame(self):
         if self.playing and self.current_idx < len(self.master_track) - 1:
@@ -415,7 +439,8 @@ def visualize_all(config: BaseConfig):
         sam2=None,
         imagenet_class=None,
         classifier=None,
-        classifier_transform=None
+        classifier_transform=None,
+        config=None
     )
 
     video_tracker = VideoTracker(image_tracker, sam2_video=None)
@@ -426,6 +451,8 @@ def visualize_all(config: BaseConfig):
     video_files = sorted(
         [f for f in os.listdir(input_dir) if f.lower().endswith(('.mp4', '.avi', '.mov', '.mkv'))]
     )
+
+    # video_files = video_files[:2]
 
     app = QApplication([])
     

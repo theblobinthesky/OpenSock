@@ -107,16 +107,13 @@ def process_video(video_path, output_dir, video_tracker, diff_threshold, skip_fr
     interesting_frames, original_size = get_interesting_frames(cap, skip_frames, image_tracker.target_size, diff_threshold, max_interesting_frames)
     if np.any(original_size != large_size):
         raise ValueError(f"The image size {original_size} is not the expected large size {large_size}.")
-
-    track_frames = interesting_frames[::track_skip]
     end = time.time()
-    logging.debug(f"Found {len(interesting_frames)} interesting frames and {len(track_frames)} track frames. {end - begin:.4f}s")
+    logging.debug(f"Found {len(interesting_frames)} interesting frames. {end - begin:.4f}s")
 
     # TODO: Make sure the aspect ratio doesn't change.
 
     begin = time.time()
     homographies = stabilizer.stabilize_frames(cap, interesting_frames)
-    track_homographies = homographies[::track_skip]
     end = time.time()
     logging.debug(f"Stabilized frames. {end - begin:.4f}s")
 
@@ -128,7 +125,13 @@ def process_video(video_path, output_dir, video_tracker, diff_threshold, skip_fr
         ids = list(range(obj_id_start, obj_id_start + len(interesting_frames)))
         return ids
 
-    for i, (frame_idx, homography) in enumerate(zip(track_frames, track_homographies)):
+    num_track_frames = len(interesting_frames) // track_skip
+    track_frame_idx = 0
+    frame_hom_pairs = list(zip(interesting_frames, homographies))
+    np.random.shuffle(frame_hom_pairs)
+    for frame_idx, homography in frame_hom_pairs:
+        if track_frame_idx >= num_track_frames: break
+
         begin = time.time()
         cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
         ret, frame = cap.read()
@@ -136,7 +139,11 @@ def process_video(video_path, output_dir, video_tracker, diff_threshold, skip_fr
             logging.debug("Failed to read frame.")
             return
 
+        frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         masks = image_tracker.process_image(frame, homography)
+        if len(masks) == 0:
+            logging.debug("Failed to find socks. Skipping the frame.")
+            continue
 
         frame_indices = list(reversed([(i, H) for (i, H) in zip(interesting_frames, homographies) if i <= frame_idx]))
         extract_frames(TEMP_DIR, cap, frame_indices, image_tracker.target_size)
@@ -151,7 +158,8 @@ def process_video(video_path, output_dir, video_tracker, diff_threshold, skip_fr
         obj_id_start += len(interesting_frames)
 
         end = time.time()
-        logging.debug(f"Tracked frame {i + 1}/{len(track_frames)}. {end - begin:.4f}s")
+        track_frame_idx += 1
+        logging.debug(f"Tracked frame {track_frame_idx}/{num_track_frames}. {end - begin:.4f}s")
 
 
     cap.release()
@@ -232,7 +240,8 @@ def label_automatically(
         sam2=sam2,
         imagenet_class=config.imagenet_class,
         classifier=classifier,
-        classifier_transform=classifier_transform
+        classifier_transform=classifier_transform,
+        config=config
     )
 
     video_tracker = VideoTracker(image_tracker, sam2_video=sam2_video)
@@ -241,7 +250,7 @@ def label_automatically(
         [f for f in os.listdir(config.input_dir) if f.lower().endswith(('.mp4', '.avi', '.mov', '.mkv'))]
     )
 
-    # video_files = video_files[1:2] # TODO: revert
+    # video_files = video_files[:2] # TODO: revert
 
     if not video_files:
         logging.debug(f"No videos found in {config.input_dir}")

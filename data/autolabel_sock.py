@@ -1,20 +1,15 @@
 import os
 os.environ['TQDM_DISABLE'] = '1'
 from config import BaseConfig
-from torchvision import models, transforms
-from torchvision.models import EfficientNet_V2_L_Weights
-
+import timm
 
 if __name__ == "__main__":
-    model = models.efficientnet_v2_l(weights=EfficientNet_V2_L_Weights.DEFAULT)
+    model = timm.create_model('eva02_large_patch14_448.mim_m38m_ft_in22k_in1k', pretrained=True)
+    model = model.to('cuda')
     model.eval()
-    model.to('cuda')
 
-    transform = transforms.Compose([
-        transforms.Resize(480, interpolation=transforms.InterpolationMode.BICUBIC),
-        transforms.ToTensor(),
-        transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5]),
-    ])
+    data_config = timm.data.resolve_model_data_config(model)
+    transforms = timm.data.create_transform(**data_config, is_training=False)
 
     config = BaseConfig(
         imagenet_class = 806,
@@ -31,6 +26,6 @@ if __name__ == "__main__":
         import autolabel
         autolabel.label_automatically(
             classifier=model,
-            classifier_transform=transform,
+            classifier_transform=transforms,
             config=config
         )

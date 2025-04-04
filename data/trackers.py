@@ -5,6 +5,8 @@ import json
 from typing import Dict, List, Tuple, Optional
 from PIL import Image
 from sam2.automatic_mask_generator import SAM2AutomaticMaskGenerator
+from config import BaseConfig
+import logging
 
 
 class Stabilizer:
@@ -178,7 +180,8 @@ class ImageTracker:
         sam2,
         imagenet_class: int,
         classifier,
-        classifier_transform
+        classifier_transform,
+        config: BaseConfig
     ):
         self.target_size = target_size
         self.stabilizer = stabilizer
@@ -187,6 +190,7 @@ class ImageTracker:
         self.imagenet_class = imagenet_class
         self.classifier = classifier
         self.transform = classifier_transform
+        self.config = config
         
     def _load_image(self, image_path: str) -> np.ndarray:
         image = cv2.imread(image_path)
@@ -223,7 +227,6 @@ class ImageTracker:
         return sock_masks
     
     def _classify_socks(self, image: np.ndarray, masks: List[Dict]) -> List[Dict]:
-        confidence_threshold = 0.01
         confirmed_socks = []
         
         for mask in masks:
@@ -240,20 +243,27 @@ class ImageTracker:
             min_x, max_x = np.min(x_indices), np.max(x_indices)
             min_y, min_x = max(0, min_y - padding), max(0, min_x - padding)
             max_y, max_x = min(image.shape[0], max_y + padding), min(image.shape[1], max_x + padding)
-            roi = image[min_y:max_y, min_x:max_x].copy()
-            roi_pil = Image.fromarray(roi)
-            input_tensor = self.transform(roi_pil).unsqueeze(0).to(self.device)
             
+            image_roi = image[min_y:max_y, min_x:max_x].copy()
+            mask_roi = mask_binary[min_y:max_y, min_x:max_x].copy()
+            image_roi = cv2.convertScaleAbs(image_roi, alpha=self.config.mask_contrast_control, beta=self.config.mask_brightness_control)
+            roi = image_roi * mask_roi[..., None]
+
+            roi = cv2.resize(roi, (448, 448)) * 255
+            roi = Image.fromarray(roi)
+            input_tensor = self.transform(roi).unsqueeze(0).float().to(self.device)
+
             with torch.no_grad():
                 output = self.classifier(input_tensor)
                 probabilities = torch.nn.functional.softmax(output[0], dim=0)
-                
+
             # Check if it's classified as a sock with enough confidence
-            if probabilities[self.imagenet_class] >= confidence_threshold:
+            if probabilities[self.imagenet_class] >= self.config.classifier_confidence_threshold:
                 mask['class_confidence'] = float(probabilities[self.imagenet_class])
                 confirmed_socks.append(mask)
-        
+
         return confirmed_socks
+
 
     def process_image(self, image: np.ndarray, homography: np.ndarray) -> np.ndarray:
         image = apply_homography(image, homography, self.target_size)
@@ -401,13 +411,13 @@ class VideoTracker:
         with open(self._get_json_file_path(dir, filename), 'w') as f:
             json.dump(export_data, f, indent=2)
             
-        print(f"Master track exported to {filename}")
+        logging.debug(f"Master track exported to {filename}")
 
 
     def import_master_track(self, dir: str, filename: str):
         with open(self._get_json_file_path(dir, filename), 'r') as f:
             data = json.load(f)
 
-        print(f"Master track imported from {filename}")
+        logging.debug(f"Master track imported from {filename}")
 
         return data

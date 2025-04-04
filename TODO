@@ -6,8 +6,14 @@
 + Autolabel pipeline is robust to hidden aruco marker in some frames
 + Autolabel pipeline is now reusable for different datasets
 + Autolabel has new visualization with a display of tracks
-+ Autolabel detects and marks occluded frames automatically
 - Dataset supports data processing function before passing to the jax code (on the cpu maybe??)
 - Premade data processing functions: Basic augmentations, DINOv2 embedding (on the cpu maybe??)
 + Fix invalidate files bug where it deletes the actual datasets!
 - Refactor object detection code to use native dataloader
+- Autolabel detects and marks occluded frames automatically
+- Autolabel pipeline stabilizer simultaneously optimizes for keeping the second marker quadratical
+- Autolabel pipeline video tracker merging finds and removes: 
+    a inside b for mt. thresh frames -> remove a
+    a on lt. thresh frames -> remove a
+- Autolabel pipeline image tracker uses classification model and improves brightness+contrast to make detections more accurate
+- Autolabel pipeline detects frames using some heuristic that is more useful than what we currently use

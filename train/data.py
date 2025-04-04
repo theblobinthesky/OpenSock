@@ -47,7 +47,8 @@ def get_obj_detection_dataset(config: DataConfig) -> Dataset:
                 labels = []
                 for _, obj_data in frame_data.items():
                     x, y, w, h = obj_data['bbox']
-                    labels.append([x, y, w, h, 1.0, 0.0])
+                    mask = 0.0 if obj_data['is_occluded'] else 1.0
+                    labels.append([x, y, w, h, mask, 0.0])
 
                 for _ in range(config.max_objs_per_image - len(labels)):
                     labels.append([0, 0, 0, 0, 0.0, 0.0])

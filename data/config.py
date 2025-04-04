@@ -19,3 +19,6 @@ class BaseConfig:
     track_skip: int = 40
     max_interesting_frames: int = 180
     iou_thresh: float = 0.9
+    classifier_confidence_threshold: float = 0.01
+    mask_contrast_control = 1.5     # contrast control (1.0-3.0)
+    mask_brightness_control = 20    # brightness control (0-100)
