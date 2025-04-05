@@ -60,7 +60,7 @@ std::string Head::getDictName() const {
     return dictName;
 }
 
-std::vector<int> Head::getShape() const {
+const std::vector<int> &Head::getShape() const {
     return shape;
 }
 
@@ -99,10 +99,11 @@ void initRootDir(std::string &rootDir) {
 Dataset::Dataset(std::string _rootDir, std::vector<Head> _heads,
                  std::vector<std::string> _subDirs,
                  const pybind11::function &createDatasetFunction,
-                 bool isVirtualDataset
-) : rootDir(std::move(_rootDir)), heads(std::move(_heads)),
-    subDirs(std::move(_subDirs)), entries({}), offset(0) {
+                 const bool isVirtualDataset
+) : rootDir(std::move(_rootDir)), heads(std::move(_heads)), subDirs(std::move(_subDirs)), entries({}), offset(0) {
     initRootDir(rootDir);
+
+    // postProcessFunction("test");
 
     if (subDirs.empty()) {
         throw std::runtime_error(
@@ -162,13 +163,12 @@ Dataset::Dataset(std::string _rootDir, std::vector<Head> _heads,
 
 Dataset::Dataset(std::string _rootDir, std::vector<Head> _heads,
                  std::vector<std::vector<std::string> > _entries
-) : rootDir(std::move(_rootDir)), heads(std::move(_heads)), subDirs({}),
-    entries(std::move(_entries)), offset(0) {
+) : rootDir(std::move(_rootDir)), heads(std::move(_heads)), subDirs({}), entries(std::move(_entries)), offset(0) {
     initRootDir(rootDir);
 
     if (entries.empty()) {
         throw std::runtime_error(
-            "Cannot instantiate a dataset with an empty list of entires.");
+            "Cannot instantiate a dataset with an empty list of entries.");
     }
 
     const size_t lastSize = entries[0].size();
@@ -180,6 +180,7 @@ Dataset::Dataset(std::string _rootDir, std::vector<Head> _heads,
 
     init();
 }
+
 
 void Dataset::init() {
     // Remove root directory, if necessary.

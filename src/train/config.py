@@ -1,19 +1,30 @@
 
 class TrainConfig:
     def __init__(self):
-        self.lr: float = 1e-3
-        self.num_epochs: int = 10
-        self.batch_size: int = 1
-        self.model_path: str = "model.pkl"
+        self.lr: float = 1e-5
+        self.num_epochs: int = 40
+        self.batch_size: int = 128
+        self.model_path: str = "../data/classificator.jax"
         self.train_dl_num_threads = 16
         self.train_dl_prefetch_size = 16
         self.valid_dl_num_threads = 16
         self.valid_dl_prefetch_size = 16
 
+
 class DataConfig:
-    img_size = (640, 640)
     videos_dir = "../data/sock_videos"
-    annotations_dir = "../data/sock_video_results"
+    annotations_dir = "../data/sock_video_master_tracks"
+
+    classifier_output_dir = "../data/temp/classifier_ds"
+    classifier_target_image_size = (1080, 1920)
+    classifier_image_size = (518, 518)
+    classifier_imagenet_percentage = 0.7
+    classifier_avoid_class = 806 # Imagenet SOCK class
+    classifier_max_num_class_samples = 1024 * 8
+
+    split_train_percentage = 0.8
+    split_valid_percentage = 0.08
+
     output_dir = "../data/temp/obj_detector_ds"
     max_objs_per_image = 256
 
@@ -47,4 +58,7 @@ def yolo_v8_x(num_classes: int):
     return yolo_v8_config(num_classes, [3, 6, 6], [3, 80, 160, 320, 640, 640])
 
 class ModelConfig:
+    classifier = {
+        'focal_loss': { 'exponent': 2.0, 'pos_class_weight': 0.25 }
+    }
     object_detector = yolo_v8_x(1)

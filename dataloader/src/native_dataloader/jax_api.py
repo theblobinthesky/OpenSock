@@ -52,9 +52,9 @@ class Head:
 
 
 class Dataset:
-    def __init__(self, post_process_fn, native_dataset):
-        self.post_process_fn = post_process_fn
+    def __init__(self, native_dataset, post_process_fn):
         self._native = native_dataset
+        self.post_process_fn = post_process_fn
 
     @classmethod
     def from_subdirs(cls, root_dir: str, heads: List[Head],
@@ -62,32 +62,31 @@ class Dataset:
                      create_dataset_function: Callable,
                      post_process_fn: Callable[[dict[str, jnp.ndarray]], dict[str, jnp.ndarray]] = None,
                      is_virtual_dataset: bool=False) -> 'Dataset':
+        if post_process_fn is None:
+            post_process_fn = lambda x: x        
+
         native = m.Dataset(root_dir, [h._native for h in heads],
                            sub_dirs, create_dataset_function, is_virtual_dataset)
-        return cls(post_process_fn, native)
+        return cls(native, post_process_fn)
 
     @classmethod
     def from_entries(cls, root_dir: str, heads: List[Head],
-                     entries: List[List[str]]) -> 'Dataset':
+                     entries: List[List[str]],
+                     post_process_fn: Callable[[dict[str, jnp.ndarray]], dict[str, jnp.ndarray]] = None) -> 'Dataset':
         """Construct a Dataset from entries. Entries may or may not be preceeded by the root directory."""
         native = m.Dataset(root_dir, [h._native for h in heads], entries)
-        return cls(native)
+        return cls(native, post_process_fn)
 
     def split_train_validation_test(self, train_percentage: float,
                                     valid_percentage: float
                                     ) -> Tuple['Dataset', 'Dataset', 'Dataset']:
         """Split the dataset into training, validation, and test subsets."""
-        train, valid, test = self._native.splitTrainValidationTest(
-            train_percentage, valid_percentage)
-        return Dataset(train), Dataset(valid), Dataset(test)
+        train, valid, test = self._native.splitTrainValidationTest(train_percentage, valid_percentage)
+        return Dataset(train, self.post_process_fn), Dataset(valid, self.post_process_fn), Dataset(test, self.post_process_fn)
 
     def get_next_batch(self, batch_size: int) -> List[List[str]]:
         """Return the next batch of file entries."""
         return self._native.getNextBatch(batch_size)
-
-    @property
-    def post_process_fn(self) -> Callable:
-        return self.post_process_fn
 
     @property
     def root_dir(self) -> str:
@@ -170,8 +169,4 @@ class DataLoader:
 
         batch = self._native.getNextBatch()
         batch = {key: from_dlpack(x) for key, x in batch.items()}
-
-        if self.dataset is not None:
-            batch = self.dataset.post_process_fn(batch)
-
-        return batch
+        return self.dataset.post_process_fn(batch)

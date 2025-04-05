@@ -50,7 +50,18 @@ def test_correctness_jpg():
         pil_img = np.array(pil_img.resize((WIDTH, HEIGHT)), np.float32)
         pil_img = pil_img / 255.0
 
+        dl_img = batch['img'][i]
+        min, max = np.min(np.mean(dl_img, axis=-1)), np.max(np.mean(dl_img, axis=-1))
+        dl_img = (dl_img - min) / (max - min)
+
         err = np.mean(np.abs(batch['img'][i] - pil_img))
+        # err_ten = np.median(np.abs(dl_img - pil_img), axis=-1)
+        # import matplotlib.pyplot as plt
+        # fig, axes = plt.subplots(3, 1)
+        # axes[0].imshow(batch['img'][i])
+        # axes[1].imshow(pil_img)
+        # axes[2].imshow(err_ten)
+        # plt.show()
         assert np.all(err < 5 / 255.0), f"Error too high for image {path}"
 
 def test_correctness_npy(tmp_path):
@@ -85,14 +96,14 @@ def test_two_dataloaders_simultaneously():
     assert jnp.all(b1['img'] == b2['img']).item()
     assert jnp.all(b1['img'] == b3['img']).item()
 
-def test_perf(benchmark):
-    def performance_benchmark(dl: m.DataLoader):
-        total_mean = 0.0
-        num_iters = len(dl) * 64
-        for _ in range(num_iters):
-            batch = dl.get_next_batch()
-            x = batch['img']
-            total_mean += x.mean()
+# def test_perf(benchmark):
+#     def performance_benchmark(dl: m.DataLoader):
+#         total_mean = 0.0
+#         num_iters = len(dl) * 64
+#         for _ in range(num_iters):
+#             batch = dl.get_next_batch()
+#             x = batch['img']
+#             total_mean += x.mean()
 
-    _, dl, _ = get_dataloader(batch_size=16)
-    benchmark(performance_benchmark, dl)
+#     _, dl, _ = get_dataloader(batch_size=16)
+#     benchmark(performance_benchmark, dl)

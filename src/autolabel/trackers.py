@@ -5,28 +5,21 @@ import json
 from typing import Dict, List, Tuple, Optional
 from PIL import Image
 from sam2.automatic_mask_generator import SAM2AutomaticMaskGenerator
-from config import BaseConfig
 import logging
+from .config import BaseConfig
 
 
 class Stabilizer:
-    def __init__(
-        self,
-        aruco_dict_type: int,
-        aruco_marker_id: int,
-        secondary_aruco_marker_id: int,
-        output_warped_size: Tuple[int, int],
-        marker_size_mm: float
-    ):
-        self.output_warped_size = output_warped_size
-        self.marker_size_mm = marker_size_mm
+    def __init__(self, config: BaseConfig):
+        self.output_warped_size = config.output_warped_size
+        self.marker_size_mm = config.marker_size_mm
         
-        self.aruco_dict = cv2.aruco.getPredefinedDictionary(aruco_dict_type)
+        self.aruco_dict = cv2.aruco.getPredefinedDictionary(config.aruco_dict_type)
         self.aruco_params = cv2.aruco.DetectorParameters()
         self.aruco_params.cornerRefinementMethod = cv2.aruco.CORNER_REFINE_SUBPIX
         self.aruco_detector = cv2.aruco.ArucoDetector(self.aruco_dict, self.aruco_params)
-        self.aruco_marker_id = aruco_marker_id
-        self.secondary_aruco_marker_id = secondary_aruco_marker_id
+        self.aruco_marker_id = config.aruco_marker_id
+        self.secondary_aruco_marker_id = config.secondary_aruco_marker_id
 
     def detect_aruco_marker(self, image: np.ndarray) -> Tuple[bool, Optional[np.ndarray]]:
         # Convert to grayscale for marker detection
@@ -173,21 +166,12 @@ def apply_homography(image: np.ndarray, homography: np.ndarray, size: tuple[int,
 
 
 class ImageTracker:
-    def __init__(
-        self, 
-        target_size: Tuple[int, int],
-        stabilizer: Stabilizer,
-        sam2,
-        imagenet_class: int,
-        classifier,
-        classifier_transform,
-        config: BaseConfig
-    ):
-        self.target_size = target_size
+    def __init__(self, config: BaseConfig, stabilizer: Stabilizer, sam2, classifier, classifier_transform):
+        self.target_size = config.image_size
         self.stabilizer = stabilizer
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.sam = sam2
-        self.imagenet_class = imagenet_class
+        self.imagenet_class = config.imagenet_class
         self.classifier = classifier
         self.transform = classifier_transform
         self.config = config
@@ -245,21 +229,13 @@ class ImageTracker:
             max_y, max_x = min(image.shape[0], max_y + padding), min(image.shape[1], max_x + padding)
             
             image_roi = image[min_y:max_y, min_x:max_x].copy()
-            mask_roi = mask_binary[min_y:max_y, min_x:max_x].copy()
-            image_roi = cv2.convertScaleAbs(image_roi, alpha=self.config.mask_contrast_control, beta=self.config.mask_brightness_control)
-            roi = image_roi * mask_roi[..., None]
+            mask_roi = mask_binary[min_y:max_y, min_x:max_x].copy()[..., None]
+            scaled_image_roi = cv2.convertScaleAbs(image_roi, alpha=self.config.mask_contrast_control, beta=self.config.mask_brightness_control)
+            roi = scaled_image_roi * mask_roi
 
-            roi = cv2.resize(roi, (448, 448)) * 255
-            roi = Image.fromarray(roi)
-            input_tensor = self.transform(roi).unsqueeze(0).float().to(self.device)
-
-            with torch.no_grad():
-                output = self.classifier(input_tensor)
-                probabilities = torch.nn.functional.softmax(output[0], dim=0)
-
-            # Check if it's classified as a sock with enough confidence
-            if probabilities[self.imagenet_class] >= self.config.classifier_confidence_threshold:
-                mask['class_confidence'] = float(probabilities[self.imagenet_class])
+            class_probability = self.classifier(roi, self.config.imagenet_class)
+            if class_probability >= self.config.classifier_confidence_threshold:
+                mask['class_confidence'] = float(class_probability)
                 confirmed_socks.append(mask)
 
         return confirmed_socks
@@ -274,7 +250,8 @@ class ImageTracker:
     
 
 class VideoTracker:
-    def __init__(self, image_tracker: ImageTracker, sam2_video):
+    def __init__(self, config: BaseConfig, image_tracker: ImageTracker, sam2_video):
+        self.config = config
         self.image_tracker = image_tracker
         self.device = self.image_tracker.device
         self.sam = sam2_video
@@ -296,7 +273,7 @@ class VideoTracker:
 
         return track
 
-    def merge_into_master_track(self, num_interesting_frames: int, min_num_occ_for_merge: int, max_num_objs: int, iou_thresh: float, tracks: list):
+    def merge_into_master_track(self, num_interesting_frames: int, min_num_occ_for_action: int, max_num_objs: int, iou_thresh: float, tracks: list):
         master_track = []
         for frame_idx in range(num_interesting_frames):
             merged = {}
@@ -304,6 +281,22 @@ class VideoTracker:
                 merged.update(track[frame_idx])
             
             master_track.append(merged) 
+
+        # Rule: a inside b for mt. thresh frames -> remove a
+        # This heavily hinges on the performance of the classification model.
+        # a_inside_b = {}
+        # for i, frame in enumerate(master_track):
+        #     for obj_id, mask in frame.items():       
+        #         for obj_id_2, mask_2 in frame.items():
+        #             mask_inside_mask_2_perc = (mask & mask_2).sum() / (mask & ~mask_2).sum()
+        #             if mask_inside_mask_2_perc >= self.config.video_tracker_inside_threshold:
+        #                 a_inside_b[(obj_id, obj_id_2)] = a_inside_b.get((obj_id, obj_id_2), 0) + 1
+            
+        #     maj_votes = [ids for ids, num_votes in a_inside_b.items() if num_votes >= min_num_occ_for_action]
+        #     for obj_id_1, obj_id_2 in maj_votes:
+        #         for frame in master_track:
+        #             if obj_id_1 in frame: del frame[obj_id_1]
+ 
 
         # Based on intersection over union metric, merge the object ids 
         # that seem to track the same object in a majority of frames.
@@ -321,14 +314,13 @@ class VideoTracker:
                         if iou >= iou_thresh:
                             to_merge[(obj_id, obj_id_2)] = to_merge.get((obj_id, obj_id_2), 0) + 1
 
-            maj_votes = [ids for ids, num_votes in to_merge.items() if num_votes >= min_num_occ_for_merge]
+            maj_votes = [ids for ids, num_votes in to_merge.items() if num_votes >= min_num_occ_for_action]
             for obj_id_1, obj_id_2 in maj_votes:
                 new_obj_id = max_num_objs
                 max_num_objs += 1
                 del to_merge[(obj_id_1, obj_id_2)]
 
                 for frame in master_track:
-
                     if obj_id_1 in frame: 
                         frame[new_obj_id] = frame[obj_id_1]
                         del frame[obj_id_1]
@@ -357,11 +349,11 @@ class VideoTracker:
                     area = cv2.contourArea(largest_contour)
                     largest_contour = cv2.approxPolyDP(largest_contour, 1e-3 * cv2.arcLength(largest_contour, True), True)
                     segmentation = largest_contour.reshape(-1, 2).flatten().tolist()
-                    x, y, w, h = cv2.boundingRect(largest_contour)
+                    y, x, h, w = cv2.boundingRect(largest_contour)
                 else:
                     area = 0.0
                     segmentation = []
-                    x, y, w, h = 0, 0, 0, 0
+                    y, x, h, w = 0, 0, 0, 0
 
 
                 frame[track_id] = {
@@ -411,13 +403,13 @@ class VideoTracker:
         with open(self._get_json_file_path(dir, filename), 'w') as f:
             json.dump(export_data, f, indent=2)
             
-        logging.debug(f"Master track exported to {filename}")
+        logging.info(f"Master track exported to {filename}")
 
 
     def import_master_track(self, dir: str, filename: str):
         with open(self._get_json_file_path(dir, filename), 'r') as f:
             data = json.load(f)
 
-        logging.debug(f"Master track imported from {filename}")
+        logging.info(f"Master track imported from {filename}")
 
         return data

@@ -74,18 +74,20 @@ private:
 
 class ListOfAllocations {
 public:
-    ListOfAllocations() = default;
+    ListOfAllocations(size_t totalSize);
 
     ListOfAllocations &operator=(ListOfAllocations &&allocs) noexcept;
 
     ListOfAllocations(const ListOfAllocations &allocs) = delete;
 
-    ListOfAllocations(ListOfAllocations &&arena) noexcept;
+    ListOfAllocations(ListOfAllocations &&allocs) noexcept;
 
     Allocation allocate(size_t size);
 
     [[nodiscard]] uint32_t getOffset(size_t i) const;
 
+    Allocation totalAllocation;
+    size_t offset;
     std::vector<Allocation> allocations;
     std::vector<size_t> sizes;
 };

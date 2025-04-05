@@ -1,6 +1,6 @@
 import wandb
 from typing import Any
-from config import DataConfig, TrainConfig, ModelConfig
+from .config import DataConfig, TrainConfig, ModelConfig
 
 def _config_to_dict(config) -> dict[str, Any]:
     return { config.__class__.__name__: vars(config) }

@@ -19,7 +19,7 @@ public:
 
     [[nodiscard]] std::string getDictName() const;
 
-    [[nodiscard]] std::vector<int> getShape() const;
+    [[nodiscard]] const std::vector<int> &getShape() const;
 
     [[nodiscard]] size_t getShapeSize() const;
 

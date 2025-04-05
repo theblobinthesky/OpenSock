@@ -13,7 +13,9 @@ namespace fs = std::filesystem;
 MemoryArena *MemoryArena::memoryArena;
 
 void MemoryArena::initialize(const size_t totalSize) {
-    memoryArena = new MemoryArena(totalSize);
+    if (memoryArena == null) {
+        memoryArena = new MemoryArena(totalSize);
+    }
 }
 
 MemoryArena *MemoryArena::getInstance() {
@@ -32,8 +34,8 @@ Allocation MemoryArena::allocate(const size_t size) {
     offset += size;
 
     if (offset > totalSize) {
-        throw std::runtime_error(
-            "Tried to allocate beyond the size of the memory arena.");
+        throw std::runtime_error(std::format("Tried to allocate {} bytes beyond the size {} of the memory arena.",
+                                             offset - totalSize, totalSize));
     }
 
     offset = offset % totalSize;
@@ -48,6 +50,7 @@ void MemoryArena::free() {
     extRefCounter--;
 
     if (destroyed && extRefCounter == 0) {
+        // TODO
     }
 }
 
@@ -85,8 +88,13 @@ uint8_t *MemoryArena::getGpuData() const {
     return gpuData;
 }
 
+ListOfAllocations::ListOfAllocations(const size_t totalSize) : totalAllocation({}), offset(0) {
+    totalAllocation = MemoryArena::getInstance()->allocate(totalSize);
+}
+
 ListOfAllocations &ListOfAllocations::operator=(
     ListOfAllocations &&allocs) noexcept {
+    totalAllocation = allocs.totalAllocation;
     allocations = std::move(allocs.allocations);
     sizes = std::move(allocs.sizes);
 
@@ -94,21 +102,27 @@ ListOfAllocations &ListOfAllocations::operator=(
 }
 
 ListOfAllocations::ListOfAllocations(
-    ListOfAllocations &&allocs) noexcept : allocations(
-                                               std::move(allocs.allocations)),
+    ListOfAllocations &&allocs) noexcept : totalAllocation(allocs.totalAllocation),
+                                           offset(0),
+                                           allocations(std::move(allocs.allocations)),
                                            sizes(std::move(allocs.sizes)) {
 }
 
 Allocation ListOfAllocations::allocate(const size_t size) {
-    Allocation allocation = MemoryArena::getInstance()->allocate(size);
+    const Allocation allocation = {
+        .host = totalAllocation.host + offset,
+        .gpu = totalAllocation.gpu + offset
+    };
+
+    offset += size;
 
     allocations.push_back(allocation);
     sizes.push_back(size);
     return allocation;
 }
 
-uint32_t ListOfAllocations::getOffset(size_t i) const {
-    return MemoryArena::getInstance()->getOffset(allocations[i]);
+uint32_t ListOfAllocations::getOffset(const size_t i) const {
+    return allocations[i].host - totalAllocation.host;
 }
 
 Semaphore::Semaphore(const int initial)
@@ -267,31 +281,27 @@ void DataLoader::threadMain() {
         }
 
         datasetMutex.lock();
-        std::vector<std::vector<std::string> > batchPaths = dataset.
-                getNextBatch(
-                    batchSize);
+        std::vector<std::vector<std::string> > batchPaths = dataset.getNextBatch(batchSize);
         datasetMutex.unlock();
 
         const size_t barrierIdx = lastBarrierIdx++ % prefetchSize;
         const std::vector<Head> &heads = dataset.getHeads();
 
         // For each subdirectory, load all images and assemble into one numpy array.
-        ListOfAllocations allocations;
+        ListOfAllocations allocations(outputBatchMemorySize);
         for (size_t i = 0; i < heads.size(); i++) {
             const Head &head = heads[i];
 
             const size_t itemSize = head.getShapeSize();
             prefetchCacheMutex.lock();
-            const size_t batchBufferSize =
-                    batchSize * itemSize * sizeof(float);
+            const size_t batchBufferSize = batchSize * itemSize * sizeof(float);
             const auto batchAlloc = allocations.allocate(batchBufferSize);
             const auto batchBuffer = reinterpret_cast<float *>(batchAlloc.host);
             prefetchCacheMutex.unlock();
 
             switch (head.getFilesType()) {
                 case FileType::JPG: {
-                    const auto batchBufferOld = new uint8_t[
-                        batchSize * itemSize];
+                    const auto batchBufferOld = new uint8_t[batchSize * itemSize];
 
                     for (size_t j = 0; j < batchSize; j++) {
                         ImageData imgData = readJpegFile(batchPaths[j][i]);
@@ -304,13 +314,10 @@ void DataLoader::threadMain() {
                             for (size_t j = 0; j < IMAGE_WIDTH(head); j++) {
                                 for (size_t c = 0; c < 3; c++) {
                                     const size_t idx = b * itemSize
-                                        + y * IMAGE_WIDTH(head) * 3
-                                        + j * 3
-                                        + c;
-                                    batchBuffer[idx] =
-                                            static_cast<float>(batchBufferOld[
-                                                idx])
-                                            / 255.0f;
+                                                       + y * IMAGE_WIDTH(head) * 3
+                                                       + j * 3
+                                                       + c;
+                                    batchBuffer[idx] = static_cast<float>(batchBufferOld[idx]) / 255.0f;
                                 }
                             }
                         }
@@ -326,8 +333,8 @@ void DataLoader::threadMain() {
                         // Ensure the file contains float data
                         if (arr.word_size != sizeof(float)) {
                             throw std::runtime_error(
-                                "NPY file " + batchPaths[j][i] +
-                                " does not contain float data.");
+                                std::format("NPY file {} has word size {} and does not contain float32 data.",
+                                            batchPaths[j][i], arr.word_size));
                         }
                         // Compute the total number of elements in the array
                         size_t npy_num_elements = 1;
@@ -342,9 +349,8 @@ void DataLoader::threadMain() {
                                 std::to_string(npy_num_elements));
                         }
                         // Copy the float data into the batch buffer
-                        auto *npy_data = arr.data<float>();
-                        std::memcpy(batchBuffer + j * itemSize, npy_data,
-                                    itemSize * sizeof(float));
+                        const auto *npy_data = arr.data<float>();
+                        std::memcpy(batchBuffer + j * itemSize, npy_data, itemSize * sizeof(float));
                     }
                 }
                 break;
@@ -392,16 +398,17 @@ py::dict DataLoader::getNextBatch() {
         const Head &head = heads[i];
         const uint32_t batchOffset = allocations.getOffset(i);
 
-        std::vector<int> shape = head.getShape();
+        const std::vector<int> &shape = head.getShape();
+        const int ndim = static_cast<int>(shape.size()) + 1;
 
-        const auto shapeArr = new int64_t[shape.size() + 1];
+        const auto shapeArr = new int64_t[ndim]{};
         shapeArr[0] = static_cast<int64_t>(batchSize);
         for (size_t s = 0; s < shape.size(); s++) {
             shapeArr[s + 1] = shape[s];
         }
 
         int64_t lastStride = 1;
-        const auto stridesArr = new int64_t[shape.size() + 1];
+        const auto stridesArr = new int64_t[shape.size() + 1]{};
         for (int s = static_cast<int>(shape.size()); s >= 0; s--) {
             stridesArr[s] = lastStride;
             lastStride *= shapeArr[s];
@@ -414,14 +421,14 @@ py::dict DataLoader::getNextBatch() {
                     .device_type = kDLCUDA,
                     .device_id = 0 // This hardcodes GPU0.
                 },
-                .ndim = 4,
+                .ndim = ndim,
                 .dtype = {
                     .code = kDLFloat,
                     .bits = 32,
                     .lanes = 1
                 },
                 .shape = shapeArr,
-                .strides = stridesArr,
+                .strides = null,
                 .byte_offset = batchOffset
             },
             .manager_ctx = null,
@@ -430,24 +437,24 @@ py::dict DataLoader::getNextBatch() {
 
         pyBatch[head.getDictName().c_str()] = py::capsule(
             dlMngTensor, "dltensor", [](void *ptr) {
-                const auto *dlManagedTensor = static_cast<DLManagedTensor *>(
-                    ptr);
+                const auto *dlManagedTensor = static_cast<DLManagedTensor *>(ptr);
                 delete[] dlManagedTensor->dl_tensor.shape;
                 delete[] dlManagedTensor->dl_tensor.strides;
                 delete dlManagedTensor;
             });
     }
 
-    for (size_t i = 0; i < prefetchCache.size(); i++) {
+    /*for (size_t i = 0; i < prefetchCache.size(); i++) {
         const auto &pair = prefetchCache[i];
         if (pair.barrierIdx == barrierIdx) {
             std::printf("Idiot index ++ (%lu, %lu, idx %lu, size %lu) \n",
                         pair.barrierIdx,
                         barrierIdx, i, prefetchCache.size() + 1);
         }
-    }
+    }*/
 
     gpu.sync(barrierIdx);
+
     return pyBatch;
 }
 

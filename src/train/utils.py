@@ -1,5 +1,7 @@
+import os
 import numpy as np
 import jax.numpy as jnp
+
 
 def batch_intersection_over_union(bbox: jnp.ndarray, rem_bboxes: jnp.ndarray) -> float:
     bbox_left, bbox_right, bbox_top, bbox_bottom = bbox[0], bbox[1], bbox[2], bbox[3]
@@ -45,6 +47,22 @@ def non_maximum_supression(
         order = order[iou < threshold]
 
     return jnp.concat(keep_bboxes, axis=0), jnp.concat(keep_scores)
+
+def accuracy(target: jnp.ndarray, prediction: jnp.ndarray) -> float:
+    return jnp.mean(jnp.round(prediction) == target.astype(jnp.float16))
+
+def recall(target: jnp.ndarray, prediction: jnp.ndarray) -> float:
+    # Round predictions and assume positive class is 1
+    pred = jnp.round(prediction)
+    tp = jnp.sum((pred == 1) & (target == 1))
+    fn = jnp.sum((pred == 0) & (target == 1))
+    return tp / (tp + fn + 1e-8)
+
+def precision(target: jnp.ndarray, prediction: jnp.ndarray) -> float:
+    pred = jnp.round(prediction)
+    tp = jnp.sum((pred == 1) & (target == 1))
+    fp = jnp.sum((pred == 1) & (target == 0))
+    return tp / (tp + fp + 1e-8)
 
 # TODO: Support multiple classes.
 def average_precision(

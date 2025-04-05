@@ -4,7 +4,7 @@ from config import TrainConfig, DataConfig, ModelConfig
 from data import get_obj_detection_dataset
 from train import train_model
 from utils import non_maximum_supression, average_precision
-from utils import quality_focal_loss, distribution_focal_loss, general_iou_loss
+from utils import quality_focal_loss, distribution_focal_loss
 
 DIM_NUMS = ('NHWC', 'HWIO', 'NHWC')
 MAX_NUMBER_OF_BBOXES = 10_000
@@ -28,7 +28,6 @@ def batch_norm(x: jnp.ndarray) -> jnp.ndarray:
     return (x - mean) / jnp.sqrt(var + 1e-5)
 
 def conv(config: ModelConfig, params: dict, x: jnp.ndarray, stride: int=1) -> jnp.ndarray:
-    # print(f"{x.shape=}, {params['weights'].shape=}")
     x = lax.conv_general_dilated(x, params['weights'], (stride, stride), 'SAME', dimension_numbers=DIM_NUMS)
     x = x + params['biases']
     x = batch_norm(x)
