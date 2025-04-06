@@ -166,14 +166,13 @@ def apply_homography(image: np.ndarray, homography: np.ndarray, size: tuple[int,
 
 
 class ImageTracker:
-    def __init__(self, config: BaseConfig, stabilizer: Stabilizer, sam2, classifier, classifier_transform):
+    def __init__(self, config: BaseConfig, stabilizer: Stabilizer, sam2, classifier):
         self.target_size = config.image_size
         self.stabilizer = stabilizer
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.sam = sam2
         self.imagenet_class = config.imagenet_class
         self.classifier = classifier
-        self.transform = classifier_transform
         self.config = config
         
     def _load_image(self, image_path: str) -> np.ndarray:
@@ -211,7 +210,7 @@ class ImageTracker:
         return sock_masks
     
     def _classify_socks(self, image: np.ndarray, masks: List[Dict]) -> List[Dict]:
-        confirmed_socks = []
+        class_instances = []
         
         for mask in masks:
             # Extract the masked region
@@ -229,16 +228,16 @@ class ImageTracker:
             max_y, max_x = min(image.shape[0], max_y + padding), min(image.shape[1], max_x + padding)
             
             image_roi = image[min_y:max_y, min_x:max_x].copy()
-            mask_roi = mask_binary[min_y:max_y, min_x:max_x].copy()[..., None]
-            scaled_image_roi = cv2.convertScaleAbs(image_roi, alpha=self.config.mask_contrast_control, beta=self.config.mask_brightness_control)
-            roi = scaled_image_roi * mask_roi
+            # mask_roi = mask_binary[min_y:max_y, min_x:max_x].copy()[..., None]
+            # scaled_image_roi = cv2.convertScaleAbs(image_roi, alpha=self.config.mask_contrast_control, beta=self.config.mask_brightness_control)
+            # roi = scaled_image_roi * mask_roi
 
-            class_probability = self.classifier(roi, self.config.imagenet_class)
-            if class_probability >= self.config.classifier_confidence_threshold:
-                mask['class_confidence'] = float(class_probability)
-                confirmed_socks.append(mask)
+            class_probability = self.classifier(image_roi, self.config.imagenet_class)
+            mask['class_confidence'] = float(class_probability)
+            mask['is_class_instance'] = class_probability >= self.config.classifier_confidence_threshold
+            class_instances.append(mask)
 
-        return confirmed_socks
+        return class_instances
 
 
     def process_image(self, image: np.ndarray, homography: np.ndarray) -> np.ndarray:
@@ -266,59 +265,96 @@ class VideoTracker:
                 self.sam.add_new_mask(state, 0, obj_id, mask['segmentation'])
            
             for out_frame_idx, out_obj_ids, out_mask_logits in self.sam.propagate_in_video(state):
+                contours_of_obj_ids = []
+                for i in range(len(out_obj_ids)):
+                    mask = (out_mask_logits[i] > 0.0).cpu().numpy()
+                    mask_uint8 = mask.astype(np.uint8).squeeze(0)
+                    contours, _ = cv2.findContours(mask_uint8, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                    if contours:
+                        largest_contour = max(contours, key=cv2.contourArea)
+                        largest_contour = cv2.approxPolyDP(largest_contour, 1e-3 * cv2.arcLength(largest_contour, True), True)
+                        contours_of_obj_ids.append(largest_contour)
+                    else:
+                        contours_of_obj_ids.append([])
+                      
                 track[out_frame_idx] = {
-                    out_obj_id: (out_mask_logits[i] > 0.0).cpu().numpy()
+                    out_obj_id: contours_of_obj_ids[i]
                     for i, out_obj_id in enumerate(out_obj_ids)
                 } 
 
         return track
 
-    def merge_into_master_track(self, num_interesting_frames: int, min_num_occ_for_action: int, max_num_objs: int, iou_thresh: float, tracks: list):
+
+    def merge_into_master_track(self, num_interesting_frames: int, min_num_occ_for_action: int, instances: list, tracks: list):
+        delete_instance = set()
         master_track = []
         for frame_idx in range(num_interesting_frames):
             merged = {}
             for track in tracks:
                 merged.update(track[frame_idx])
             
-            master_track.append(merged) 
+            master_track.append(merged)
+
+        # Bake all masks.
+        for frame in master_track:
+            for obj_id in frame.keys():
+                work_size = np.array(self.config.image_size[::-1]) // self.config.performance_downscale_factor
+                mask = np.zeros(work_size, dtype=np.uint8)
+                contour = frame[obj_id]
+                if len(contour) > 0:
+                    cv2.drawContours(mask, [contour], 0, (255,), -1)
+                mask = np.transpose(mask, (1, 0))
+ 
+                frame[obj_id] = (mask, contour)
+
 
         # Rule: a inside b for mt. thresh frames -> remove a
-        # This heavily hinges on the performance of the classification model.
-        # a_inside_b = {}
-        # for i, frame in enumerate(master_track):
-        #     for obj_id, mask in frame.items():       
-        #         for obj_id_2, mask_2 in frame.items():
-        #             mask_inside_mask_2_perc = (mask & mask_2).sum() / (mask & ~mask_2).sum()
-        #             if mask_inside_mask_2_perc >= self.config.video_tracker_inside_threshold:
-        #                 a_inside_b[(obj_id, obj_id_2)] = a_inside_b.get((obj_id, obj_id_2), 0) + 1
+        # This might be a bad idea since we're rejecting non-class instances later.
+        a_inside_b = {}
+        for frame in master_track:
+            for obj_id, (mask, _) in frame.items():       
+                for obj_id_2, (mask_2, _) in frame.items():
+                    if obj_id >= obj_id_2: continue
+
+                    inside = (mask & mask_2).sum()
+                    mask_area = mask.sum()
+
+                    if mask_area > 0 and inside / mask_area >= self.config.video_tracker_inside_threshold:
+                        a_inside_b[(obj_id, obj_id_2)] = a_inside_b.get((obj_id, obj_id_2), 0) + 1
             
-        #     maj_votes = [ids for ids, num_votes in a_inside_b.items() if num_votes >= min_num_occ_for_action]
-        #     for obj_id_1, obj_id_2 in maj_votes:
-        #         for frame in master_track:
-        #             if obj_id_1 in frame: del frame[obj_id_1]
+            maj_votes = [ids for ids, num_votes in a_inside_b.items() if num_votes >= min_num_occ_for_action]
+            for obj_id_1, _ in maj_votes:
+                delete_instance.add(obj_id_1)
+                for frame in master_track:
+                    if obj_id_1 in frame: del frame[obj_id_1]
  
 
         # Based on intersection over union metric, merge the object ids 
         # that seem to track the same object in a majority of frames.
         to_merge = {}
-        for i, frame in enumerate(master_track):
-            for obj_id, mask in frame.items():
-                for obj_id_2, mask_2 in frame.items():
+        num_instances = len(instances)
+        for frame in master_track:
+            for obj_id, (mask, _) in frame.items():
+                for obj_id_2, (mask_2, _) in frame.items():
                     if obj_id >= obj_id_2: continue
-                    
+
                     inter = (mask & mask_2).sum()
                     union = (mask | mask_2).sum()
                     
                     if union > 0:
                         iou = inter / union
-                        if iou >= iou_thresh:
+                        if iou >= self.config.instance_merge_iou_thresh:
                             to_merge[(obj_id, obj_id_2)] = to_merge.get((obj_id, obj_id_2), 0) + 1
 
             maj_votes = [ids for ids, num_votes in to_merge.items() if num_votes >= min_num_occ_for_action]
             for obj_id_1, obj_id_2 in maj_votes:
-                new_obj_id = max_num_objs
-                max_num_objs += 1
+                new_obj_id = num_instances
+                instances.append(instances[obj_id_1])
+                num_instances += 1
+
                 del to_merge[(obj_id_1, obj_id_2)]
+                delete_instance.add(obj_id_1)
+                delete_instance.add(obj_id_2)
 
                 for frame in master_track:
                     if obj_id_1 in frame: 
@@ -328,35 +364,36 @@ class VideoTracker:
                     if obj_id_2 in frame: 
                         frame[new_obj_id] = frame[obj_id_2]
                         del frame[obj_id_2]
-                
-                            
+
+        
+        # Remove the flagged instances.
+        for instance_idx in sorted(list(delete_instance), reverse=True):
+            del instances[instance_idx]
+
+
         # Remap object ids to continuous integers starting from 0.
-        unique_ids = set()
-        for frame in master_track:
-            unique_ids.update(frame.keys())
+        # unique_ids = set()
+        # for frame in master_track:
+        #     unique_ids.update(frame.keys())
 
-        sorted_ids = sorted(unique_ids)
-        id_map = {old_id: new_id for new_id, old_id in enumerate(sorted_ids)}
-        master_track = [{id_map[old_id]: mask for old_id, mask in frame.items()} for frame in master_track]
+        # sorted_ids = sorted(unique_ids)
+        # id_map = {old_id: new_id for new_id, old_id in enumerate(sorted_ids)}
+        # master_track = [{id_map[old_id]: pair for old_id, pair in frame.items()} for frame in master_track]
 
-        # Convert to contours.
+        # Add metadata.
         for frame in master_track:
-            for track_id, mask in list(frame.items()):
-                mask_uint8 = mask.astype(np.uint8).squeeze(0)
-                contours, _ = cv2.findContours(mask_uint8, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-                if contours:
-                    largest_contour = max(contours, key=cv2.contourArea)
-                    area = cv2.contourArea(largest_contour)
-                    largest_contour = cv2.approxPolyDP(largest_contour, 1e-3 * cv2.arcLength(largest_contour, True), True)
-                    segmentation = largest_contour.reshape(-1, 2).flatten().tolist()
-                    y, x, h, w = cv2.boundingRect(largest_contour)
-                else:
+            for obj_id, (_, contour) in list(frame.items()):
+
+                if len(contour) == 0:
                     area = 0.0
                     segmentation = []
                     y, x, h, w = 0, 0, 0, 0
+                else:
+                    area = cv2.contourArea(contour)
+                    segmentation = contour.reshape(-1, 2).flatten().tolist()
+                    y, x, h, w = cv2.boundingRect(contour)
 
-
-                frame[track_id] = {
+                frame[obj_id] = {
                     "segmentation": segmentation,
                     "area": area,
                     "bbox": [x, y, w, h],
@@ -364,7 +401,7 @@ class VideoTracker:
                 }
 
                     
-        return master_track, len(sorted_ids)
+        return instances, master_track
 
     def mark_occlusions(self, master_track: list):
         for frame in master_track:
@@ -377,7 +414,7 @@ class VideoTracker:
     def _get_json_file_path(self, dir: str, filename: str):
         return f"{dir}/{filename}.json"
 
-    def export_master_track(self, important_frame_indices: list[int], homographies: list[np.ndarray], master_track: list, num_objs: int, dir: str, filename: str):
+    def export_master_track(self, important_frame_indices: list[int], instances: list, homographies: list[np.ndarray], master_track: list, dir: str, filename: str):
         important_frames = []
         for frame_idx, frame, homography in zip(important_frame_indices, master_track, homographies):
             frame_data = {}
@@ -395,7 +432,7 @@ class VideoTracker:
             })
 
         export_data = {
-            'num_objects': num_objs,
+            'instances': instances,
             'important_frames': important_frames,
             'variant_frames': None
         }

@@ -6,7 +6,7 @@
 + Autolabel pipeline is robust to hidden aruco marker in some frames
 + Autolabel pipeline is now reusable for different datasets
 + Autolabel has new visualization with a display of tracks
-- Dataset supports data processing function before passing to the jax code (on the cpu maybe??)
++ Dataset supports data processing function before passing to the jax code (on the cpu maybe??)
 - Premade data processing functions: Basic augmentations, DINOv2 embedding (on the cpu maybe??)
 + Fix invalidate files bug where it deletes the actual datasets!
 - Refactor object detection code to use native dataloader

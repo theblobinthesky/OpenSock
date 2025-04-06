@@ -2,7 +2,8 @@ import os, logging
 os.environ['LOG'] = '1'
 # os.environ['INVALIDATE_DATASET'] = '1'
 from tqdm.contrib.logging import logging_redirect_tqdm
-from autolabel.autolabel_sock import autolabel_sock
+from autolabel.autolabel import label_automatically
+from autolabel.visualize import visualize_all
 from autolabel.config import BaseConfig
 from train.classificator import train_classifier, linear_classifier
 from train.train import load_params
@@ -17,7 +18,7 @@ logging.basicConfig(
     handlers=[logging.FileHandler('pipeline.log'), logging.StreamHandler()]
 )
 
-class PretrainedNumpyClassificator:
+class PretrainedClassificator:
     def __init__(self):
         self.model = timm.create_model('eva02_large_patch14_448.mim_m38m_ft_in22k_in1k', pretrained=True)
         self.model = self.model.to('cuda')
@@ -36,7 +37,7 @@ class PretrainedNumpyClassificator:
         return probabilities[class_idx]
 
 
-class CustomNumpyClassificator:
+class CustomClassificator:
     def __init__(self, tconfig: TrainConfig, dconfig: DataConfig):
         self.dinov2 = torch.hub.load('facebookresearch/dinov2', 'dinov2_vits14_reg').to('cuda')
         self.dinov2 = torch.compile(self.dinov2)
@@ -58,23 +59,26 @@ class CustomNumpyClassificator:
 
 
 with logging_redirect_tqdm():
-    # config = BaseConfig(
-    #     imagenet_class = 806,
-    #     input_dir = "../data/sock_videos",
-    #     output_dir = "../data/sock_video_master_tracks",
-    #     image_size = (1080, 1920),
-    #     output_warped_size = (540, 960),   
-    #     classifier_confidence_threshold = 0.04
-    # )
+    config = BaseConfig(
+        imagenet_class = 806,
+        input_dir = "../data/sock_videos",
+        output_dir = "../data/sock_video_master_tracks",
+        image_size = (1080, 1920),
+        output_warped_size = (540, 960),   
+        classifier_confidence_threshold = 0.01
+    )
 
-    # print("Autolabel using pretrained classifier:")
-    # classifier = PretrainedNumpyClassificator()
-    # autolabel_sock(config, model=classifier)
-    # train_classifier()
+    print("Autolabel using pretrained classifier:")
+    classifier = PretrainedClassificator()
+    label_automatically(classifier, config)
+    visualize_all(config)
 
-    # print()
-    # print("Training classifier:")
-    # train_classifier()
+    exit(0)
+
+
+    print()
+    print("Training classifier:")
+    train_classifier()
 
     config = BaseConfig(
         imagenet_class = 806,
@@ -82,11 +86,11 @@ with logging_redirect_tqdm():
         output_dir = "../data/sock_video_enhanced_master_tracks",
         image_size = (1080, 1920),
         output_warped_size = (540, 960),   
-        classifier_confidence_threshold = 0.3
+        classifier_confidence_threshold = 0.5
     )
 
     print()
     print("Autolabel using custom classifier:")
     tconfig, dconfig = TrainConfig(), DataConfig()
-    classifier = CustomNumpyClassificator(tconfig, dconfig)
-    autolabel_sock(config, model=classifier)
+    classifier = CustomClassificator(tconfig, dconfig)
+    label_automatically(classifier, config)

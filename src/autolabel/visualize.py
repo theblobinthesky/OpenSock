@@ -489,7 +489,7 @@ class TrackingVisualizer(QMainWindow):
 
 def visualize_all(config: BaseConfig):
     stabilizer = Stabilizer(config)
-    image_tracker = ImageTracker(config, stabilizer, None, None, None)
+    image_tracker = ImageTracker(config, stabilizer, None, None)
     video_tracker = VideoTracker(config, image_tracker, None)
 
     video_files = sorted(
