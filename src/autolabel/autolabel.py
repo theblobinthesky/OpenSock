@@ -233,7 +233,7 @@ def label_automatically(
         [f for f in os.listdir(config.input_dir) if f.lower().endswith(('.mp4', '.avi', '.mov', '.mkv'))]
     )
 
-    # video_files = video_files[:1] # TODO: revert
+    video_files = video_files[:1] # TODO: revert
 
     if not video_files:
         logging.info(f"No videos found in {config.input_dir}")

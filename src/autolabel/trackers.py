@@ -1,9 +1,7 @@
 import numpy as np
-import torch
-import cv2
+import torch, cv2, rtree
 import json
 from typing import Dict, List, Tuple, Optional
-from PIL import Image
 from sam2.automatic_mask_generator import SAM2AutomaticMaskGenerator
 import logging
 from .config import BaseConfig
@@ -308,44 +306,81 @@ class VideoTracker:
                 frame[obj_id] = (mask, contour)
 
 
-        # Rule: a inside b for mt. thresh frames -> remove a
+        # Rule 1: a inside b for mt. thresh frames -> remove a
         # This might be a bad idea since we're rejecting non-class instances later.
-        a_inside_b = {}
+
+        # Rule 2: Based on intersection over union metric, merge the object ids 
+        # that seem to track the same object in a majority of frames.
+
+        def bbox_inters(contour1, contour2):
+            if len(contour1) == 0 or len(contour2) == 0: return False
+
+            x1, y1, w1, h1 = cv2.boundingRect(contour1)
+            x2, y2, w2, h2 = cv2.boundingRect(contour2)
+
+            left = max(x1, x2)
+            right = min(x1 + w1, x2 + w2)
+            top = max(y1, y2)
+            bottom = min(y1 + h1, y2 + h2)
+
+            inters_width = max(0.0, right - left)
+            inters_height = max(0.0, bottom - top)
+
+            return inters_width * inters_height
+
+        # Setup rtrees.
+        rtrees_for_frames = [] 
         for frame in master_track:
-            for obj_id, (mask, _) in frame.items():       
-                for obj_id_2, (mask_2, _) in frame.items():
+            rtree = rtree.index.Index()
+
+            for obj_id, (_, contour) in frame.items():
+                x, y, w, h = cv2.boundingRect(contour)
+                rtree.insert(obj_id, (x, y, x + w, y + h))
+
+            rtrees_for_frames.append(rtree)
+
+        # Apply both rules.
+        a_inside_b = {}
+        to_merge = {}
+        num_instances = len(instances)
+        for frame, rtree in zip(master_track, rtrees_for_frames):
+            for obj_id, (mask, contour) in frame.items():
+                x, y, w, h = cv2.boundingRect(contour)
+                hits = list(rtree.intersection((x, y, x + w, y + h)))
+
+                for obj_id_2 in hits:
                     if obj_id >= obj_id_2: continue
+                    mask_2, contour_2 = frame[obj_id_2]
 
-                    inside = (mask & mask_2).sum()
+                    inters_upper_bound = bbox_inters(contour, contour_2)
+
+                    # Test for rule 1:
                     mask_area = mask.sum()
+                    inters = None
+                    if mask_area > 0 and inters_upper_bound / mask_area >= self.config.video_tracker_inside_threshold:
+                        # Test with the real rule 1.
+                        inters = (mask & mask_2).sum()
+                        if inters / mask_area >= self.config.video_tracker_inside_threshold:
+                            a_inside_b[(obj_id, obj_id_2)] = a_inside_b.get((obj_id, obj_id_2), 0) + 1
 
-                    if mask_area > 0 and inside / mask_area >= self.config.video_tracker_inside_threshold:
-                        a_inside_b[(obj_id, obj_id_2)] = a_inside_b.get((obj_id, obj_id_2), 0) + 1
-            
+                    # Test for full rule 2:
+                    union = (mask | mask_2).sum()
+                    if union > 0 and inters_upper_bound / union >= self.config.instance_merge_iou_thresh:
+                        if inters is None: 
+                            inters = (mask & mask_2).sum()
+
+                        if inters / union >= self.config.instance_merge_iou_thresh:
+                            to_merge[(obj_id, obj_id_2)] = to_merge.get((obj_id, obj_id_2), 0) + 1
+
+
+            # Apply rule 1: 
             maj_votes = [ids for ids, num_votes in a_inside_b.items() if num_votes >= min_num_occ_for_action]
             for obj_id_1, _ in maj_votes:
                 delete_instance.add(obj_id_1)
                 for frame in master_track:
                     if obj_id_1 in frame: del frame[obj_id_1]
- 
 
-        # Based on intersection over union metric, merge the object ids 
-        # that seem to track the same object in a majority of frames.
-        to_merge = {}
-        num_instances = len(instances)
-        for frame in master_track:
-            for obj_id, (mask, _) in frame.items():
-                for obj_id_2, (mask_2, _) in frame.items():
-                    if obj_id >= obj_id_2: continue
-
-                    inter = (mask & mask_2).sum()
-                    union = (mask | mask_2).sum()
-                    
-                    if union > 0:
-                        iou = inter / union
-                        if iou >= self.config.instance_merge_iou_thresh:
-                            to_merge[(obj_id, obj_id_2)] = to_merge.get((obj_id, obj_id_2), 0) + 1
-
+            # Apply rule 2: 
             maj_votes = [ids for ids, num_votes in to_merge.items() if num_votes >= min_num_occ_for_action]
             for obj_id_1, obj_id_2 in maj_votes:
                 new_obj_id = num_instances
@@ -365,7 +400,7 @@ class VideoTracker:
                         frame[new_obj_id] = frame[obj_id_2]
                         del frame[obj_id_2]
 
-        
+
         # Remove the flagged instances.
         for instance_idx in sorted(list(delete_instance), reverse=True):
             del instances[instance_idx]

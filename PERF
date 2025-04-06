@@ -1,0 +1,27 @@
+Number of seconds to autolabel one video:
+- 663.8462216854095s
+- 363.01553082466125s
+- 
+
+Find interesting frames (in seconds):
+- 35.0216s
+- 10.4558s
+
+Stabilize frames (in seconds):
+- 9.6867s
+- 
+
+Find class instances (in seconds):
+- 4.0113s
+-
+
+Track all frames from track frame i (in seconds):
+- 94.9308s
+- 66.0000s
+
+Merge into master track (in seconds):
+- 240.7528s
+- 180.0000s
+- 24.5158s
+- 18.5018s
+- 
