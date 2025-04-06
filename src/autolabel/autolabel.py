@@ -78,92 +78,101 @@ def extract_frames(temp_output_dir, cap, frame_tuples, output_size):
         cv2.imwrite(f"{temp_output_dir}/{i}.jpeg", frame)
 
 def process_video(config: BaseConfig, video_path, video_tracker):
-    # image_tracker = video_tracker.image_tracker
-    # stabilizer = image_tracker.stabilizer
-    # video_name = os.path.splitext(os.path.basename(video_path))[0]
-    # os.makedirs(config.output_dir, exist_ok=True)
-    # cap = cv2.VideoCapture(video_path)
-    # if not cap.isOpened():
-    #     logging.info(f"Error: Could not open video file {video_path}")
-    #     return
+    image_tracker = video_tracker.image_tracker
+    stabilizer = image_tracker.stabilizer
+    video_name = os.path.splitext(os.path.basename(video_path))[0]
+    os.makedirs(config.output_dir, exist_ok=True)
+    cap = cv2.VideoCapture(video_path)
+    if not cap.isOpened():
+        logging.info(f"Error: Could not open video file {video_path}")
+        return
 
-    # begin = time.time()
-    # interesting_frames, original_size = get_interesting_frames(cap, config)
-    # if np.any(original_size != config.image_size):
-    #     raise ValueError(f"The image size {original_size} is not the expected large size {config.image_size}.")
-    # end = time.time()
-    # logging.info(f"Found {len(interesting_frames)} interesting frames. {end - begin:.4f}s")
-
-
-    # begin = time.time()
-    # homographies = stabilizer.stabilize_frames(cap, interesting_frames)
-    # end = time.time()
-    # logging.info(f"Stabilized frames. {end - begin:.4f}s")
-
-    # instances = []
-    # tracks = []
-    # obj_id_start = 0
-
-    # def _get_obj_ids(masks):
-    #     nonlocal obj_id_start
-    #     ids = list(range(obj_id_start, obj_id_start + len(masks)))
-    #     return ids
-
-    # num_track_frames = len(interesting_frames) // config.track_skip
-    # track_frame_idx = 0
-    # frame_hom_pairs = list(zip(interesting_frames, homographies))
-    # np.random.shuffle(frame_hom_pairs)
-    # for frame_idx, homography in frame_hom_pairs:
-    #     if track_frame_idx >= num_track_frames: break
-
-    #     cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
-    #     ret, frame = cap.read()
-    #     if not ret:
-    #         logging.info("Failed to read frame.")
-    #         return
-
-    #     begin = time.time()
-    #     frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-    #     masks = image_tracker.process_image(frame, homography)
-    #     if len(masks) == 0:
-    #         logging.info("Failed to find socks. Skipping the frame.")
-    #         continue
-
-    #     instances.extend(masks)
-    #     end = time.time()
-    #     logging.info(f"Found {len(masks)} class instances. {end - begin:.4f}s")
-
-    #     begin = time.time()
-    #     frame_indices = list(reversed([(i, H) for (i, H) in zip(interesting_frames, homographies) if i <= frame_idx]))
-    #     extract_frames(config.temp_fs_dir, cap, frame_indices, image_tracker.target_size)
-    #     track_bw = video_tracker.track_forward(config.temp_fs_dir, frame_indices, masks, _get_obj_ids(masks))
-
-    #     frame_indices = [(i, H) for (i, H) in zip(interesting_frames, homographies) if i >= frame_idx]
-    #     extract_frames(config.temp_fs_dir, cap, frame_indices, image_tracker.target_size)
-    #     track_fw = video_tracker.track_forward(config.temp_fs_dir, frame_indices, masks, _get_obj_ids(masks))
-
-    #     track = [*reversed(track_bw[1:]), *track_fw]
-    #     tracks.append(track)
-    #     obj_id_start += len(masks)
-
-    #     end = time.time()
-    #     logging.info(f"Tracked all frames. {end - begin:.4f}s")
+    begin = time.time()
+    interesting_frames, original_size = get_interesting_frames(cap, config)
+    if np.any(original_size != config.image_size):
+        raise ValueError(f"The image size {original_size} is not the expected large size {config.image_size}.")
+    end = time.time()
+    logging.info(f"Found {len(interesting_frames)} interesting frames. {end - begin:.4f}s")
 
 
-    #     track_frame_idx += 1
-    #     logging.info(f"Tracked frame {track_frame_idx}/{num_track_frames}.")
+
+    begin = time.time()
+    homographies = stabilizer.stabilize_frames(cap, interesting_frames)
+    end = time.time()
+    logging.info(f"Stabilized frames. {end - begin:.4f}s")
+
+    instances = []
+    tracks = []
+    obj_id_start = 0
+
+    def _get_obj_ids(masks):
+        nonlocal obj_id_start
+        ids = list(range(obj_id_start, obj_id_start + len(masks)))
+        return ids
+
+    num_track_frames = len(interesting_frames) // config.track_skip
+    track_frame_idx = 0
+    frame_hom_pairs = list(zip(interesting_frames, homographies))
+    np.random.shuffle(frame_hom_pairs)
+    for frame_idx, homography in frame_hom_pairs:
+        if track_frame_idx >= num_track_frames: break
+
+        cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
+        ret, frame = cap.read()
+        if not ret:
+            logging.info("Failed to read frame.")
+            return
+
+        begin = time.time()
+        frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        masks = image_tracker.process_image(frame, homography)
+        if len(masks) == 0:
+            logging.info("Failed to find socks. Skipping the frame.")
+            continue
+
+        instances.extend(masks)
+        end = time.time()
+        logging.info(f"Found {len(masks)} class instances. {end - begin:.4f}s")
+
+        begin = time.time()
+        frame_indices = list(reversed([(i, H) for (i, H) in zip(interesting_frames, homographies) if i <= frame_idx]))
+        extract_frames(config.temp_fs_dir, cap, frame_indices, image_tracker.target_size)
+        track_bw = video_tracker.track_forward(config.temp_fs_dir, frame_indices, masks, _get_obj_ids(masks))
+
+        frame_indices = [(i, H) for (i, H) in zip(interesting_frames, homographies) if i >= frame_idx]
+        extract_frames(config.temp_fs_dir, cap, frame_indices, image_tracker.target_size)
+        track_fw = video_tracker.track_forward(config.temp_fs_dir, frame_indices, masks, _get_obj_ids(masks))
+
+        track = [*reversed(track_bw[1:]), *track_fw]
+        tracks.append(track)
+        obj_id_start += len(masks)
+
+        end = time.time()
+        logging.info(f"Tracked all frames. {end - begin:.4f}s")
 
 
-    # cap.release()
+        track_frame_idx += 1
+        logging.info(f"Tracked frame {track_frame_idx}/{num_track_frames}.")
+
+
+    cap.release()
+
+    instances = [
+        {
+            'class_confidence': instance['class_confidence'],
+            'is_class_instance': bool(instance['is_class_instance'])
+        }
+        for instance in instances
+    ]
+
 
     # import pickle
     # with open("metadata.pickle", "wb") as f:
     #     pickle.dump([instances, tracks, interesting_frames, homographies, video_name], f)
 
-    import pickle
-    with open("metadata.pickle", "rb") as f:
-        [instances, tracks, interesting_frames, homographies, video_name] = pickle.load(f)
-
+    # import pickle
+    # with open("metadata.pickle", "rb") as f:
+    #     [instances, tracks, interesting_frames, homographies, video_name] = pickle.load(f)
 
     begin = time.time()
     t = 152 # len(interesting_frames)

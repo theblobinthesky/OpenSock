@@ -1,5 +1,6 @@
 import numpy as np
-import torch, cv2, rtree
+import torch, cv2, rtree.index as index
+from shapely.geometry import Polygon
 import json
 from typing import Dict, List, Tuple, Optional
 from sam2.automatic_mask_generator import SAM2AutomaticMaskGenerator
@@ -232,7 +233,7 @@ class ImageTracker:
 
             class_probability = self.classifier(image_roi, self.config.imagenet_class)
             mask['class_confidence'] = float(class_probability)
-            mask['is_class_instance'] = class_probability >= self.config.classifier_confidence_threshold
+            mask['is_class_instance'] = bool(class_probability >= self.config.classifier_confidence_threshold)
             class_instances.append(mask)
 
         return class_instances
@@ -293,18 +294,18 @@ class VideoTracker:
             
             master_track.append(merged)
 
-        # Bake all masks.
+
+        # Bake all polygons.
         for frame in master_track:
             for obj_id in frame.keys():
-                work_size = np.array(self.config.image_size[::-1]) // self.config.performance_downscale_factor
-                mask = np.zeros(work_size, dtype=np.uint8)
                 contour = frame[obj_id]
-                if len(contour) > 0:
-                    cv2.drawContours(mask, [contour], 0, (255,), -1)
-                mask = np.transpose(mask, (1, 0))
- 
-                frame[obj_id] = (mask, contour)
+                if len(contour) == 0:
+                    frame[obj_id] = (None, contour)
+                else:
+                    poly = Polygon(np.array(contour).reshape((-1, 2))).buffer(0)
+                    frame[obj_id] = (poly, contour)
 
+        # Now apply the following rules:
 
         # Rule 1: a inside b for mt. thresh frames -> remove a
         # This might be a bad idea since we're rejecting non-class instances later.
@@ -331,11 +332,12 @@ class VideoTracker:
         # Setup rtrees.
         rtrees_for_frames = [] 
         for frame in master_track:
-            rtree = rtree.index.Index()
+            rtree = index.Index()
 
             for obj_id, (_, contour) in frame.items():
-                x, y, w, h = cv2.boundingRect(contour)
-                rtree.insert(obj_id, (x, y, x + w, y + h))
+                if len(contour) > 0:
+                    x, y, w, h = cv2.boundingRect(contour)
+                    rtree.insert(obj_id, (x, y, x + w, y + h))
 
             rtrees_for_frames.append(rtree)
 
@@ -344,32 +346,35 @@ class VideoTracker:
         to_merge = {}
         num_instances = len(instances)
         for frame, rtree in zip(master_track, rtrees_for_frames):
-            for obj_id, (mask, contour) in frame.items():
+            for obj_id, (poly, contour) in frame.items():
+                if len(contour) == 0: continue
                 x, y, w, h = cv2.boundingRect(contour)
                 hits = list(rtree.intersection((x, y, x + w, y + h)))
 
                 for obj_id_2 in hits:
                     if obj_id >= obj_id_2: continue
-                    mask_2, contour_2 = frame[obj_id_2]
+                    poly_2, contour_2 = frame[obj_id_2]
 
                     inters_upper_bound = bbox_inters(contour, contour_2)
 
                     # Test for rule 1:
-                    mask_area = mask.sum()
+                    mask_area = poly.area
                     inters = None
                     if mask_area > 0 and inters_upper_bound / mask_area >= self.config.video_tracker_inside_threshold:
                         # Test with the real rule 1.
-                        inters = (mask & mask_2).sum()
+                        inters = poly.intersection(poly_2).area
+
                         if inters / mask_area >= self.config.video_tracker_inside_threshold:
                             a_inside_b[(obj_id, obj_id_2)] = a_inside_b.get((obj_id, obj_id_2), 0) + 1
 
                     # Test for full rule 2:
-                    union = (mask | mask_2).sum()
-                    if union > 0 and inters_upper_bound / union >= self.config.instance_merge_iou_thresh:
+                    union_lower_bound = max(poly.area + poly_2.area - inters_upper_bound, 0.1)
+                    if inters_upper_bound / union_lower_bound >= self.config.instance_merge_iou_thresh:
                         if inters is None: 
-                            inters = (mask & mask_2).sum()
+                            inters = poly.intersection(poly_2).area
 
-                        if inters / union >= self.config.instance_merge_iou_thresh:
+                        union = poly.area + poly_2.area - inters
+                        if union > 0 and inters / union >= self.config.instance_merge_iou_thresh:
                             to_merge[(obj_id, obj_id_2)] = to_merge.get((obj_id, obj_id_2), 0) + 1
 
 
@@ -377,8 +382,15 @@ class VideoTracker:
             maj_votes = [ids for ids, num_votes in a_inside_b.items() if num_votes >= min_num_occ_for_action]
             for obj_id_1, _ in maj_votes:
                 delete_instance.add(obj_id_1)
-                for frame in master_track:
-                    if obj_id_1 in frame: del frame[obj_id_1]
+                for frame, rtree in zip(master_track, rtrees_for_frames):
+                    if obj_id_1 in frame: 
+                        # TODO: Duplicate code.
+                        _, contour = frame[obj_id_1]
+                        if len(contour) > 0:
+                            x, y, w, h = cv2.boundingRect(contour)
+                            rtree.delete(obj_id_1, (x, y, x + w, y + h))
+
+                        del frame[obj_id_1]
 
             # Apply rule 2: 
             maj_votes = [ids for ids, num_votes in to_merge.items() if num_votes >= min_num_occ_for_action]
@@ -391,29 +403,42 @@ class VideoTracker:
                 delete_instance.add(obj_id_1)
                 delete_instance.add(obj_id_2)
 
-                for frame in master_track:
+                for frame, rtree in zip(master_track, rtrees_for_frames):
                     if obj_id_1 in frame: 
+                        # TODO: Duplicate code.
+                        _, contour = frame[obj_id_1]
+                        if len(contour) > 0:
+                            x, y, w, h = cv2.boundingRect(contour)
+                            rtree.delete(obj_id_1, (x, y, x + w, y + h))
+                            rtree.insert(new_obj_id, (x, y, x + w, y + h))
+
                         frame[new_obj_id] = frame[obj_id_1]
                         del frame[obj_id_1]
                         
                     if obj_id_2 in frame: 
+                        # TODO: Duplicate code.
+                        _, contour = frame[obj_id_2]
+                        if len(contour) > 0:
+                            x, y, w, h = cv2.boundingRect(contour)
+                            rtree.delete(obj_id_2, (x, y, x + w, y + h))
+                            rtree.insert(new_obj_id, (x, y, x + w, y + h))
+
                         frame[new_obj_id] = frame[obj_id_2]
                         del frame[obj_id_2]
 
 
-        # Remove the flagged instances.
-        for instance_idx in sorted(list(delete_instance), reverse=True):
-            del instances[instance_idx]
-
-
         # Remap object ids to continuous integers starting from 0.
-        # unique_ids = set()
-        # for frame in master_track:
-        #     unique_ids.update(frame.keys())
+        unique_ids = set()
+        for frame in master_track:
+            unique_ids.update(frame.keys())
+        
+        sorted_ids = sorted(unique_ids)
+        id_map = {old_id: new_id for new_id, old_id in enumerate(sorted_ids)}
+        master_track = [{id_map[old_id]: pair for old_id, pair in frame.items()} for frame in master_track]
 
-        # sorted_ids = sorted(unique_ids)
-        # id_map = {old_id: new_id for new_id, old_id in enumerate(sorted_ids)}
-        # master_track = [{id_map[old_id]: pair for old_id, pair in frame.items()} for frame in master_track]
+        instances = {id: instances[id] for id in unique_ids if id not in delete_instance}
+        instances = {id_map[old_id]: instance for old_id, instance in instances.items()}
+
 
         # Add metadata.
         for frame in master_track:

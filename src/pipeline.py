@@ -70,7 +70,7 @@ with logging_redirect_tqdm():
 
     print("Autolabel using pretrained classifier:")
     classifier = PretrainedClassificator()
-    label_automatically(classifier, config)
+    # label_automatically(classifier, config)
     visualize_all(config)
 
     exit(0)

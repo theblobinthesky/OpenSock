@@ -14,6 +14,7 @@ from .config import BaseConfig
 
 class FrameViewer(QWidget):
     object_deleted = pyqtSignal(str)
+    object_toggled = pyqtSignal(str)  # New signal for toggling is_class_instance
     
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -22,15 +23,17 @@ class FrameViewer(QWidget):
         self.scaled_pixmap = None
         self.scale_factor = 1.0 # Default scale factor
         self.polygons = {}
+        self.instances = {}  # Store instance data including is_class_instance status
         self.playing = False
         self.playing_backward = False
         self.variant_frames = []
         self.current_frame_idx = 0
         self.highlighted_obj_id = None
         
-    def update_frame(self, frame_rgb, polygons, frame_idx, playing, playing_backward, variant_frames, highlighted_obj_id=None):
+    def update_frame(self, frame_rgb, polygons, instances, frame_idx, playing, playing_backward, variant_frames, highlighted_obj_id=None):
         height, width = frame_rgb.shape[:2]
         self.polygons = polygons
+        self.instances = instances  # Store instance data
         self.current_frame_idx = frame_idx
         self.playing = playing
         self.playing_backward = playing_backward
@@ -83,8 +86,13 @@ class FrameViewer(QWidget):
         
         # Draw polygons - scale them by the scale factor
         for obj_id, points in self.polygons.items():
-            color = plt.cm.tab20(int(obj_id) % 20)
-            r, g, b = [int(c * 255) for c in color[:3]]
+            # Determine color based on is_class_instance
+            if obj_id in self.instances and self.instances[obj_id]['is_class_instance']:
+                # Use green for class instances
+                base_color = QColor(0, 200, 0)  # Green for class instances
+            else:
+                # Use red for non-class instances
+                base_color = QColor(200, 0, 0)  # Red for non-class instances
             
             # Scale points by scale factor
             scaled_points = []
@@ -103,21 +111,26 @@ class FrameViewer(QWidget):
             # Higher opacity and thicker border for highlighted object
             if obj_id == self.highlighted_obj_id:
                 painter.setOpacity(0.8)
-                painter.setBrush(QColor(r, g, b))
+                painter.setBrush(base_color)
                 painter.setPen(QPen(QColor(255, 255, 0), highlight_pen_width))  # Yellow border for highlighted object
             else:
                 painter.setOpacity(0.6)
-                painter.setBrush(QColor(r, g, b))
-                painter.setPen(QPen(QColor(r, g, b), pen_width))
+                painter.setBrush(base_color)
+                painter.setPen(QPen(base_color, pen_width))
                 
             painter.drawPolygon(poly)
             
-            # Draw object ID with dark background
+            # Draw object ID and confidence with dark background
             painter.setOpacity(1.0)
-            text = f"ID: {obj_id}"
+            confidence_text = ""
+            if obj_id in self.instances and 'class_confidence' in self.instances[obj_id]:
+                confidence = self.instances[obj_id]['class_confidence']
+                confidence_text = f"{confidence:.2f}"
+            
+            text = f"ID: {obj_id} {confidence_text}"
             
             # Scale label size and position based on scale factor
-            label_width = int(60 * self.scale_factor)
+            label_width = int(100 * self.scale_factor)  # Wider to accommodate confidence value
             label_height = int(20 * self.scale_factor)
             label_y_offset = int(25 * self.scale_factor)
             
@@ -152,7 +165,7 @@ class FrameViewer(QWidget):
         painter.drawText(status_rect, Qt.AlignLeft | Qt.AlignVCenter, f"{status} | {scale_info}")
         
         # Draw instructions with background
-        instructions = "j: mark variant | u: undo deletion | click object: delete | right: play forward | left: play backward | space: pause | q: quit"
+        instructions = "j: mark variant | u: undo deletion | click object: toggle class | right: play forward | left: play backward | space: pause | q: quit"
         instr_rect = QRect(10, 50, self.width() - 20, 25)
         painter.fillRect(instr_rect, QColor(0, 0, 0, 180))
         painter.setPen(QColor(0, 255, 0))
@@ -178,25 +191,28 @@ class FrameViewer(QWidget):
                 for obj_id, points in self.polygons.items():
                     points_array = np.array(points, dtype=np.int32)
                     if cv2.pointPolygonTest(points_array, (x, y), False) >= 0:
-                        self.object_deleted.emit(obj_id)
+                        self.object_toggled.emit(obj_id)  # Emit toggle signal instead of delete
                         break
+
 
 class TrackViewer(QWidget):
     object_clicked = pyqtSignal(str)
     
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setFixedHeight(150)
+        self.setFixedHeight(160)
         self.master_track = []
         self.deleted_ids = set()
         self.current_idx = 0
         self.highlighted_obj_id = None
+        self.instances = {}  # Store instance data
         
-    def update_data(self, master_track, deleted_ids, current_idx, highlighted_obj_id=None):
+    def update_data(self, master_track, deleted_ids, current_idx, instances=None, highlighted_obj_id=None):
         self.master_track = master_track
         self.deleted_ids = deleted_ids
         self.current_idx = current_idx
         self.highlighted_obj_id = highlighted_obj_id
+        self.instances = instances or {}
         self.update()
     
     def paintEvent(self, event):
@@ -213,7 +229,7 @@ class TrackViewer(QWidget):
         obj_ids = sorted([oid for oid in obj_ids if oid not in self.deleted_ids], key=lambda x: int(x))
         
         num_frames = len(self.master_track)
-        left_margin = 50
+        left_margin = 60  # Increased to accommodate class label
         timeline_width = self.width() - left_margin
         spacing = timeline_width / num_frames if num_frames > 0 else 0
         row_height = 20
@@ -232,9 +248,14 @@ class TrackViewer(QWidget):
             if obj_id == self.highlighted_obj_id:
                 painter.fillRect(0, y_row, self.width(), row_height, QColor(80, 80, 100))
             
-            # Draw object ID label with background
-            id_rect = QRect(5, y_row + 2, 40, row_height - 4)
-            painter.fillRect(id_rect, QColor(30, 30, 30))
+            # Draw object ID label with background and color indicating class status
+            id_rect = QRect(5, y_row + 2, 50, row_height - 4)
+            
+            # Color based on class status
+            is_class = self.instances.get(obj_id, {}).get('is_class_instance', False)
+            label_color = QColor(30, 150, 30) if is_class else QColor(150, 30, 30)
+            
+            painter.fillRect(id_rect, label_color)
             painter.setPen(QColor(255, 255, 255))
             painter.drawText(id_rect, Qt.AlignCenter, f"ID: {obj_id}")
             
@@ -274,6 +295,7 @@ class TrackViewer(QWidget):
         if 0 <= clicked_row < len(obj_ids):
             self.object_clicked.emit(obj_ids[clicked_row])
 
+
 class TrackingVisualizer(QMainWindow):
     def __init__(self, output_dir, video_name, video_path, video_tracker, stabilizer):
         super().__init__()
@@ -286,6 +308,7 @@ class TrackingVisualizer(QMainWindow):
         data = video_tracker.import_master_track(output_dir, video_name)
         self.master_track = data['important_frames']
         self.variant_frames = data.get('variant_frames', [])
+        self.instances = data.get('instances', {})  # Load instance data
         self.deleted_obj_ids = set()
         # Store deletion history for undo
         self.deletion_history = deque(maxlen=50)  # Limit history to 50 items
@@ -302,7 +325,13 @@ class TrackingVisualizer(QMainWindow):
         self.play_timer.timeout.connect(self.play_next_frame)
         self.play_timer.setInterval(100)
         
+        # Calculate scaling properly on startup
+        self.initialized = False
+        QTimer.singleShot(100, self.initial_display)
+    
+    def initial_display(self):
         self.display_current_frame()
+        self.initialized = True
     
     def setup_ui(self):
         self.setWindowTitle("Sock Tracking")
@@ -313,7 +342,7 @@ class TrackingVisualizer(QMainWindow):
         main_layout = QVBoxLayout(central_widget)
         
         self.frame_viewer = FrameViewer()
-        self.frame_viewer.object_deleted.connect(self.delete_object)
+        self.frame_viewer.object_toggled.connect(self.toggle_class_instance)  # Connect toggle signal
         main_layout.addWidget(self.frame_viewer)
         
         # Create scrollarea with padding for bottom items
@@ -342,10 +371,32 @@ class TrackingVisualizer(QMainWindow):
         QShortcut(QKeySequence(Qt.Key_Left), self, self.start_playing_backward)
         QShortcut(QKeySequence(Qt.Key_Space), self, self.stop_playing)
         QShortcut(QKeySequence(Qt.Key_U), self, self.undo_deletion)  # Add undo shortcut
+        QShortcut(QKeySequence(Qt.Key_D), self, self.delete_highlighted_object)  # New shortcut for deletion
     
     def highlight_object(self, obj_id):
         self.highlighted_obj_id = obj_id
         self.display_current_frame()
+    
+    def toggle_class_instance(self, obj_id):
+        """Toggle the is_class_instance field for the clicked object"""
+        if obj_id in self.instances:
+            # Toggle the is_class_instance field
+            self.instances[obj_id]['is_class_instance'] = not self.instances[obj_id]['is_class_instance']
+            logging.info(f"Toggled object {obj_id} is_class_instance to {self.instances[obj_id]['is_class_instance']}")
+            self.display_current_frame()
+        else:
+            # If the instance doesn't exist in the instances dict, create it
+            self.instances[obj_id] = {
+                'class_confidence': 0.0,
+                'is_class_instance': True  # Start as True when created manually
+            }
+            logging.info(f"Created new instance {obj_id} with is_class_instance=True")
+            self.display_current_frame()
+    
+    def delete_highlighted_object(self):
+        """Delete the currently highlighted object"""
+        if self.highlighted_obj_id:
+            self.delete_object(self.highlighted_obj_id)
     
     def display_current_frame(self):
         if not self.master_track:
@@ -375,7 +426,8 @@ class TrackingVisualizer(QMainWindow):
         
         self.frame_viewer.update_frame(
             frame_rgb, 
-            polygons, 
+            polygons,
+            self.instances,  # Pass instance data 
             frame_idx, 
             self.playing, 
             self.playing_backward, 
@@ -387,6 +439,7 @@ class TrackingVisualizer(QMainWindow):
             self.master_track, 
             self.deleted_obj_ids, 
             self.current_idx,
+            self.instances,  # Pass instance data
             self.highlighted_obj_id
         )
     
@@ -460,7 +513,7 @@ class TrackingVisualizer(QMainWindow):
         self.play_timer.stop()
         self.cap.release()
         
-        if self.deleted_obj_ids or (self.variant_frames and self.current_idx == len(self.master_track) - 1):
+        if self.deleted_obj_ids or (self.variant_frames and self.current_idx == len(self.master_track) - 1) or self.instances:
             # Apply deletions and save changes
             data = self.video_tracker.import_master_track(self.output_dir, self.video_name)
             
@@ -471,21 +524,27 @@ class TrackingVisualizer(QMainWindow):
                             del frame['data'][obj_id]
                 
                 data['important_frames'] = self.master_track
-                data['num_objects'] -= len(self.deleted_obj_ids)
+                if 'num_objects' in data:
+                    data['num_objects'] -= len(self.deleted_obj_ids)
                 logging.info(f"Removed {len(self.deleted_obj_ids)} objects from all frames")
+            
+            # Save instance data
+            data['instances'] = self.instances
+            logging.info(f"Saved {len(self.instances)} instances with class status")
             
             if self.variant_frames and self.current_idx == len(self.master_track) - 1:
                 data['important_frames'] = self.master_track
                 data['variant_frames'] = self.variant_frames
-            
+
             json_path = self.video_tracker._get_json_file_path(self.output_dir, self.video_name)
             with open(json_path, 'w') as f:
                 json.dump(data, f, indent=2)
             logging.info(f"Saved changes to {json_path}")
         else:
             logging.info(f"Quit without saving changes.")
-        
+
         event.accept()
+
 
 def visualize_all(config: BaseConfig):
     stabilizer = Stabilizer(config)
@@ -503,17 +562,39 @@ def visualize_all(config: BaseConfig):
     logging.info(f"Output directory: {config.output_dir}")
     
     for video_file in video_files:
-        video_file = video_file[:-4]
-        video_path = os.path.join(config.input_dir, video_file + ".mov")
-        logging.info(f"Processing video: {video_file}")
+        # Remove file extension if present
+        video_name = video_file.rsplit('.', 1)[0] if '.' in video_file else video_file
         
-        data = video_tracker.import_master_track(config.output_dir, video_file)
-        if data.get('variant_frames') is not None:
-            logging.info(f"Skipping {video_file} - variant frames already marked")
+        # Get full path with the original extension
+        for ext in ['.mp4', '.avi', '.mov', '.mkv']:
+            potential_path = os.path.join(config.input_dir, video_name + ext)
+            if os.path.exists(potential_path):
+                video_path = potential_path
+                break
+        else:
+            # If no matching file is found with extensions
+            video_path = os.path.join(config.input_dir, video_file)
+        
+        logging.info(f"Processing video: {video_name}")
+        
+        # Check if the track file exists
+        try:
+            data = video_tracker.import_master_track(config.output_dir, video_name)
+            # Ensure instances are present in the data
+            if 'instances' not in data:
+                logging.info(f"Adding instances field to {video_name}")
+                data['instances'] = {}
+                json_path = video_tracker._get_json_file_path(config.output_dir, video_name)
+                with open(json_path, 'w') as f:
+                    json.dump(data, f, indent=2)
+                    
+            if data.get('variant_frames') is not None and config.skip_variant_marked:
+                logging.info(f"Skipping {video_name} - variant frames already marked")
+                continue
+        except Exception as e:
+            logging.error(f"Error loading track file for {video_name}: {e}")
             continue
         
-        visualizer = TrackingVisualizer(config.output_dir, video_file, video_path, video_tracker, stabilizer)
+        visualizer = TrackingVisualizer(config.output_dir, video_name, video_path, video_tracker, stabilizer)
         visualizer.show()
         app.exec_()
-    
-    return 0
