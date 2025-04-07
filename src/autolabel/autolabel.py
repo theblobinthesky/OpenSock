@@ -175,15 +175,12 @@ def process_video(config: BaseConfig, video_path, video_tracker):
     #     [instances, tracks, interesting_frames, homographies, video_name] = pickle.load(f)
 
     begin = time.time()
-    t = 152 # len(interesting_frames)
-    instances, master_track = video_tracker.merge_into_master_track(t, 4, instances, tracks)
+    instances, master_track = video_tracker.merge_into_master_track(len(interesting_frames), 4, instances, tracks)
+    print(f"{len(instances)=}")
     end = time.time()
     logging.info(f"Merged and deduplicated tracks. {end - begin:.4f}s")
 
-    begin = time.time()
     video_tracker.mark_occlusions(master_track)
-    end = time.time()
-    logging.info(f". {end - begin:.4f}s")
 
     begin = time.time()
     video_tracker.export_master_track(interesting_frames, instances, homographies, master_track, config.output_dir, video_name)
@@ -242,7 +239,7 @@ def label_automatically(
         [f for f in os.listdir(config.input_dir) if f.lower().endswith(('.mp4', '.avi', '.mov', '.mkv'))]
     )
 
-    video_files = video_files[:1] # TODO: revert
+    # video_files = video_files[:1] # TODO: revert
 
     if not video_files:
         logging.info(f"No videos found in {config.input_dir}")
@@ -254,7 +251,7 @@ def label_automatically(
         begin = time.time()
         process_video(config, video_path, video_tracker)
         end = time.time()
-        print(f"Processed video {video_file}. {end - begin}s")
+        logging.info(f"Processed video: {video_file}. {end - begin}s")
 
 
     logging.info("All operations completed successfully!")

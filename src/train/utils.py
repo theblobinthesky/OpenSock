@@ -3,6 +3,28 @@ import numpy as np
 import jax.numpy as jnp
 
 
+def compute_iou_with_sides(box1, box2):
+    # box format: [x_min, y_min, x_max, y_max]
+    x1, y1, x2, y2 = box1
+    x1_p, y1_p, x2_p, y2_p = box2
+
+    # Intersection coordinates
+    xi1 = max(x1, x1_p)
+    yi1 = max(y1, y1_p)
+    xi2 = min(x2, x2_p)
+    yi2 = min(y2, y2_p)
+
+    # Intersection area
+    inter_area = max(0, xi2 - xi1) * max(0, yi2 - yi1)
+
+    # Union area
+    box1_area = (x2 - x1) * (y2 - y1)
+    box2_area = (x2_p - x1_p) * (y2_p - y1_p)
+    union_area = box1_area + box2_area - inter_area
+
+    return inter_area / union_area if union_area > 0 else 0
+
+
 def batch_intersection_over_union(bbox: jnp.ndarray, rem_bboxes: jnp.ndarray) -> float:
     bbox_left, bbox_right, bbox_top, bbox_bottom = bbox[0], bbox[1], bbox[2], bbox[3]
     [rem_left, rem_right, rem_top, rem_bottom] = rem_bboxes.T
@@ -140,3 +162,23 @@ def distribution_focal_loss(cx, cy, target: jnp.ndarray, pred: jnp.ndarray) -> j
 def general_iou_loss():
     # TODO: Dew it.
     return 0.0
+
+
+def infinite_learning_rate_scheduler(config: dict, idx: int) -> dict:
+    warmup_end = config['num_warmup_steps']
+    cooldown_end = warmup_end + config['num_cooldown_steps']
+    decay_end = cooldown_end + config['num_decay_steps']
+    annealing_end = decay_end + config['num_annealing_steps']
+
+    idx = idx % annealing_end
+
+    if idx <= warmup_end:
+        lr = config['max_lr'] * idx / config['num_warmup_steps']
+    elif idx <= cooldown_end:
+        lr = config['const_lr'] + 0.5 * (config['max_lr'] - config['const_lr']) * (1 + np.cos(np.pi * (idx - warmup_end) / config['num_cooldown_steps']))
+    elif idx <= decay_end:
+        lr = config['const_lr']
+    else:
+        lr = config['const_lr'] * (config['min_lr'] / config['const_lr']) ** ((idx - decay_end) / (decay_end + config['num_annealing_steps']))
+
+    return lr

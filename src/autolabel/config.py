@@ -23,11 +23,11 @@ class BaseConfig:
     max_interesting_frames: int = 180
     instance_merge_iou_thresh: float = 0.9
     no_change_threshold: float = 0.01
-    consecutive_static_required: int = 3
+    consecutive_static_required: int = 10
     performance_downscale_factor: int = 4
 
     classifier_confidence_threshold: float = 0.04
     mask_contrast_control = 1.3     # contrast control (1.0-3.0)
     mask_brightness_control = 10    # brightness control (0-100)
-    video_tracker_inside_threshold = 0.9
+    video_tracker_inside_threshold = 1.0 # 0.99
     temp_fs_dir = "../data/temp_fs"

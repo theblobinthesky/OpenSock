@@ -2,7 +2,6 @@ import os
 import json
 import cv2
 import numpy as np
-import matplotlib.pyplot as plt
 import logging
 from collections import deque
 from PyQt5.QtWidgets import QApplication, QMainWindow, QWidget, QVBoxLayout, QScrollArea, QShortcut
@@ -10,7 +9,6 @@ from PyQt5.QtCore import Qt, QTimer, QRect, pyqtSignal, QPoint, QSize
 from PyQt5.QtGui import QImage, QPixmap, QPainter, QColor, QPen, QKeySequence, QPolygon
 from .trackers import Stabilizer, ImageTracker, VideoTracker, apply_homography
 from .config import BaseConfig
-
 
 class FrameViewer(QWidget):
     object_deleted = pyqtSignal(str)
@@ -165,7 +163,7 @@ class FrameViewer(QWidget):
         painter.drawText(status_rect, Qt.AlignLeft | Qt.AlignVCenter, f"{status} | {scale_info}")
         
         # Draw instructions with background
-        instructions = "j: mark variant | u: undo deletion | click object: toggle class | right: play forward | left: play backward | space: pause | q: quit"
+        instructions = "j: mark variant | u: undo deletion | click object: toggle class | right: play forward | left: play backward | space: pause | q: quit | p: quit all"
         instr_rect = QRect(10, 50, self.width() - 20, 25)
         painter.fillRect(instr_rect, QColor(0, 0, 0, 180))
         painter.setPen(QColor(0, 255, 0))
@@ -194,18 +192,33 @@ class FrameViewer(QWidget):
                         self.object_toggled.emit(obj_id)  # Emit toggle signal instead of delete
                         break
 
-
 class TrackViewer(QWidget):
     object_clicked = pyqtSignal(str)
+    object_toggled = pyqtSignal(str)  # New signal for toggling is_class_instance
     
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setFixedHeight(160)
         self.master_track = []
         self.deleted_ids = set()
         self.current_idx = 0
         self.highlighted_obj_id = None
         self.instances = {}  # Store instance data
+        
+    def sizeHint(self):
+        # Calculate size based on content
+        if not self.master_track:
+            return QSize(100, 300)
+        
+        obj_ids = self.get_visible_object_ids()
+        height = len(obj_ids) * 20 + 10  # Row height (20) plus some padding
+        return QSize(100, height)
+        
+    def get_visible_object_ids(self):
+        """Helper method to get sorted visible object IDs"""
+        obj_ids = set()
+        for frame in self.master_track:
+            obj_ids.update(frame['data'].keys())
+        return sorted([oid for oid in obj_ids if oid not in self.deleted_ids], key=lambda x: int(x))
         
     def update_data(self, master_track, deleted_ids, current_idx, instances=None, highlighted_obj_id=None):
         self.master_track = master_track
@@ -213,6 +226,9 @@ class TrackViewer(QWidget):
         self.current_idx = current_idx
         self.highlighted_obj_id = highlighted_obj_id
         self.instances = instances or {}
+        
+        # Update widget size when data changes
+        self.updateGeometry()
         self.update()
     
     def paintEvent(self, event):
@@ -222,14 +238,12 @@ class TrackViewer(QWidget):
         painter = QPainter(self)
         painter.fillRect(self.rect(), QColor(50, 50, 50))
         
-        # Compute sorted valid object IDs
-        obj_ids = set()
-        for frame in self.master_track:
-            obj_ids.update(frame['data'].keys())
-        obj_ids = sorted([oid for oid in obj_ids if oid not in self.deleted_ids], key=lambda x: int(x))
+        # Get sorted visible object IDs
+        obj_ids = self.get_visible_object_ids()
         
         num_frames = len(self.master_track)
-        left_margin = 60  # Increased to accommodate class label
+        left_margin = 80  # Increased margin to accommodate toggle icon + ID label
+        toggle_width = 20  # Width of toggle icon area
         timeline_width = self.width() - left_margin
         spacing = timeline_width / num_frames if num_frames > 0 else 0
         row_height = 20
@@ -248,11 +262,33 @@ class TrackViewer(QWidget):
             if obj_id == self.highlighted_obj_id:
                 painter.fillRect(0, y_row, self.width(), row_height, QColor(80, 80, 100))
             
+            # Draw toggle icon (checkbox-like)
+            toggle_rect = QRect(5, y_row + 2, toggle_width - 2, row_height - 4)
+            is_class = self.instances.get(obj_id, {}).get('is_class_instance', False)
+            
+            # Draw toggle icon background
+            painter.fillRect(toggle_rect, QColor(20, 20, 20))
+            
+            # Draw toggle icon state
+            if is_class:
+                # Green checkmark or filled box for enabled
+                painter.setPen(QPen(QColor(0, 200, 0), 2))
+                painter.drawLine(toggle_rect.left() + 3, toggle_rect.center().y(), 
+                                toggle_rect.center().x() - 2, toggle_rect.bottom() - 5)
+                painter.drawLine(toggle_rect.center().x() - 2, toggle_rect.bottom() - 5,
+                                toggle_rect.right() - 3, toggle_rect.top() + 5)
+            else:
+                # Red X for disabled
+                painter.setPen(QPen(QColor(200, 0, 0), 2))
+                painter.drawLine(toggle_rect.left() + 3, toggle_rect.top() + 3, 
+                                toggle_rect.right() - 3, toggle_rect.bottom() - 3)
+                painter.drawLine(toggle_rect.left() + 3, toggle_rect.bottom() - 3,
+                                toggle_rect.right() - 3, toggle_rect.top() + 3)
+            
             # Draw object ID label with background and color indicating class status
-            id_rect = QRect(5, y_row + 2, 50, row_height - 4)
+            id_rect = QRect(toggle_width + 5, y_row + 2, 50, row_height - 4)
             
             # Color based on class status
-            is_class = self.instances.get(obj_id, {}).get('is_class_instance', False)
             label_color = QColor(30, 150, 30) if is_class else QColor(150, 30, 30)
             
             painter.fillRect(id_rect, label_color)
@@ -282,18 +318,24 @@ class TrackViewer(QWidget):
     def mousePressEvent(self, event):
         if not self.master_track:
             return
-            
-        # Calculate row height and find which row was clicked
-        obj_ids = set()
-        for frame in self.master_track:
-            obj_ids.update(frame['data'].keys())
-        obj_ids = sorted([oid for oid in obj_ids if oid not in self.deleted_ids], key=lambda x: int(x))
+ 
+        # Get sorted visible object IDs
+        obj_ids = self.get_visible_object_ids()
         
         row_height = 20
         clicked_row = event.y() // row_height
         
         if 0 <= clicked_row < len(obj_ids):
-            self.object_clicked.emit(obj_ids[clicked_row])
+            obj_id = obj_ids[clicked_row]
+            
+            # Check if click is in toggle icon area (left side)
+            toggle_width = 20
+            if event.x() <= toggle_width:
+                # Toggle icon clicked
+                self.object_toggled.emit(obj_id)
+            else:
+                # Rest of row clicked - highlight object
+                self.object_clicked.emit(obj_id)
 
 
 class TrackingVisualizer(QMainWindow):
@@ -332,7 +374,7 @@ class TrackingVisualizer(QMainWindow):
     def initial_display(self):
         self.display_current_frame()
         self.initialized = True
-    
+
     def setup_ui(self):
         self.setWindowTitle("Sock Tracking")
         self.resize(1280, 870)
@@ -358,8 +400,9 @@ class TrackingVisualizer(QMainWindow):
         
         self.track_viewer = TrackViewer()
         self.track_viewer.object_clicked.connect(self.highlight_object)
-        track_layout.addWidget(self.track_viewer)
-        track_layout.addStretch()
+        self.track_viewer.object_toggled.connect(self.toggle_class_instance)  # Connect the new toggle signal
+        # track_layout.addWidget(self.track_viewer)
+        # track_layout.addStretch()
         
         main_layout.addWidget(self.scroll_area)
         
@@ -372,7 +415,8 @@ class TrackingVisualizer(QMainWindow):
         QShortcut(QKeySequence(Qt.Key_Space), self, self.stop_playing)
         QShortcut(QKeySequence(Qt.Key_U), self, self.undo_deletion)  # Add undo shortcut
         QShortcut(QKeySequence(Qt.Key_D), self, self.delete_highlighted_object)  # New shortcut for deletion
-    
+
+
     def highlight_object(self, obj_id):
         self.highlighted_obj_id = obj_id
         self.display_current_frame()

@@ -5,7 +5,7 @@ from tqdm.contrib.logging import logging_redirect_tqdm
 from autolabel.autolabel import label_automatically
 from autolabel.visualize import visualize_all
 from autolabel.config import BaseConfig
-from train.classificator import train_classifier, linear_classifier
+from src.train.classifier import train_classifier, linear_classifier
 from train.train import load_params
 from train.config import TrainConfig, DataConfig
 import cv2, jax.numpy as jnp, numpy as np, torch
@@ -18,7 +18,7 @@ logging.basicConfig(
     handlers=[logging.FileHandler('pipeline.log'), logging.StreamHandler()]
 )
 
-class PretrainedClassificator:
+class PretrainedClassifier:
     def __init__(self):
         self.model = timm.create_model('eva02_large_patch14_448.mim_m38m_ft_in22k_in1k', pretrained=True)
         self.model = self.model.to('cuda')
@@ -37,7 +37,7 @@ class PretrainedClassificator:
         return probabilities[class_idx]
 
 
-class CustomClassificator:
+class CustomClassifier:
     def __init__(self, tconfig: TrainConfig, dconfig: DataConfig):
         self.dinov2 = torch.hub.load('facebookresearch/dinov2', 'dinov2_vits14_reg').to('cuda')
         self.dinov2 = torch.compile(self.dinov2)
@@ -68,17 +68,14 @@ with logging_redirect_tqdm():
         classifier_confidence_threshold = 0.01
     )
 
-    print("Autolabel using pretrained classifier:")
-    classifier = PretrainedClassificator()
+    # print("Autolabel using pretrained classifier:")
+    # classifier = PretrainedClassifier()
     # label_automatically(classifier, config)
-    visualize_all(config)
+    # visualize_all(config)
 
-    exit(0)
-
-
-    print()
-    print("Training classifier:")
-    train_classifier()
+    # print()
+    # print("Training classifier:")
+    # train_classifier()
 
     config = BaseConfig(
         imagenet_class = 806,
@@ -92,5 +89,6 @@ with logging_redirect_tqdm():
     print()
     print("Autolabel using custom classifier:")
     tconfig, dconfig = TrainConfig(), DataConfig()
-    classifier = CustomClassificator(tconfig, dconfig)
-    label_automatically(classifier, config)
+    classifier = CustomClassifier(tconfig, dconfig)
+    # label_automatically(classifier, config)
+    visualize_all(config)

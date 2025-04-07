@@ -1,5 +1,5 @@
 import numpy as np
-import torch, cv2, rtree.index as index
+import torch, cv2
 from shapely.geometry import Polygon
 import json
 from typing import Dict, List, Tuple, Optional
@@ -329,33 +329,21 @@ class VideoTracker:
 
             return inters_width * inters_height
 
-        # Setup rtrees.
-        rtrees_for_frames = [] 
-        for frame in master_track:
-            rtree = index.Index()
-
-            for obj_id, (_, contour) in frame.items():
-                if len(contour) > 0:
-                    x, y, w, h = cv2.boundingRect(contour)
-                    rtree.insert(obj_id, (x, y, x + w, y + h))
-
-            rtrees_for_frames.append(rtree)
-
         # Apply both rules.
         a_inside_b = {}
         to_merge = {}
         num_instances = len(instances)
-        for frame, rtree in zip(master_track, rtrees_for_frames):
+        for frame in master_track:
             for obj_id, (poly, contour) in frame.items():
                 if len(contour) == 0: continue
                 x, y, w, h = cv2.boundingRect(contour)
-                hits = list(rtree.intersection((x, y, x + w, y + h)))
 
-                for obj_id_2 in hits:
-                    if obj_id >= obj_id_2: continue
+                for obj_id_2 in frame.keys():
+                    if obj_id == obj_id_2: continue
                     poly_2, contour_2 = frame[obj_id_2]
 
                     inters_upper_bound = bbox_inters(contour, contour_2)
+                    if inters_upper_bound == 0.0: continue
 
                     # Test for rule 1:
                     mask_area = poly.area
@@ -366,6 +354,9 @@ class VideoTracker:
 
                         if inters / mask_area >= self.config.video_tracker_inside_threshold:
                             a_inside_b[(obj_id, obj_id_2)] = a_inside_b.get((obj_id, obj_id_2), 0) + 1
+
+                    # Rule 2 is symetric, Rule 1 is antisymmetric.
+                    if obj_id >= obj_id_2: continue
 
                     # Test for full rule 2:
                     union_lower_bound = max(poly.area + poly_2.area - inters_upper_bound, 0.1)
@@ -379,18 +370,12 @@ class VideoTracker:
 
 
             # Apply rule 1: 
-            maj_votes = [ids for ids, num_votes in a_inside_b.items() if num_votes >= min_num_occ_for_action]
-            for obj_id_1, _ in maj_votes:
-                delete_instance.add(obj_id_1)
-                for frame, rtree in zip(master_track, rtrees_for_frames):
-                    if obj_id_1 in frame: 
-                        # TODO: Duplicate code.
-                        _, contour = frame[obj_id_1]
-                        if len(contour) > 0:
-                            x, y, w, h = cv2.boundingRect(contour)
-                            rtree.delete(obj_id_1, (x, y, x + w, y + h))
-
-                        del frame[obj_id_1]
+            # maj_votes = [ids for ids, num_votes in a_inside_b.items() if num_votes >= min_num_occ_for_action]
+            # for obj_id_1, _ in maj_votes:
+            #     delete_instance.add(obj_id_1)
+            #     for frame, rtree in zip(master_track, rtrees_for_frames):
+            #         if obj_id_1 in frame: 
+            #             del frame[obj_id_1]
 
             # Apply rule 2: 
             maj_votes = [ids for ids, num_votes in to_merge.items() if num_votes >= min_num_occ_for_action]
@@ -403,26 +388,12 @@ class VideoTracker:
                 delete_instance.add(obj_id_1)
                 delete_instance.add(obj_id_2)
 
-                for frame, rtree in zip(master_track, rtrees_for_frames):
+                for frame in master_track:
                     if obj_id_1 in frame: 
-                        # TODO: Duplicate code.
-                        _, contour = frame[obj_id_1]
-                        if len(contour) > 0:
-                            x, y, w, h = cv2.boundingRect(contour)
-                            rtree.delete(obj_id_1, (x, y, x + w, y + h))
-                            rtree.insert(new_obj_id, (x, y, x + w, y + h))
-
                         frame[new_obj_id] = frame[obj_id_1]
                         del frame[obj_id_1]
                         
                     if obj_id_2 in frame: 
-                        # TODO: Duplicate code.
-                        _, contour = frame[obj_id_2]
-                        if len(contour) > 0:
-                            x, y, w, h = cv2.boundingRect(contour)
-                            rtree.delete(obj_id_2, (x, y, x + w, y + h))
-                            rtree.insert(new_obj_id, (x, y, x + w, y + h))
-
                         frame[new_obj_id] = frame[obj_id_2]
                         del frame[obj_id_2]
 

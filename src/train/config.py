@@ -2,13 +2,23 @@
 class TrainConfig:
     def __init__(self):
         self.lr: float = 1e-5
-        self.num_epochs: int = 40
+        self.num_epochs: int = 25
         self.batch_size: int = 128
-        self.model_path: str = "../data/classificator.jax"
-        self.train_dl_num_threads = 16
-        self.train_dl_prefetch_size = 16
-        self.valid_dl_num_threads = 16
-        self.valid_dl_prefetch_size = 16
+        self.model_path: str = "../data/classifier.jax"
+        self.train_dl_num_threads = 12
+        self.train_dl_prefetch_size = 12
+        self.valid_dl_num_threads = 12
+        self.valid_dl_prefetch_size = 12
+
+        self.lr_schedule = {
+            'max_lr': 1e-3,
+            'const_lr': 1e-4,
+            'min_lr': 1e-5,
+            'num_warmup_epochs': 1,
+            'num_cooldown_epochs': 12,
+            'num_decay_epochs': 6,
+            'num_annealing_epochs': 5
+        }
 
 
 class DataConfig:
@@ -18,9 +28,18 @@ class DataConfig:
     classifier_output_dir = "../data/temp/classifier_ds"
     classifier_target_image_size = (1080, 1920)
     classifier_image_size = (518, 518)
-    classifier_imagenet_percentage = 0.7
+    classifier_negative_percentage = 0.2
+    classifier_imagenet_percentage = 0.5
     classifier_avoid_class = 806 # Imagenet SOCK class
-    classifier_max_num_class_samples = 1024 * 8
+    classifier_max_num_class_samples = 1024 * 2
+
+    classifier_neg_anchors = {
+        'min_size': 0.15,
+        'max_size': 0.3,
+        'steps': 5
+    }
+    classifier_neg_class_iou_thresh = 0.05
+
 
     split_train_percentage = 0.8
     split_valid_percentage = 0.08

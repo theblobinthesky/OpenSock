@@ -8,6 +8,7 @@ from functools import partial
 from collections import Counter
 from .config import TrainConfig, DataConfig, ModelConfig
 from .logger import Logger, MockLogger
+from .utils import infinite_learning_rate_scheduler
 
 stop_training = False
 
@@ -68,20 +69,35 @@ def train_model(purpose: str,
                 ):
     threading.Thread(target=monitor_input, daemon=True).start()
 
-    optim = optax.adam(learning_rate=tconfig.lr)
+    optim = optax.inject_hyperparams(optax.adam)(learning_rate=0.0)
     opt_state = optim.init(params)
     last_valid_loss = float('inf')
 
     train_ds, valid_ds, test_ds = dataset.split_train_validation_test(dconfig.split_train_percentage, dconfig.split_valid_percentage)
     train_dl = DataLoader(train_ds, tconfig.batch_size, tconfig.train_dl_num_threads, tconfig.train_dl_prefetch_size)
     valid_dl = DataLoader(valid_ds, tconfig.batch_size, tconfig.valid_dl_num_threads, tconfig.valid_dl_prefetch_size)
-
     logger = Logger(purpose, dconfig, tconfig, mconfig) if 'LOG' in os.environ else MockLogger()
 
+    lr_schedule = {
+        'max_lr': tconfig.lr_schedule['max_lr'],
+        'const_lr': tconfig.lr_schedule['const_lr'],
+        'min_lr':  tconfig.lr_schedule['min_lr'],
+        'num_warmup_steps':  int(tconfig.lr_schedule['num_warmup_epochs'] * len(train_dl)),
+        'num_cooldown_steps': int(tconfig.lr_schedule['num_cooldown_epochs'] * len(train_dl)),
+        'num_decay_steps':  int(tconfig.lr_schedule['num_decay_epochs'] * len(train_dl)),
+        'num_annealing_steps': int(tconfig.lr_schedule['num_annealing_epochs'] * len(train_dl))
+    }
+
+    step = 0
     for epoch in range(tconfig.num_epochs):
         epoch_loss = 0.0
         tqdm_iter = tqdm(range(len(train_dl)), desc=f"Training epoch {epoch + 1}/{tconfig.num_epochs}")
         for _ in tqdm_iter:
+            lr = infinite_learning_rate_scheduler(lr_schedule, step)
+            logger.log({"lr": lr})
+            opt_state.hyperparams['learning_rate'] = lr
+            step += 1
+
             batch = train_dl.get_next_batch()
             loss, params, opt_state = _train_step(params, batch, opt_state, optim, loss_fn)
             epoch_loss += loss

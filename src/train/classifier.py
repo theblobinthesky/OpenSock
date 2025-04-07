@@ -84,7 +84,7 @@ def train_classifier():
             'recall': recall(target, pred)
         }
 
-    train_model("classificator", tconfig, dconfig, mconfig, dataset, params, loss_fn, metric_fn)
+    train_model("classifier", tconfig, dconfig, mconfig, dataset, params, loss_fn, metric_fn)
 
 
 if __name__ == "__main__":
