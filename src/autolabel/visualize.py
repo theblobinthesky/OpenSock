@@ -212,7 +212,10 @@ class TrackViewer(QWidget):
         obj_ids = self.get_visible_object_ids()
         height = len(obj_ids) * 20 + 10  # Row height (20) plus some padding
         return QSize(100, height)
-        
+
+    def minimumSizeHint(self):
+        return self.sizeHint()
+
     def get_visible_object_ids(self):
         """Helper method to get sorted visible object IDs"""
         obj_ids = set()
@@ -390,7 +393,7 @@ class TrackingVisualizer(QMainWindow):
         # Create scrollarea with padding for bottom items
         self.scroll_area = QScrollArea()
         self.scroll_area.setWidgetResizable(True)
-        self.scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
         
         self.track_container = QWidget()
         self.scroll_area.setWidget(self.track_container)
@@ -401,8 +404,8 @@ class TrackingVisualizer(QMainWindow):
         self.track_viewer = TrackViewer()
         self.track_viewer.object_clicked.connect(self.highlight_object)
         self.track_viewer.object_toggled.connect(self.toggle_class_instance)  # Connect the new toggle signal
-        # track_layout.addWidget(self.track_viewer)
-        # track_layout.addStretch()
+        track_layout.addWidget(self.track_viewer)
+        track_layout.addStretch()
         
         main_layout.addWidget(self.scroll_area)
         

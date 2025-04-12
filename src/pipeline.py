@@ -1,11 +1,12 @@
 import os, logging
-os.environ['LOG'] = '1'
+# os.environ['LOG'] = '1'
 # os.environ['INVALIDATE_DATASET'] = '1'
+os.environ['PYTORCH_CUDA_ALLOC_CONF'] = 'expandable_segments:True'
 from tqdm.contrib.logging import logging_redirect_tqdm
 from autolabel.autolabel import label_automatically
 from autolabel.visualize import visualize_all
 from autolabel.config import BaseConfig
-from src.train.classifier import train_classifier, linear_classifier
+from train.classifier import train_classifier, linear_classifier
 from train.train import load_params
 from train.config import TrainConfig, DataConfig
 import cv2, jax.numpy as jnp, numpy as np, torch
@@ -39,7 +40,7 @@ class PretrainedClassifier:
 
 class CustomClassifier:
     def __init__(self, tconfig: TrainConfig, dconfig: DataConfig):
-        self.dinov2 = torch.hub.load('facebookresearch/dinov2', 'dinov2_vits14_reg').to('cuda')
+        self.dinov2 = torch.hub.load('facebookresearch/dinov2', 'dinov2_vitb14_reg').to('cuda')
         self.dinov2 = torch.compile(self.dinov2)
         self.jax_params = load_params(tconfig.model_path)
         self.dconfig = dconfig
@@ -48,34 +49,41 @@ class CustomClassifier:
     def __call__(self, x: np.ndarray, _: int):
         x = cv2.resize(x, self.dconfig.classifier_image_size)
         x = np.array(x)[None,]
-        with torch.no_grad():
-            with torch.autocast(device_type='cuda'):
-                images = torch.from_numpy(x).to(dtype=torch.float16, device='cuda') / 255.0
-                images = torch.permute(images, (0, 3, 1, 2))
-                features = self.dinov2(images)
-                jax_features = jnp.from_dlpack(torch.utils.dlpack.to_dlpack(features))
-                pred = linear_classifier(self.jax_params, jax_features)
-                return pred[0][0]
+        with torch.no_grad(), torch.autocast(device_type='cuda'):
+            # import matplotlib.pyplot as plt
+            # plt.figure(figsize=(8, 8))
+            # plt.imshow(x[0])
+            # plt.axis('off') 
+            # plt.title('Input Image')
+            # plt.show()
+
+            images = torch.from_numpy(x).to(dtype=torch.float16, device='cuda') / 255.0
+            images = torch.permute(images, (0, 3, 1, 2))
+            features = self.dinov2(images)
+            jax_features = jnp.from_dlpack(torch.utils.dlpack.to_dlpack(features), copy=True)
+            pred = linear_classifier(self.jax_params, jax_features)
+            print(f"{pred[0][0]=}")
+            return pred[0][0]
 
 
 with logging_redirect_tqdm():
-    config = BaseConfig(
-        imagenet_class = 806,
-        input_dir = "../data/sock_videos",
-        output_dir = "../data/sock_video_master_tracks",
-        image_size = (1080, 1920),
-        output_warped_size = (540, 960),   
-        classifier_confidence_threshold = 0.01
-    )
+    # config = BaseConfig(
+    #     imagenet_class = 806,
+    #     input_dir = "../data/sock_videos",
+    #     output_dir = "../data/sock_video_master_tracks",
+    #     image_size = (1080, 1920),
+    #     output_warped_size = (540, 960),   
+    #     classifier_confidence_threshold = 0.01
+    # )
 
     # print("Autolabel using pretrained classifier:")
     # classifier = PretrainedClassifier()
     # label_automatically(classifier, config)
     # visualize_all(config)
 
-    # print()
-    # print("Training classifier:")
-    # train_classifier()
+    print()
+    print("Training classifier:")
+    train_classifier()
 
     config = BaseConfig(
         imagenet_class = 806,
@@ -90,5 +98,5 @@ with logging_redirect_tqdm():
     print("Autolabel using custom classifier:")
     tconfig, dconfig = TrainConfig(), DataConfig()
     classifier = CustomClassifier(tconfig, dconfig)
-    # label_automatically(classifier, config)
+    label_automatically(classifier, config)
     visualize_all(config)

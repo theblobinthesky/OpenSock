@@ -10,7 +10,7 @@ from .config import DataConfig
 from .utils import compute_iou_with_sides
 
 
-dinov2 = torch.hub.load('facebookresearch/dinov2', 'dinov2_vits14_reg').to('cuda')
+dinov2 = torch.hub.load('facebookresearch/dinov2', 'dinov2_vitb14_reg').to('cuda')
 dinov2 = torch.compile(dinov2)
 
 def get_num_samples_from_class_samples(num_class_samples: int, other_total_perc: float, other_part_perc: float) -> int:
@@ -223,6 +223,7 @@ def load_imagenet_for_classifier(config: DataConfig, avoided_class: int, num_sam
                 label = np.array([0.0], np.float32)
 
                 file_name = f"imagenet_{sample_idx:06d}"
+                roi = cv2.cvtColor(roi, cv2.COLOR_RGB2BGR)
                 cv2.imwrite(os.path.join(config.classifier_output_dir, "images", f"{file_name}.jpg"), roi)
                 np.save(os.path.join(config.classifier_output_dir, "labels", f"{file_name}.npy"), label)
                 sample_idx += 1
@@ -239,7 +240,9 @@ def pp_encode_images_into_features(batch: dict[str, jnp.ndarray]) -> jnp.ndarray
             features = dinov2(images).contiguous()
             jax_features = jnp.from_dlpack(torch.utils.dlpack.to_dlpack(features))
 
+
     return {
+        'images': batch['images'],
         'features': jax_features,
         'labels': batch['labels']
     }

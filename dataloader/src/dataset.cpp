@@ -103,8 +103,6 @@ Dataset::Dataset(std::string _rootDir, std::vector<Head> _heads,
 ) : rootDir(std::move(_rootDir)), heads(std::move(_heads)), subDirs(std::move(_subDirs)), entries({}), offset(0) {
     initRootDir(rootDir);
 
-    // postProcessFunction("test");
-
     if (subDirs.empty()) {
         throw std::runtime_error(
             "Cannot instantiate a dataset with not subdirectories.");
@@ -181,6 +179,11 @@ Dataset::Dataset(std::string _rootDir, std::vector<Head> _heads,
     init();
 }
 
+Dataset::Dataset(const Dataset &other)
+    : rootDir(other.rootDir), heads(other.heads),
+      subDirs(other.subDirs), entries(other.entries),
+      offset(other.offset.load()) {
+}
 
 void Dataset::init() {
     // Remove root directory, if necessary.
@@ -229,14 +232,14 @@ std::tuple<Dataset, Dataset, Dataset> Dataset::splitTrainValidationTest(
     );
 }
 
-std::vector<std::vector<std::string> > Dataset::getNextBatch(
-    const size_t batchSize) const {
+std::vector<std::vector<std::string> > Dataset::getNextBatch(const size_t batchSize) {
     std::vector<std::vector<std::string> > batch;
 
-    for (size_t i = offset; i < offset + batchSize; i++) {
+    const uint32_t lastOffset = offset.fetch_add(batchSize);
+    for (size_t i = lastOffset; i < lastOffset + batchSize; i++) {
         std::vector<std::string> entry;
 
-        for (auto subPath: std::vector(entries[i % entries.size()])) {
+        for (auto subPath: entries[i % entries.size()]) {
             entry.push_back(std::format("{}{}", rootDir, subPath));
         }
 
@@ -244,6 +247,10 @@ std::vector<std::vector<std::string> > Dataset::getNextBatch(
     }
 
     return batch;
+}
+
+void Dataset::goBackNBatches(const size_t numBatches, const size_t batchSize) {
+    offset += entries.size() - numBatches * batchSize;
 }
 
 std::string Dataset::getRootDir() const {

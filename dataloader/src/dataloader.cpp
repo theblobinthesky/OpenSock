@@ -1,7 +1,6 @@
 #include "dataloader.h"
 #include "utils.h"
-#include "image.h"
-#include "cnpy.h"
+#include "data.h"
 #include <filesystem>
 #include <dlpack/dlpack.h>
 
@@ -10,237 +9,22 @@
 namespace py = pybind11;
 namespace fs = std::filesystem;
 
-MemoryArena *MemoryArena::memoryArena;
-
-void MemoryArena::initialize(const size_t totalSize) {
-    if (memoryArena == null) {
-        memoryArena = new MemoryArena(totalSize);
-    }
-}
-
-MemoryArena *MemoryArena::getInstance() {
-    if (memoryArena == null) {
-        throw std::runtime_error("MemoryArena is not initialized.");
-    }
-
-    return memoryArena;
-}
-
-// TODO: Make sure to leave more space in a future version of this allocator
-// so threads don't contend for the same cache line potentially.
-Allocation MemoryArena::allocate(const size_t size) {
-    uint8_t *hostPtr = hostData + offset;
-    uint8_t *gpuPtr = gpuData + offset;
-    offset += size;
-
-    if (offset > totalSize) {
-        throw std::runtime_error(std::format("Tried to allocate {} bytes beyond the size {} of the memory arena.",
-                                             offset - totalSize, totalSize));
-    }
-
-    offset = offset % totalSize;
-    extRefCounter++;
-    return {
-        .host = hostPtr,
-        .gpu = gpuPtr
-    };
-}
-
-void MemoryArena::free() {
-    extRefCounter--;
-
-    if (destroyed && extRefCounter == 0) {
-        // TODO
-    }
-}
-
-void MemoryArena::destroy() {
-    if (extRefCounter == 0) {
-        destroyed = true;
-    }
-}
-
-MemoryArena::MemoryArena(const size_t _totalSize)
-    : hostData(null), gpuData(null), totalSize(_totalSize), offset(0) {
-    cudaError_t err = cudaMallocHost(&hostData, totalSize);
-    if (err != cudaSuccess) {
-        throw std::runtime_error("cudaHostMalloc failed");
-    }
-
-    err = cudaMalloc(&gpuData, totalSize);
-    if (err != cudaSuccess) {
-        throw std::runtime_error(
-            "cudaMalloc failed to allocate " + std::to_string(
-                totalSize / 1024 / 1024) + "MB");
-    }
-}
-
-void MemoryArena::freeAll() {
-    cudaFreeHost(hostData);
-    cudaFree(gpuData);
-}
-
-size_t MemoryArena::getOffset(const Allocation &allocation) const {
-    return allocation.host - hostData;
-}
-
-uint8_t *MemoryArena::getGpuData() const {
-    return gpuData;
-}
-
-ListOfAllocations::ListOfAllocations(const size_t totalSize) : totalAllocation({}), offset(0) {
-    totalAllocation = MemoryArena::getInstance()->allocate(totalSize);
-}
-
-ListOfAllocations &ListOfAllocations::operator=(
-    ListOfAllocations &&allocs) noexcept {
-    totalAllocation = allocs.totalAllocation;
-    allocations = std::move(allocs.allocations);
-    sizes = std::move(allocs.sizes);
-
-    return *this;
-}
-
-ListOfAllocations::ListOfAllocations(
-    ListOfAllocations &&allocs) noexcept : totalAllocation(allocs.totalAllocation),
-                                           offset(0),
-                                           allocations(std::move(allocs.allocations)),
-                                           sizes(std::move(allocs.sizes)) {
-}
-
-Allocation ListOfAllocations::allocate(const size_t size) {
-    const Allocation allocation = {
-        .host = totalAllocation.host + offset,
-        .gpu = totalAllocation.gpu + offset
-    };
-
-    offset += size;
-
-    allocations.push_back(allocation);
-    sizes.push_back(size);
-    return allocation;
-}
-
-uint32_t ListOfAllocations::getOffset(const size_t i) const {
-    return allocations[i].host - totalAllocation.host;
-}
-
-Semaphore::Semaphore(const int initial)
-    : semaphore(initial), numTokensUsed(initial) {
-}
-
-void Semaphore::acquire() {
-    if (!disabled) {
-        semaphore.acquire();
-        ++numTokensUsed;
-    }
-}
-
-void Semaphore::release() {
-    semaphore.release();
-    --numTokensUsed;
-}
-
-void Semaphore::disable() {
-    semaphore.release(numTokensUsed);
-    numTokensUsed = 0;
-    disabled = true;
-}
-
-ThreadPool::ThreadPool(const std::function<void()> &_threadMain,
-                       const size_t _threadCount) : threadMain(_threadMain),
-                                                    threadCount(_threadCount),
-                                                    shutdownCounter(0) {
-}
-
-void ThreadPool::start() {
-    for (size_t i = 0; i < threadCount; i++) {
-        threads.emplace_back(&ThreadPool::extendedThreadMain, this);
-    }
-}
-
-ThreadPool::~ThreadPool() noexcept {
-    for (auto &thread: threads) {
-        if (thread.joinable()) thread.join();
-    }
-}
-
-void ThreadPool::extendedThreadMain() {
-    if (threadMain) threadMain();
-
-    ++shutdownCounter;
-    shutdownNotify.notify_all();
-    std::unique_lock lock(shutdownMutex);
-    shutdownNotify.wait(
-        lock, [this] {
-            return shutdownCounter >= threads.size();
-        });
-}
-
-GPUState::GPUState(const size_t numBarriers) : stream{} {
-    if (const cudaError_t err = cudaStreamCreate(&stream);
-        err != cudaSuccess) {
-        throw std::runtime_error("cudaStreamCreate failed.");
-    }
-
-    for (size_t i = 0; i < numBarriers; i++) {
-        cudaEvent_t barrierEvent;
-        if (cudaEventCreate(&barrierEvent) != cudaSuccess) {
-            throw std::runtime_error("cudaEventCreate failed.");
-        }
-
-        barriers.push_back(barrierEvent);
-    }
-}
-
-GPUState::~GPUState() {
-    if (const auto err = cudaStreamDestroy(stream); err != cudaSuccess) {
-        std::printf("cudaStreamDestroy failed.\n");
-        std::terminate();
-    }
-
-    for (cudaEvent_t barrier: barriers) {
-        cudaEventDestroy(barrier);
-    }
-}
-
-void GPUState::copy(uint8_t *gpuBuffer,
-                    const uint8_t *buffer,
-                    const uint32_t size) const {
-    if (cudaMemcpyAsync(gpuBuffer, buffer, size,
-                        cudaMemcpyHostToDevice, stream) != cudaSuccess) {
-        throw std::runtime_error("cudaMemcpyAsync failed.");
-    }
-}
-
-void GPUState::insertBarrier(const size_t barrierIdx) const {
-    if (cudaEventRecord(barriers[barrierIdx], stream) != cudaSuccess) {
-        throw std::runtime_error("cudaEventRecord failed.");
-    }
-}
-
-void GPUState::sync(const size_t barrierIdx) const {
-    if (cudaEventSynchronize(barriers[barrierIdx]) != cudaSuccess) {
-        throw std::runtime_error("cudaEventSynchronize failed.");
-    }
-}
+std::atomic_int DataLoader::nextId;
 
 DataLoader::DataLoader(
-    Dataset _dataset,
+    const Dataset& _dataset,
     const int _batchSize,
     const int _numThreads,
     const int _prefetchSize
-) : dataset(std::move(_dataset)),
+) : id(nextId.fetch_add(1)),
+    dataset(_dataset),
     batchSize(_batchSize),
     numThreads(_numThreads),
     prefetchSize(_prefetchSize),
     prefetchSemaphore(_prefetchSize),
     outputBatchMemorySize(0),
-    gpu(_prefetchSize),
-    threadPool([this] { this->threadMain(); },
-               _numThreads)
-// TODO: This initialized incorrectly before the defensive programming.
-{
+    resourceClient(id, _prefetchSize),
+    threadPool([this] { this->threadMain(); }, _numThreads) {
     if (batchSize <= 0 || _numThreads <= 0 || _prefetchSize <= 0) {
         throw std::runtime_error(
             "Batch size, the number of threads and the prefetch size need to be strictly positive.");
@@ -251,8 +35,7 @@ DataLoader::DataLoader(
             "Prefetch size must be larger or equal than the number of threads.");
     }
 
-    numberOfBatches = (dataset.getEntries().size() + batchSize - 1) /
-                      batchSize;
+    numberOfBatches = (dataset.getEntries().size() + batchSize - 1) / batchSize;
 
     for (const Head &head: dataset.getHeads()) {
         size_t itemMemorySize = sizeof(float);
@@ -263,7 +46,7 @@ DataLoader::DataLoader(
         outputBatchMemorySize += batchSize * itemMemorySize;
     }
 
-    MemoryArena::initialize(outputBatchMemorySize * _prefetchSize);
+    ResourcePool::reserveAtLeast(outputBatchMemorySize * _prefetchSize);
 
     threadPool.start();
 }
@@ -288,88 +71,37 @@ void DataLoader::threadMain() {
         const std::vector<Head> &heads = dataset.getHeads();
 
         // For each subdirectory, load all images and assemble into one numpy array.
-        ListOfAllocations allocations(outputBatchMemorySize);
-        for (size_t i = 0; i < heads.size(); i++) {
-            const Head &head = heads[i];
+        MultipleAllocations allocations = resourceClient.allocate(outputBatchMemorySize);
 
-            const size_t itemSize = head.getShapeSize();
-            prefetchCacheMutex.lock();
-            const size_t batchBufferSize = batchSize * itemSize * sizeof(float);
-            const auto batchAlloc = allocations.allocate(batchBufferSize);
-            const auto batchBuffer = reinterpret_cast<float *>(batchAlloc.host);
-            prefetchCacheMutex.unlock();
+        // Make sure to not touch the allocation if the current resource client has lost access to the pool.
+        // Otherwise, you'd get null pointer exceptions.
+        if (allocations) {
+            for (size_t headIdx = 0; headIdx < heads.size(); headIdx++) {
+                const Head &head = heads[headIdx];
 
-            switch (head.getFilesType()) {
-                case FileType::JPG: {
-                    const auto batchBufferOld = new uint8_t[batchSize * itemSize];
-
-                    for (size_t j = 0; j < batchSize; j++) {
-                        ImageData imgData = readJpegFile(batchPaths[j][i]);
-                        resizeImage(imgData, batchBufferOld + j * itemSize,
-                                    IMAGE_WIDTH(head), IMAGE_HEIGHT(head));
-                    }
-
-                    for (size_t b = 0; b < batchSize; b++) {
-                        for (size_t y = 0; y < IMAGE_HEIGHT(head); y++) {
-                            for (size_t j = 0; j < IMAGE_WIDTH(head); j++) {
-                                for (size_t c = 0; c < 3; c++) {
-                                    const size_t idx = b * itemSize
-                                                       + y * IMAGE_WIDTH(head) * 3
-                                                       + j * 3
-                                                       + c;
-                                    batchBuffer[idx] = static_cast<float>(batchBufferOld[idx]) / 255.0f;
-                                }
-                            }
-                        }
-                    }
-
-                    delete[] batchBufferOld;
+                Allocation allocation = {};
+                switch (head.getFilesType()) {
+                    case FileType::JPG:
+                        allocation = loadJpgFiles(allocations, batchPaths, heads, headIdx);
+                        break;
+                    case FileType::NPY:
+                        allocation = loadNpyFiles(allocations, batchPaths, heads, headIdx);
+                        break;
+                    default:
+                        throw std::runtime_error("Cannot load an unsupported file type.");
                 }
-                break;
-                case FileType::NPY: {
-                    for (size_t j = 0; j < batchSize; j++) {
-                        // Load the NPY file from the path
-                        cnpy::NpyArray arr = cnpy::npy_load(batchPaths[j][i]);
-                        // Ensure the file contains float data
-                        if (arr.word_size != sizeof(float)) {
-                            throw std::runtime_error(
-                                std::format("NPY file {} has word size {} and does not contain float32 data.",
-                                            batchPaths[j][i], arr.word_size));
-                        }
-                        // Compute the total number of elements in the array
-                        size_t npy_num_elements = 1;
-                        for (const unsigned long d: arr.shape) {
-                            npy_num_elements *= d;
-                        }
-                        if (npy_num_elements != itemSize) {
-                            throw std::runtime_error(
-                                "NPY file " + batchPaths[j][i] +
-                                " has mismatched size. Expected " +
-                                std::to_string(itemSize) + ", got " +
-                                std::to_string(npy_num_elements));
-                        }
-                        // Copy the float data into the batch buffer
-                        const auto *npy_data = arr.data<float>();
-                        std::memcpy(batchBuffer + j * itemSize, npy_data, itemSize * sizeof(float));
-                    }
-                }
-                break;
-                default: {
-                    throw std::runtime_error("Should never get here!");
-                }
+
+                // Start async upload to gpu memory as soon as possible.
+                resourceClient.copy(allocation.gpu, allocation.host, allocation.size);
             }
-
-            // Start async upload to gpu memory as soon as possible.
-            gpu.copy(batchAlloc.gpu, reinterpret_cast<uint8_t *>(batchBuffer),
-                     batchBufferSize);
         }
 
-        gpu.insertBarrier(barrierIdx);
+        resourceClient.insertBarrier(barrierIdx);
 
         prefetchCacheMutex.lock();
         prefetchCache.push_back({
             .barrierIdx = barrierIdx,
-            .allocations = std::move(allocations)
+            .gpuAllocations = allocations.getGpuAllocations() // Maybe std::move ?
         });
         prefetchCacheMutex.unlock();
 
@@ -378,17 +110,20 @@ void DataLoader::threadMain() {
 }
 
 void deleter(DLManagedTensor *self) {
-    MemoryArena::getInstance()->free();
+    ResourcePool::getInstance().release();
 }
 
 py::dict DataLoader::getNextBatch() {
+    if (resourceClient.acquire()) {
+        dataset.goBackNBatches(prefetchCache.size(), batchSize);
+        prefetchSemaphore.releaseAll();
+        prefetchCache.clear();
+    }
+
     std::unique_lock lock(prefetchCacheMutex);
-    prefetchCacheNotify.wait(
-        lock, [this] { return !prefetchCache.empty(); });
-
-    const auto [barrierIdx, allocations] = std::move(prefetchCache.front());
-    prefetchCache.erase(prefetchCache.begin());
-
+    prefetchCacheNotify.wait(lock, [this] { return !prefetchCache.empty(); });
+    const auto [barrierIdx, gpuAllocations] = std::move(prefetchCache.front());
+    prefetchCache.pop_front();
     lock.unlock();
     prefetchSemaphore.release();
 
@@ -396,7 +131,7 @@ py::dict DataLoader::getNextBatch() {
     const auto &heads = dataset.getHeads(); // TODO: Prevent copy.
     for (size_t i = 0; i < heads.size(); i++) {
         const Head &head = heads[i];
-        const uint32_t batchOffset = allocations.getOffset(i);
+        uint8_t *gpuAllocation = gpuAllocations[i];
 
         const std::vector<int> &shape = head.getShape();
         const int ndim = static_cast<int>(shape.size()) + 1;
@@ -416,7 +151,7 @@ py::dict DataLoader::getNextBatch() {
 
         const auto *dlMngTensor = new DLManagedTensor{
             .dl_tensor = {
-                .data = MemoryArena::getInstance()->getGpuData(),
+                .data = gpuAllocation,
                 .device = {
                     .device_type = kDLCUDA,
                     .device_id = 0 // This hardcodes GPU0.
@@ -429,12 +164,13 @@ py::dict DataLoader::getNextBatch() {
                 },
                 .shape = shapeArr,
                 .strides = null,
-                .byte_offset = batchOffset
+                .byte_offset = 0
             },
             .manager_ctx = null,
             .deleter = &deleter
         };
 
+        ResourcePool::getInstance().acquire();
         pyBatch[head.getDictName().c_str()] = py::capsule(
             dlMngTensor, "dltensor", [](void *ptr) {
                 const auto *dlManagedTensor = static_cast<DLManagedTensor *>(ptr);
@@ -453,7 +189,7 @@ py::dict DataLoader::getNextBatch() {
         }
     }*/
 
-    gpu.sync(barrierIdx);
+    resourceClient.sync(barrierIdx);
 
     return pyBatch;
 }

@@ -31,12 +31,14 @@ def _train_step(params, batch, opt_state, optim, loss_fn):
     return loss, params, opt_state
 
 def _save_model(params: dict, path: str):
+    params = jax.device_get(params)
     with open(path, "wb") as file:
         pickle.dump(params, file)
 
 def load_params(path: str):
     with open(path, "rb") as file:
-        return pickle.load(file)
+        params = pickle.load(file)
+    return jax.device_put(params)
 
 def test_one_epoch(
         purpose: str,
@@ -46,10 +48,17 @@ def test_one_epoch(
         ):
     acc_metrics = None
     tqdm_iter = tqdm(range(len(data_loader)))
-    for _ in tqdm_iter:
+    for _ in tqdm_iter: 
         batch = data_loader.get_next_batch()
 
+        import matplotlib.pyplot as plt
+        import numpy as np
+        plt.imshow(np.array(batch['images'][0]))
+        plt.show()
+
         metrics = metric_fn(params, batch)
+        metrics = {key: float(value) for key, value in metrics.items()}
+        print(f"{metrics=}")
         if acc_metrics is None: acc_metrics = Counter(metrics)
         else: acc_metrics += metrics
 
@@ -122,5 +131,6 @@ def train_model(purpose: str,
 
     # Test:
     test_dl = DataLoader(test_ds, tconfig.batch_size, tconfig.valid_dl_num_threads, tconfig.valid_dl_prefetch_size)
+    params = load_params(tconfig.model_path)
     test_metrics = test_one_epoch("Testing", params, test_dl, metric_fn)
     logger.log({"test": test_metrics})

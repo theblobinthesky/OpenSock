@@ -1,5 +1,6 @@
 #ifndef DATASET_H
 #define DATASET_H
+#include <atomic>
 #include <vector>
 #include <filesystem>
 #include <format>
@@ -46,11 +47,13 @@ public:
             std::vector<std::vector<std::string> > _entries
     );
 
-    std::tuple<Dataset, Dataset, Dataset> splitTrainValidationTest(
-        float trainPercentage, float validPercentage);
+    Dataset(const Dataset &other);
 
-    [[nodiscard]] std::vector<std::vector<std::string> > getNextBatch(
-        size_t batchSize) const;
+    std::tuple<Dataset, Dataset, Dataset> splitTrainValidationTest(float trainPercentage, float validPercentage);
+
+    [[nodiscard]] std::vector<std::vector<std::string> > getNextBatch(size_t batchSize);
+
+    void goBackNBatches(size_t numBatches, size_t batchSize);
 
     [[nodiscard]] std::string getRootDir() const;
 
@@ -65,7 +68,7 @@ private:
     std::vector<Head> heads;
     std::vector<std::string> subDirs;
     std::vector<std::vector<std::string> > entries;
-    size_t offset;
+    std::atomic_uint32_t offset;
 };
 
 #endif //DATASET_H

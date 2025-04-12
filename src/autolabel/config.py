@@ -17,9 +17,11 @@ class BaseConfig:
     sam2_checkpoint: str = "../data/sam2.1_hiera_large.pt"
     sam2_config_url: str = "https://raw.githubusercontent.com/facebookresearch/sam2/refs/heads/main/sam2/configs/sam2/sam2_hiera_l.yaml"
     sam2_config: str = "../data/sam2.1_hiera_l.yaml"
+    automatic_mask_points_per_side = 64
+    automatic_mask_quality_thresh = 0.75
 
     diff_threshold: float = 0.05
-    track_skip: int = 38
+    track_skip: int = 30
     max_interesting_frames: int = 180
     instance_merge_iou_thresh: float = 0.9
     no_change_threshold: float = 0.01

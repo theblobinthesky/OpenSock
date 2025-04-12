@@ -179,8 +179,9 @@ class ImageTracker:
         return cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
 
     def _generate_masks(self, image: np.ndarray) -> List[Dict]:
-        # Use SAM2AutomaticMaskGenerator for generating masks
-        mask_generator = SAM2AutomaticMaskGenerator(self.sam)
+        mask_generator = SAM2AutomaticMaskGenerator(self.sam, 
+                                                    points_per_side=self.config.automatic_mask_points_per_side,
+                                                    pred_iou_thresh=self.config.automatic_mask_quality_thresh)
         masks = mask_generator.generate(image)
         return sorted(masks, key=lambda x: x['area'], reverse=True)
 
@@ -230,6 +231,7 @@ class ImageTracker:
             # mask_roi = mask_binary[min_y:max_y, min_x:max_x].copy()[..., None]
             # scaled_image_roi = cv2.convertScaleAbs(image_roi, alpha=self.config.mask_contrast_control, beta=self.config.mask_brightness_control)
             # roi = scaled_image_roi * mask_roi
+            # TODO: Revert or delete.
 
             class_probability = self.classifier(image_roi, self.config.imagenet_class)
             mask['class_confidence'] = float(class_probability)

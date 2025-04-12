@@ -6,7 +6,7 @@ import jax, jax.nn as nn, jax.numpy as jnp
 import jax.nn.initializers as init
 from .config import TrainConfig, DataConfig, ModelConfig
 from .data import get_classifier_dataset
-from .train import train_model
+from .train import train_model, load_params
 from .utils import focal_loss, accuracy, precision, recall
 
 
@@ -47,8 +47,9 @@ def linear_classifier(params: dict, x: jnp.ndarray) -> jnp.ndarray:
 
 
 def init_linear_classifier():
+    # Dinov2 dimensions by size: 384 (s), 768 (b), 1024 (l), 1536 (g)
     return {
-        'linear0': init_linear_layer(384, 1024),
+        'linear0': init_linear_layer(768, 1024),
         'linear1': init_linear_layer(1024, 1024),
         'linear2': init_linear_layer(1024, 1024),
         'linear3': init_linear_layer(1024, 1024),

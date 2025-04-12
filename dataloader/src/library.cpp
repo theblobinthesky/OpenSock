@@ -1,6 +1,5 @@
 #include "dataset.h"
 #include "dataloader.h"
-#include <pybind11/eigen.h>
 #include <pybind11/numpy.h>
 
 #define STRINGIFY(x) #x

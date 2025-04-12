@@ -18,9 +18,11 @@
 - Enable 0-100 autolabeling: autolabel, train custom classifier, autolabel with custom classifier
 - Support custom camera calibration
 - Autolabel stabilizer takes into account camera calibration
-- Add negative examples to the classification dataset: start with rejected objects, fill up with random views that are non-intersecting to all positive instances
++ Add negative examples to the classification dataset: start with rejected objects, fill up with random views that are non-intersecting to all positive instances
 + Support learning rate scheduler
 - Support fp16 training
-- Fix visualizers' track viewer by supporting more than 7 ids and supporting toggling via the track viewer directly
++ Fix visualizers' track viewer by supporting more than 7 ids and supporting toggling via the track viewer directly
 - Add visualizer feature to add points to track and save them into a json file another directory
 - Train classification model
+-
+-

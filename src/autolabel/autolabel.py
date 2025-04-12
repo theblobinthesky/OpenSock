@@ -176,7 +176,6 @@ def process_video(config: BaseConfig, video_path, video_tracker):
 
     begin = time.time()
     instances, master_track = video_tracker.merge_into_master_track(len(interesting_frames), 4, instances, tracks)
-    print(f"{len(instances)=}")
     end = time.time()
     logging.info(f"Merged and deduplicated tracks. {end - begin:.4f}s")
 

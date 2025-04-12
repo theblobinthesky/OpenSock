@@ -13,7 +13,6 @@ find_package(Python REQUIRED COMPONENTS Interpreter Development.Module)
 find_package(pybind11 CONFIG REQUIRED)
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(URING REQUIRED liburing)
-find_package(Eigen3 REQUIRED NO_MODULE)
 find_package(JPEG REQUIRED)
 find_package(CUDAToolkit REQUIRED)
 find_package(dlpack CONFIG REQUIRED)
@@ -26,7 +25,9 @@ python_add_library(_core MODULE
         src/dataloader.cpp
         src/dataset.cpp
         src/io.cpp
-        src/image.cpp
+        src/data.cpp
+        src/resource.cpp
+        src/utils.cpp
         src/library.cpp
         src/cnpy.cpp
         WITH_SOABI
@@ -36,7 +37,6 @@ target_include_directories(_core PRIVATE src/)
 target_include_directories(_core PRIVATE ${CUDAToolkit_INCLUDE_DIRS})
 target_link_libraries(_core PRIVATE pybind11::headers)
 target_link_libraries(_core PRIVATE ${URING_LIBRARIES})
-target_link_libraries(_core PRIVATE Eigen3::Eigen)
 target_link_libraries(_core PRIVATE JPEG::JPEG)
 target_link_libraries(_core PRIVATE CUDA::cudart)
 target_link_libraries(_core PRIVATE dlpack::dlpack)

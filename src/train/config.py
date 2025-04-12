@@ -2,7 +2,7 @@
 class TrainConfig:
     def __init__(self):
         self.lr: float = 1e-5
-        self.num_epochs: int = 25
+        self.num_epochs: int = 10 # 25
         self.batch_size: int = 128
         self.model_path: str = "../data/classifier.jax"
         self.train_dl_num_threads = 12
@@ -28,10 +28,10 @@ class DataConfig:
     classifier_output_dir = "../data/temp/classifier_ds"
     classifier_target_image_size = (1080, 1920)
     classifier_image_size = (518, 518)
-    classifier_negative_percentage = 0.2
-    classifier_imagenet_percentage = 0.5
+    classifier_negative_percentage = 0.3
+    classifier_imagenet_percentage = 0.4
     classifier_avoid_class = 806 # Imagenet SOCK class
-    classifier_max_num_class_samples = 1024 * 2
+    classifier_max_num_class_samples = 1024 * 4
 
     classifier_neg_anchors = {
         'min_size': 0.15,
