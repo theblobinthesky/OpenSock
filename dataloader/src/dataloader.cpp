@@ -9,10 +9,15 @@
 namespace py = pybind11;
 namespace fs = std::filesystem;
 
+bool PrefetchItem::operator<(const PrefetchItem &other) const {
+    // Make sure to sort the priority queue such that the smallest elements have priority.
+    return datasetStartingOffset > other.datasetStartingOffset;
+}
+
 std::atomic_int DataLoader::nextId;
 
 DataLoader::DataLoader(
-    const Dataset& _dataset,
+    const Dataset &_dataset,
     const int _batchSize,
     const int _numThreads,
     const int _prefetchSize
@@ -21,10 +26,14 @@ DataLoader::DataLoader(
     batchSize(_batchSize),
     numThreads(_numThreads),
     prefetchSize(_prefetchSize),
-    prefetchSemaphore(_prefetchSize),
+    // The memory of the last getNextBatch cannot be invalidated until the next getNextBatch call.
+    // Therefore, make sure the semaphore can't wrap around the buffer directly after the first call.
+    prefetchSemaphore(_prefetchSize - 1),
+    lastStartingOffset(-static_cast<int>(batchSize)),
     outputBatchMemorySize(0),
     resourceClient(id, _prefetchSize),
     threadPool([this] { this->threadMain(); }, _numThreads) {
+
     if (batchSize <= 0 || _numThreads <= 0 || _prefetchSize <= 0) {
         throw std::runtime_error(
             "Batch size, the number of threads and the prefetch size need to be strictly positive.");
@@ -47,6 +56,7 @@ DataLoader::DataLoader(
     }
 
     ResourcePool::reserveAtLeast(outputBatchMemorySize * _prefetchSize);
+    // resourceClient.acquire();
 
     threadPool.start();
 }
@@ -54,23 +64,22 @@ DataLoader::DataLoader(
 DataLoader::~DataLoader() {
     shutdown = true;
     prefetchSemaphore.disable();
+    prefetchCacheNotify.notify_all();
 }
 
 void DataLoader::threadMain() {
     while (!shutdown) {
         prefetchSemaphore.acquire();
-        if (shutdown) {
-            break;
-        }
+        if (shutdown) break;
 
         datasetMutex.lock();
-        std::vector<std::vector<std::string> > batchPaths = dataset.getNextBatch(batchSize);
+        const auto [startingOffset, genIdx, batchPaths] = dataset.getNextBatchI(batchSize);
         datasetMutex.unlock();
 
         const size_t barrierIdx = lastBarrierIdx++ % prefetchSize;
         const std::vector<Head> &heads = dataset.getHeads();
 
-        // For each subdirectory, load all images and assemble into one numpy array.
+        // For each head, load all batch items into one contigous cpu array.
         MultipleAllocations allocations = resourceClient.allocate(outputBatchMemorySize);
 
         // Make sure to not touch the allocation if the current resource client has lost access to the pool.
@@ -98,14 +107,29 @@ void DataLoader::threadMain() {
 
         resourceClient.insertBarrier(barrierIdx);
 
-        prefetchCacheMutex.lock();
-        prefetchCache.push_back({
-            .barrierIdx = barrierIdx,
-            .gpuAllocations = allocations.getGpuAllocations() // Maybe std::move ?
+        // Make sure threads submit their batches in dataset order.
+        std::unique_lock lock(prefetchCacheMutex);
+        prefetchCacheNotify.wait(lock, [this, startingOffset, genIdx] {
+            // Make sure to leave the conditional variable when shutdown is already enabled.
+            return shutdown
+                   || dataset.getGenIdx().load() != genIdx
+                   || startingOffset - static_cast<int>(batchSize) == lastStartingOffset.load();
         });
-        prefetchCacheMutex.unlock();
+        if (shutdown) break;
 
-        prefetchCacheNotify.notify_one();
+        if (dataset.getGenIdx().load() == genIdx) {
+            prefetchCache.push({
+                .datasetStartingOffset = startingOffset,
+                .barrierIdx = barrierIdx,
+                .gpuAllocations = allocations.getGpuAllocations() // Maybe std::move ?
+            });
+
+            lastStartingOffset = startingOffset;
+        }
+
+        lock.unlock();
+
+        prefetchCacheNotify.notify_all();
     }
 }
 
@@ -115,15 +139,22 @@ void deleter(DLManagedTensor *self) {
 
 py::dict DataLoader::getNextBatch() {
     if (resourceClient.acquire()) {
-        dataset.goBackNBatches(prefetchCache.size(), batchSize);
+        std::unique_lock lock(prefetchCacheMutex);
+        dataset.resetByNumBatches(prefetchCache.size(), batchSize);
+        lastStartingOffset = dataset.getOffset() - static_cast<int>(batchSize);
+        while (!prefetchCache.empty()) prefetchCache.pop(); // Clear is not supported
+        lock.unlock();
+
         prefetchSemaphore.releaseAll();
-        prefetchCache.clear();
+        prefetchCacheNotify.notify_all();
     }
 
     std::unique_lock lock(prefetchCacheMutex);
     prefetchCacheNotify.wait(lock, [this] { return !prefetchCache.empty(); });
-    const auto [barrierIdx, gpuAllocations] = std::move(prefetchCache.front());
-    prefetchCache.pop_front();
+
+    const auto [_, barrierIdx, gpuAllocations] = prefetchCache.top();
+    prefetchCache.pop();
+
     lock.unlock();
     prefetchSemaphore.release();
 

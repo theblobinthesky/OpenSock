@@ -232,10 +232,10 @@ std::tuple<Dataset, Dataset, Dataset> Dataset::splitTrainValidationTest(
     );
 }
 
-std::vector<std::vector<std::string> > Dataset::getNextBatch(const size_t batchSize) {
-    std::vector<std::vector<std::string> > batch;
+DatasetBatch Dataset::getNextBatchI(const size_t batchSize) {
+    std::vector<std::vector<std::string> > batchPaths;
 
-    const uint32_t lastOffset = offset.fetch_add(batchSize);
+    const uint32_t lastOffset = offset.fetch_add(static_cast<int>(batchSize));
     for (size_t i = lastOffset; i < lastOffset + batchSize; i++) {
         std::vector<std::string> entry;
 
@@ -243,14 +243,26 @@ std::vector<std::vector<std::string> > Dataset::getNextBatch(const size_t batchS
             entry.push_back(std::format("{}{}", rootDir, subPath));
         }
 
-        batch.push_back(std::move(entry));
+        batchPaths.push_back(std::move(entry));
     }
 
-    return batch;
+    return {
+        .startingOffset = static_cast<int32_t>(lastOffset),
+        .genIdx = genIdx.load(),
+        .batchPaths = std::move(batchPaths)
+    };
 }
 
-void Dataset::goBackNBatches(const size_t numBatches, const size_t batchSize) {
-    offset += entries.size() - numBatches * batchSize;
+std::vector<std::vector<std::string> > Dataset::getNextBatch(const size_t batchSize) {
+    return getNextBatchI(batchSize).batchPaths;
+}
+
+void Dataset::resetByNumBatches(const size_t numBatches, const size_t batchSize) {
+    offset -= static_cast<int>(numBatches * batchSize);
+    if (offset < 0) {
+        throw std::runtime_error("Offset cannot be negative.");
+    }
+    genIdx += 1;
 }
 
 std::string Dataset::getRootDir() const {
@@ -263,4 +275,12 @@ std::vector<Head> Dataset::getHeads() const {
 
 std::vector<std::vector<std::string> > Dataset::getEntries() const {
     return entries;
+}
+
+int32_t Dataset::getOffset() const {
+    return offset.load();
+}
+
+const std::atomic_uint32_t &Dataset::getGenIdx() const {
+    return genIdx;
 }

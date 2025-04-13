@@ -2,7 +2,7 @@
 #include <format>
 
 SharedPtr<ResourcePool> ResourcePool::instance;
-std::atomic_int ResourcePool::currentClientId = std::atomic_int(0);
+std::atomic_int ResourcePool::currentClientId = std::atomic_int(-1);
 
 SharedPtr<ResourcePool> ResourcePool::getInstance() {
     if (!instance) {
@@ -142,7 +142,7 @@ bool ResourceClient::acquire() {
 
 MultipleAllocations ResourceClient::allocate(const size_t totalSize) {
     std::unique_lock lock(mutex);
-    if (ResourcePool::currentClientId != clientId) {
+    if (ResourcePool::currentClientId.load() != clientId) {
         // Do not allocate if the client has not acquired the pool.
         return MultipleAllocations({});
     }
@@ -150,7 +150,7 @@ MultipleAllocations ResourceClient::allocate(const size_t totalSize) {
     return MultipleAllocations(pool->allocate(totalSize));
 }
 
-#define RETURN_IF_INACTIVE() if (ResourcePool::currentClientId != clientId) return;
+#define RETURN_IF_INACTIVE() if (ResourcePool::currentClientId.load() != clientId) return
 
 void ResourceClient::copy(uint8_t *gpuBuffer,
                           const uint8_t *buffer,

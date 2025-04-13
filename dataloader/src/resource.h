@@ -73,7 +73,7 @@ public:
 
     ~ResourceClient();
 
-    [[nodiscard]] bool acquire();
+    bool acquire();
 
     [[nodiscard]] MultipleAllocations allocate(size_t totalSize);
 

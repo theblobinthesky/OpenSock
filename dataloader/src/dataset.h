@@ -35,6 +35,12 @@ private:
 #define IMAGE_HEIGHT(subDir) static_cast<size_t>(subDir.getShape()[0])
 #define IMAGE_WIDTH(subDir) static_cast<size_t>(subDir.getShape()[1])
 
+struct DatasetBatch {
+    int32_t startingOffset;
+    uint32_t genIdx;
+    std::vector<std::vector<std::string>> batchPaths;
+};
+
 class Dataset {
 public:
     Dataset(std::string _rootDir, std::vector<Head> _heads,
@@ -51,15 +57,19 @@ public:
 
     std::tuple<Dataset, Dataset, Dataset> splitTrainValidationTest(float trainPercentage, float validPercentage);
 
-    [[nodiscard]] std::vector<std::vector<std::string> > getNextBatch(size_t batchSize);
+    [[nodiscard]] DatasetBatch getNextBatchI(size_t batchSize);
+    [[nodiscard]] std::vector<std::vector<std::string>> getNextBatch(size_t batchSize);
 
-    void goBackNBatches(size_t numBatches, size_t batchSize);
+    void resetByNumBatches(size_t numBatches, size_t batchSize);
 
     [[nodiscard]] std::string getRootDir() const;
 
     [[nodiscard]] std::vector<Head> getHeads() const;
 
     [[nodiscard]] std::vector<std::vector<std::string> > getEntries() const;
+
+    [[nodiscard]] int32_t getOffset() const;
+    [[nodiscard]] const std::atomic_uint32_t &getGenIdx() const;
 
 private:
     void init();
@@ -68,7 +78,8 @@ private:
     std::vector<Head> heads;
     std::vector<std::string> subDirs;
     std::vector<std::vector<std::string> > entries;
-    std::atomic_uint32_t offset;
+    std::atomic_int32_t offset;
+    std::atomic_uint32_t genIdx;
 };
 
 #endif //DATASET_H

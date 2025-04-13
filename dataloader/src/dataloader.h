@@ -6,13 +6,17 @@
 #include <vector>
 #include <condition_variable>
 #include <atomic>
+#include <queue>
 #include <pybind11/pybind11.h>
 
 #define CHS 3
 
-struct BarrierAllocationsPair {
+struct PrefetchItem {
+    int32_t datasetStartingOffset;
     size_t barrierIdx;
     std::vector<uint8_t *> gpuAllocations;
+
+    bool operator<(const PrefetchItem& other) const;
 };
 
 class DataLoader {
@@ -44,7 +48,8 @@ private:
     size_t numberOfBatches;
     Semaphore prefetchSemaphore;
     std::mutex datasetMutex;
-    std::list<BarrierAllocationsPair> prefetchCache;
+    std::priority_queue<PrefetchItem> prefetchCache;
+    std::atomic_int32_t lastStartingOffset;
     std::condition_variable prefetchCacheNotify;
     std::atomic_int lastBarrierIdx;
     std::mutex prefetchCacheMutex;
