@@ -116,7 +116,7 @@ struct BatchAllocation {
 
 BatchAllocation getBatchAllocation(const Head &head,
                                    MultipleAllocations &allocations,
-                                   size_t batchSize) {
+                                   const size_t batchSize) {
     const auto itemSize = head.getShapeSize();
     const auto batchBufferSize = batchSize * itemSize * sizeof(float);
     const auto batchAllocation = allocations.allocate(batchBufferSize);

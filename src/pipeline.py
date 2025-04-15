@@ -67,36 +67,36 @@ class CustomClassifier:
 
 
 with logging_redirect_tqdm():
-    # config = BaseConfig(
-    #     imagenet_class = 806,
-    #     input_dir = "../data/sock_videos",
-    #     output_dir = "../data/sock_video_master_tracks",
-    #     image_size = (1080, 1920),
-    #     output_warped_size = (540, 960),   
-    #     classifier_confidence_threshold = 0.01
-    # )
-
-    # print("Autolabel using pretrained classifier:")
-    # classifier = PretrainedClassifier()
-    # label_automatically(classifier, config)
-    # visualize_all(config)
-
-    print()
-    print("Training classifier:")
-    train_classifier()
-
     config = BaseConfig(
         imagenet_class = 806,
         input_dir = "../data/sock_videos",
-        output_dir = "../data/sock_video_enhanced_master_tracks",
+        output_dir = "../data/sock_video_master_tracks",
         image_size = (1080, 1920),
         output_warped_size = (540, 960),   
-        classifier_confidence_threshold = 0.5
+        classifier_confidence_threshold = 0.01
     )
 
-    print()
-    print("Autolabel using custom classifier:")
-    tconfig, dconfig = TrainConfig(), DataConfig()
-    classifier = CustomClassifier(tconfig, dconfig)
+    print("Autolabel using pretrained classifier:")
+    classifier = PretrainedClassifier()
     label_automatically(classifier, config)
-    visualize_all(config)
+    # visualize_all(config)
+
+    # print()
+    # print("Training classifier:")
+    # train_classifier()
+
+    # config = BaseConfig(
+    #     imagenet_class = 806,
+    #     input_dir = "../data/sock_videos",
+    #     output_dir = "../data/sock_video_enhanced_master_tracks",
+    #     image_size = (1080, 1920),
+    #     output_warped_size = (540, 960),   
+    #     classifier_confidence_threshold = 0.5
+    # )
+
+#     # print()
+#     # print("Autolabel using custom classifier:")
+#     # tconfig, dconfig = TrainConfig(), DataConfig()
+#     # classifier = CustomClassifier(tconfig, dconfig)
+#     # label_automatically(classifier, config)
+#     # visualize_all(config)

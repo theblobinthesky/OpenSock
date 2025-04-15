@@ -27,6 +27,9 @@ class BaseConfig:
     no_change_threshold: float = 0.01
     consecutive_static_required: int = 10
     performance_downscale_factor: int = 4
+    num_track_frames: int = 5
+    min_partition_size_perc: float = 0.10
+    center_window_width_perc: float = 0.08
 
     classifier_confidence_threshold: float = 0.04
     mask_contrast_control = 1.3     # contrast control (1.0-3.0)

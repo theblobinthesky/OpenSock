@@ -47,7 +47,6 @@ PYBIND11_MODULE(_core, m) {
             .def("getNextBatch", &DataLoader::getNextBatch)
             .def("__len__", &DataLoader::getNumberOfBatches);
     // TODO Comment(getNextBatch): Important convention is that memory of the last batch gets invalid when you call getNextBatch!
-    // Idk about that. Jax has a different idea of this convention!
 
 #ifdef VERSION_INFO
     m.attr("__version__") = MACRO_STRINGIFY(VERSION_INFO);

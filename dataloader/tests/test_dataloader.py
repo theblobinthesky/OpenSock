@@ -45,51 +45,48 @@ def get_dataloaders(batch_size: int):
     ), (ds1, ds2, ds3), root_dir
 
 
-# def test_get_length():
-#     bs = 16
-#     _, dl, _ = get_dataloader(batch_size=bs)
-#     assert len(dl) == (633 + bs - 1) // bs
+def test_get_length():
+    bs = 16
+    _, dl, _ = get_dataloader(batch_size=bs)
+    assert len(dl) == (633 + bs - 1) // bs
 
+# def verify_correctness(ds, dl, root_dir, bs):
+#     import matplotlib.pyplot as plt
+#     num = len(dl)
+#     _, axs = plt.subplots(num, 16)
+
+#     entries = [[f"{root_dir}{sub_path}" for sub_path in item] for item in ds.entries]
+
+#     for j in range(num):
+#         batch = dl.get_next_batch()
+#         for i, batch_paths in enumerate(entries[j * 16:16 + j * 16]):
+#             pil_img = Image.open(batch_paths[0]).convert("RGB")
+#             pil_img = np.array(pil_img.resize((WIDTH, HEIGHT)), np.float32)
+#             pil_img = pil_img / 255.0
+
+#             # err = np.mean(np.abs(batch['img'][i] - pil_img))
+#             # axs[0 + j * 2, i].imshow(pil_img)
+#             # axs[1 + j * 2, i].imshow(batch['img'][i])
+#             # axs[0 + j * 2, i].axis('off')
+#             # axs[1 + j * 2, i].axis('off')
+#             axs[j, i].imshow(batch['img'][i])
+#             axs[j, i].axis('off')
+
+#     plt.show()
 
 def verify_correctness(ds, dl, root_dir, bs):
-    import matplotlib.pyplot as plt
-    num = 4 # len(dl)
-    _, axs = plt.subplots(2 * num, 16)
-
     entries = [[f"{root_dir}{sub_path}" for sub_path in item] for item in ds.entries]
 
-    for j in range(num):
+    for batch_idx in range(len(dl)):
         batch = dl.get_next_batch()
-        for i, batch_paths in enumerate(entries[j * 16:16 + j * 16]):
-            pil_img = Image.open(batch_paths[0]).convert("RGB")
+        for i, batch_paths in enumerate(entries[batch_idx * bs:bs + batch_idx * bs]):
+            path = batch_paths[0]
+            pil_img = Image.open(path).convert("RGB")
             pil_img = np.array(pil_img.resize((WIDTH, HEIGHT)), np.float32)
             pil_img = pil_img / 255.0
 
             err = np.mean(np.abs(batch['img'][i] - pil_img))
-            axs[0 + j * 2, i].imshow(pil_img)
-            axs[1 + j * 2, i].imshow(batch['img'][i])
-            axs[0 + j * 2, i].axis('off')
-            axs[1 + j * 2, i].axis('off')
-            # axs[j, i].imshow(batch['img'][i])
-            # axs[j, i].axis('off')
-
-    plt.show()
-
-
-# def verify_correctness(ds, dl, root_dir, bs):
-#     entries = [[f"{root_dir}{sub_path}" for sub_path in item] for item in ds.entries]
-
-#     for batch_idx in range(len(dl)):
-#         batch = dl.get_next_batch()
-#         for i, batch_paths in enumerate(entries[batch_idx * bs:bs + batch_idx * bs]):
-#             path = batch_paths[0]
-#             pil_img = Image.open(path).convert("RGB")
-#             pil_img = np.array(pil_img.resize((WIDTH, HEIGHT)), np.float32)
-#             pil_img = pil_img / 255.0
-
-#             err = np.mean(np.abs(batch['img'][i] - pil_img))
-#             assert np.all(err < 10 / 255.0), f"Error too high for image {path}"
-
+            assert np.all(err < 10 / 255.0), f"Error too high for image {path}"
 
 def test_correctness_one_dataloader():
     ds, dl, root_dir = get_dataloader(batch_size=16)
@@ -99,7 +96,8 @@ def test_correctness_one_dataloader():
 #     (dl1, dl2, dl3), (ds1, ds2, ds3), root_dir = get_dataloaders(batch_size=16)
 #     dl2.get_next_batch()
 #     verify_correctness(ds1, dl1, root_dir, bs=16)
-
+#     verify_correctness(ds2, dl2, root_dir, bs=16)
+#     verify_correctness(ds3, dl3, root_dir, bs=16)
 
 # def hash_array(arr):
 #     arr_np = np.asarray(arr)

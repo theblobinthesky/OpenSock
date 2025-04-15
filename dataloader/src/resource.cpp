@@ -9,7 +9,7 @@ SharedPtr<ResourcePool> ResourcePool::getInstance() {
         instance = SharedPtr(new ResourcePool(), true);
     }
 
-    return SharedPtr(instance);
+    return {instance};
 }
 
 void ResourcePool::reserveAtLeast(const size_t totalSize) {

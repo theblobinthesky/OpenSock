@@ -24,5 +24,9 @@
 + Fix visualizers' track viewer by supporting more than 7 ids and supporting toggling via the track viewer directly
 - Add visualizer feature to add points to track and save them into a json file another directory
 - Train classification model
--
--
+- Fix all tests of dataloader
+- Hack sam2 to support high dynamic range images
++ Autolabel selects track images in local minimas of change rate to maximize the utility of each track. Optimize the partitioning using dynamic programming.
+- Plan an advanced merging routine for the video tracker
+- Implement the advanced merging routine for the video tracker
+- Fix shared pointer implementation

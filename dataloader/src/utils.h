@@ -51,12 +51,16 @@ public:
 
     SharedPtr &operator=(const SharedPtr &other) = delete;
 
-    SharedPtr(const SharedPtr &other) : refCounter(other.refCounter), ptr(other.ptr) {
+    SharedPtr(const SharedPtr &other) : refCounter(other.refCounter), ptr(other.ptr), weakPtr(false) {
         acquire();
     }
 
     SharedPtr &operator=(SharedPtr &&other) noexcept {
         if (this != &other) {
+            // This instance might have held an old pointer.
+            // Make sure to not leave it dangling.
+            release();
+
             refCounter = other.refCounter;
             ptr = other.ptr;
             weakPtr = other.weakPtr;
@@ -92,8 +96,9 @@ public:
         --(*refCounter);
 
         if (*refCounter == 0) {
-            delete refCounter;
-            delete ptr;
+            // delete refCounter;
+            // delete ptr;
+            // TODO: Fix this!
         }
 
         refCounter = null;
@@ -149,7 +154,7 @@ public:
 
     void disable();
 
-// private:
+    // private:
 public:
     std::counting_semaphore<> semaphore;
     std::atomic_int numTokensUsed;

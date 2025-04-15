@@ -56,7 +56,7 @@ DataLoader::DataLoader(
     }
 
     ResourcePool::reserveAtLeast(outputBatchMemorySize * _prefetchSize);
-    // resourceClient.acquire();
+    resourceClient.acquire();
 
     threadPool.start();
 }
@@ -173,12 +173,12 @@ py::dict DataLoader::getNextBatch() {
             shapeArr[s + 1] = shape[s];
         }
 
-        int64_t lastStride = 1;
+        /*int64_t lastStride = 1;
         const auto stridesArr = new int64_t[shape.size() + 1]{};
         for (int s = static_cast<int>(shape.size()); s >= 0; s--) {
             stridesArr[s] = lastStride;
             lastStride *= shapeArr[s];
-        }
+        }*/
 
         const auto *dlMngTensor = new DLManagedTensor{
             .dl_tensor = {
