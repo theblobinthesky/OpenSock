@@ -25,8 +25,10 @@
 - Add visualizer feature to add points to track and save them into a json file another directory
 - Train classification model
 - Fix all tests of dataloader
-- Hack sam2 to support high dynamic range images
++ Optimize optimal color curve such that sam2 can leverage 10-bit linear images optimally in their 8-bit srgb projection
 + Autolabel selects track images in local minimas of change rate to maximize the utility of each track. Optimize the partitioning using dynamic programming.
 - Plan an advanced merging routine for the video tracker
-- Implement the advanced merging routine for the video tracker
 - Fix shared pointer implementation
+- Improve video tracker performance using model inference adjustment and not tracking too far
+- Implement the advanced merging routine for the video tracker
+- Improve video tracker performance when tracking does not lead to new information anymore (requires advanced merging routine)
