@@ -1,6 +1,7 @@
 import cv2
 import numpy as np
 import scipy
+import json
 from pathlib import Path
 from tqdm import tqdm
 
@@ -90,57 +91,12 @@ def calibrate_fisheye(objpoints, imgpoints, image_size):
     return {"name": "fisheye", "rms": rms_error, "mean": mean_error}
 
 
-    # # Normalize image points.
-    # cx, cy = img_pts.mean(axis=0)
-    # pts0 = img_pts - [cx, cy]
-    # mean_dist = np.mean(np.linalg.norm(pts0, axis=1), axis=0)
-    # s = np.sqrt(2) / mean_dist
-    # T = np.array([
-    #     [s, 0, -s * cx],
-    #     [0, s, -s * cy],
-    #     [0, 0, 1]
-    # ], np.float64)
-
-
-    # # Normalize object points.
-    # cx, cy, cz = obj_pts.mean(axis=0)
-    # pts0 = obj_pts - [cx, cy, cz]
-    # mean_dist = np.mean(np.linalg.norm(pts0, axis=1), axis=0)
-    # s = np.sqrt(3) / mean_dist
-    # U = np.array([
-    #     [s, 0, 0, -s * cx],
-    #     [0, s, 0, -s * cy],
-    #     [0, 0, s, -s * cz],
-    #     [0, 0, 0, 1]
-    # ], np.float64)
-
-
-    # # Normalize both point sets.
-    # b = obj_pts.shape[0]
-    # img_hom_norm = np.hstack([img_pts, np.ones((b, 1))]) @ T.T
-    # obj_hom_norm = np.hstack([obj_pts, np.ones((b, 1))]) @ U.T
-
-
-    # # Initialize using linear solve.
-    # rows = []
-    # for (x, y, w), X in zip(img_hom_norm, obj_hom_norm):
-    #     rows.append(np.hstack([np.zeros(4), -w * X.T, y * X.T]))
-    #     rows.append(np.hstack([w * X.T, np.zeros(4), -x * X.T]))
-    # M = np.vstack(rows)
-
-    # _, _, Vh = np.linalg.svd(M)
-    # P = Vh[-1].reshape((3, 4))
-
-    # # TODO
-
-    # # Apply both normalizations.
-    # P = np.linalg.inv(T) @ P @ U
-
 def find_homography(from_pts: np.ndarray, to_pts: np.ndarray) -> np.ndarray:
     src = from_pts.reshape(-1,1,2).astype(np.float64)
     dst =   to_pts.reshape(-1,1,2).astype(np.float64)
     H, mask = cv2.findHomography(src, dst, method=0)  # pure DLT + LS
     return H
+
 
 def get_null_space_vector(M: np.ndarray) -> np.ndarray:
     _, _, Vh = np.linalg.svd(M)
@@ -311,6 +267,7 @@ def init_distortion_coefficients(intrinsics, A, extrinsics, obj_pts_list, img_pt
     M, b = np.vstack(M_rows), np.vstack(b_rows)
     return np.linalg.lstsq(M, b)[0].ravel()
 
+
 def project_points(pts, intrinsics, extrinsic, dist_coeff):
     [fx, fy, scew, px, py] = intrinsics
     rvec, tvec = extrinsic
@@ -408,21 +365,76 @@ def calibrate_custom(obj_pts_list, img_pts_list, image_size):
 
     return {"name": "custom", "rms": rms, "mean": mean_error}
 
+
+def calibrate_and_save(input_dir, output_dir):
+    images = sorted(Path(input_dir).glob("*.jpg")) + sorted(Path(input_dir).glob("*.png"))
+    objp, imgp, valid_imgs = detect_corners(images)
+    if not objp:
+        raise RuntimeError("No corners detected")
+    h, w = valid_imgs[0].shape[:2]
+
+    objp, imgp = np.array(objp), np.array(imgp)
+    objp = objp[:, :, :2]
+
+    intrinsics, Rs, ts = init_intrinsics_and_extrinsics(objp, imgp)
+    intrinsics, extrinsic_list = refine_intrinsics_and_extrinsics(intrinsics, Rs, ts, objp, imgp)
+    fx, fy, scew, px, py = intrinsics
+    A = np.array([[fx, scew, px], [0, fy, py], [0, 0, 1]])
+    dist_init = init_distortion_coefficients(intrinsics, A, extrinsic_list, objp, imgp)
+    intrinsics, extrinsic_list, dist_coeff = refine_everything(intrinsics, extrinsic_list, dist_init, objp, imgp)
+
+    # Compute reprojection errors
+    img_pts_all = np.vstack([p.reshape(-1,2) for p in imgp])
+    proj_pts = [project_points(o, intrinsics, e, dist_coeff).reshape(-1,2) for o,e in zip(objp, extrinsic_list)]
+    proj_pts_all = np.vstack(proj_pts)
+    errors = np.linalg.norm(img_pts_all - proj_pts_all, axis=1)
+    rms_error = float(np.sqrt(np.mean(errors**2)))
+    mean_error = float(np.mean(errors))
+
+    calib_data = {
+        "intrinsics": {"fx": fx, "fy": fy, "scew": scew, "px": px, "py": py},
+        "distortion_coeff": dist_coeff.tolist(),
+        "image_size": [w, h]
+    }
+
+    output_path = Path(output_dir)
+    output_path.mkdir(parents=True, exist_ok=True)
+    with open(output_path / "calib.json", "w") as f:
+        json.dump(calib_data, f, indent=4)
+
+    print(f"Calibration saved to {output_path / 'calib.json'}")
+    print(f"  RMS  : {rms_error:.4f} px")
+    print(f"  Mean : {mean_error:.4f} px")
+
+
+def apply_calibration(image: np.ndarray, calib: dict):
+    intrin = calib["intrinsics"]
+    fx, fy, scew, px, py = intrin["fx"], intrin["fy"], intrin["scew"], intrin["px"], intrin["py"]
+    k1, k2 = calib["distortion_coeff"]
+    calib_w, calib_h = calib["image_size"]
+    h, w, c = image.shape
+
+    print(h, w, c)
+
+
+    return 0.0
+
+
 def main():
-    # images = sorted(IMAGE_DIR.glob("*.jpg")) + sorted(IMAGE_DIR.glob("*.png"))
-    # if not images:
-    #     raise FileNotFoundError(f"No images found in {IMAGE_DIR}")
+    images = sorted(IMAGE_DIR.glob("*.jpg")) + sorted(IMAGE_DIR.glob("*.png"))
+    if not images:
+        raise FileNotFoundError(f"No images found in {IMAGE_DIR}")
 
-    # objp, imgp, valid_imgs = detect_corners(images)
-    # if not objp:
-    #     raise RuntimeError("No corners detected")
+    objp, imgp, valid_imgs = detect_corners(images)
+    if not objp:
+        raise RuntimeError("No corners detected")
     
-    # h, w = valid_imgs[0].shape[:2]
-    # image_size = (w, h)
+    h, w = valid_imgs[0].shape[:2]
+    image_size = (w, h)
 
-    # import pickle
-    # with open('../data/calib.pickle', 'wb') as file:
-    #     pickle.dump([objp, imgp, image_size], file)
+    import pickle
+    with open('../data/calib.pickle', 'wb') as file:
+        pickle.dump([objp, imgp, image_size], file)
 
     import pickle
     with open('../data/calib.pickle', 'rb') as file:

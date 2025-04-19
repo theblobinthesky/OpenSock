@@ -136,6 +136,7 @@ def process_video_files_for_classifier(config: DataConfig, video_files: list[str
                 ret, frame = cap.read()
                 if not ret:
                     continue
+                frame = image_tracker.apply_calibration(frame)
 
                 frame = apply_homography(frame, homography, size=config.classifier_target_image_size)
 
@@ -300,6 +301,7 @@ def process_video_file_for_obj_detection(config: DataConfig, video_file: str):
         ret, frame = cap.read()
         if not ret:
             continue
+        frame = image_tracker.apply_calibration(frame)
         
         # Save image
         shape = frame.shape

@@ -6,6 +6,7 @@ class BaseConfig:
     imagenet_class: int
     input_dir: str
     output_dir: str
+    calibration_dir: str
     image_size: tuple
     output_warped_size: tuple
     aruco_dict_type: int = cv2.aruco.DICT_6X6_250

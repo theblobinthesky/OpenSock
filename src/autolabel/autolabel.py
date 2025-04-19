@@ -8,7 +8,7 @@ from .config import BaseConfig
 from .trackers import Stabilizer, ImageTracker, VideoTracker, apply_homography
 
 
-def get_interesting_frames(cap, config: BaseConfig) -> list[int]:
+def get_interesting_frames(image_tracker: ImageTracker, cap, config: BaseConfig) -> list[int]:
     def _process(frame: np.ndarray):
         work_size = tuple(np.array(config.image_size) // config.performance_downscale_factor)
         frame = cv2.resize(frame, work_size, interpolation=cv2.INTER_AREA)
@@ -19,6 +19,7 @@ def get_interesting_frames(cap, config: BaseConfig) -> list[int]:
     if not ret:
         print("Failed to retrieve frame.")
         return [], None, None
+    prev_frame = image_tracker.apply_calibration(prev_frame)
     
     original_size = prev_frame.shape[:-1]
     prev_frame = _process(prev_frame)
@@ -33,6 +34,7 @@ def get_interesting_frames(cap, config: BaseConfig) -> list[int]:
         ret, frame = cap.read()
         if not ret:
             break
+        frame = image_tracker.apply_calibration(frame)
 
         size = frame.shape[:-1]
         if original_size != size:
@@ -158,7 +160,7 @@ def get_interesting_frames(cap, config: BaseConfig) -> list[int]:
 # )
 # get_interesting_frames(None, config)
 
-def extract_frames(temp_output_dir, cap, frame_tuples, output_size):
+def extract_frames(image_tracker: ImageTracker, temp_output_dir, cap, frame_tuples, output_size):
     for sub_path in os.listdir(temp_output_dir):
         os.remove(f"{temp_output_dir}/{sub_path}")
 
@@ -171,6 +173,7 @@ def extract_frames(temp_output_dir, cap, frame_tuples, output_size):
         if not ret:
             logging.info("Failed to retrieve frame.")
             return []
+        frame = image_tracker.apply_calibration(frame)
         frame = apply_homography(frame, homography, output_size)
         cv2.imwrite(f"{temp_output_dir}/{i}.jpeg", frame)
 
@@ -185,23 +188,11 @@ def process_video(config: BaseConfig, video_path, video_tracker):
         return
 
     begin = time.time()
-    interesting_frames, track_frame_indices, original_size = get_interesting_frames(cap, config)
+    interesting_frames, track_frame_indices, original_size = get_interesting_frames(image_tracker, cap, config)
     if np.any(original_size != config.image_size):
         raise ValueError(f"The image size {original_size} is not the expected large size {config.image_size}.")
     end = time.time()
     logging.info(f"Found {len(interesting_frames)} interesting frames and {len(track_frame_indices)} track frames. {end - begin:.4f}s")
-
-    # import matplotlib.pyplot as plt
-    # fig, axs = plt.subplots(len(track_frame_indices), 1)
-    # for i, track_frame_idx in enumerate(track_frame_indices):
-    #     cap.set(cv2.CAP_PROP_POS_FRAMES, interesting_frames[track_frame_idx])
-    #     ret, frame = cap.read()
-    #     if not ret:
-    #         logging.info("Failed to read frame.")
-    #         return
-
-    #     axs[i].imshow(frame)
-    # plt.show()
 
     begin = time.time()
     homographies = stabilizer.stabilize_frames(cap, interesting_frames)
@@ -224,6 +215,7 @@ def process_video(config: BaseConfig, video_path, video_tracker):
         if not ret:
             logging.info("Failed to read frame.")
             return
+        frame = image_tracker.apply_calibration(frame)
 
         begin = time.time()
         frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
@@ -238,11 +230,11 @@ def process_video(config: BaseConfig, video_path, video_tracker):
 
         begin = time.time()
         frame_indices = list(reversed([(i, H) for (i, H) in zip(interesting_frames, homographies) if i <= frame_idx]))
-        extract_frames(config.temp_fs_dir, cap, frame_indices, image_tracker.target_size)
+        extract_frames(image_tracker, config.temp_fs_dir, cap, frame_indices, image_tracker.target_size)
         track_bw = video_tracker.track_forward(config.temp_fs_dir, frame_indices, masks, _get_obj_ids(masks))
 
         frame_indices = [(i, H) for (i, H) in zip(interesting_frames, homographies) if i >= frame_idx]
-        extract_frames(config.temp_fs_dir, cap, frame_indices, image_tracker.target_size)
+        extract_frames(image_tracker, config.temp_fs_dir, cap, frame_indices, image_tracker.target_size)
         track_fw = video_tracker.track_forward(config.temp_fs_dir, frame_indices, masks, _get_obj_ids(masks))
 
         track = [*reversed(track_bw[1:]), *track_fw]

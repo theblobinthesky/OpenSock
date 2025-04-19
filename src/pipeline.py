@@ -3,6 +3,7 @@ import os, logging
 # os.environ['INVALIDATE_DATASET'] = '1'
 os.environ['PYTORCH_CUDA_ALLOC_CONF'] = 'expandable_segments:True'
 from tqdm.contrib.logging import logging_redirect_tqdm
+from autolabel.calibrate import calibrate_and_save
 from autolabel.autolabel import label_automatically
 from autolabel.visualize import visualize_all
 from autolabel.config import BaseConfig
@@ -50,13 +51,6 @@ class CustomClassifier:
         x = cv2.resize(x, self.dconfig.classifier_image_size)
         x = np.array(x)[None,]
         with torch.no_grad(), torch.autocast(device_type='cuda'):
-            # import matplotlib.pyplot as plt
-            # plt.figure(figsize=(8, 8))
-            # plt.imshow(x[0])
-            # plt.axis('off') 
-            # plt.title('Input Image')
-            # plt.show()
-
             images = torch.from_numpy(x).to(dtype=torch.float16, device='cuda') / 255.0
             images = torch.permute(images, (0, 3, 1, 2))
             features = self.dinov2(images)
@@ -71,10 +65,15 @@ with logging_redirect_tqdm():
         imagenet_class = 806,
         input_dir = "../data/sock_videos",
         output_dir = "../data/sock_video_master_tracks",
+        calibration_dir="../data/calibration",
         image_size = (1080, 1920),
         output_warped_size = (540, 960),   
         classifier_confidence_threshold = 0.01
     )
+
+    print("Calibrating camera:")
+    calibrate_and_save(config.calibration_dir, config.output_dir)
+
 
     print("Autolabel using pretrained classifier:")
     classifier = PretrainedClassifier()
@@ -94,9 +93,9 @@ with logging_redirect_tqdm():
     #     classifier_confidence_threshold = 0.5
     # )
 
-#     # print()
-#     # print("Autolabel using custom classifier:")
-#     # tconfig, dconfig = TrainConfig(), DataConfig()
-#     # classifier = CustomClassifier(tconfig, dconfig)
-#     # label_automatically(classifier, config)
-#     # visualize_all(config)
+    # print()
+    # print("Autolabel using custom classifier:")
+    # tconfig, dconfig = TrainConfig(), DataConfig()
+    # classifier = CustomClassifier(tconfig, dconfig)
+    # label_automatically(classifier, config)
+    # visualize_all(config)

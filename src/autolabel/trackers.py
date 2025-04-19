@@ -6,6 +6,7 @@ from typing import Dict, List, Tuple, Optional
 from sam2.automatic_mask_generator import SAM2AutomaticMaskGenerator
 import logging
 from .config import BaseConfig
+import calibrate
 
 
 class Stabilizer:
@@ -81,7 +82,7 @@ class Stabilizer:
 
         return H
         
-    def stabilize_frames(self, cap, interesting_frames: list[int]):
+    def stabilize_frames(self, image_tracker, cap, interesting_frames: list[int]):
         primary_homographies = {}
         primary_corners_dict = {}
         secondary_midpoints = {}
@@ -92,6 +93,7 @@ class Stabilizer:
             if not ret:
                 print("Failed to retrieve frame.")
                 return []
+            frame = image_tracker.apply_calibration(frame)
 
             primary_corners, secondary_corners = self.detect_aruco_marker(frame)
 
@@ -173,11 +175,11 @@ class ImageTracker:
         self.imagenet_class = config.imagenet_class
         self.classifier = classifier
         self.config = config
-        
-    def _load_image(self, image_path: str) -> np.ndarray:
-        image = cv2.imread(image_path)
-        return cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
 
+        with open(f"{config.output_dir}/calib.json", "rb") as file:
+            self.calib_config = json.load(file)
+
+        
     def _generate_masks(self, image: np.ndarray) -> List[Dict]:
         mask_generator = SAM2AutomaticMaskGenerator(self.sam, 
                                                     points_per_side=self.config.automatic_mask_points_per_side,
@@ -239,6 +241,10 @@ class ImageTracker:
             class_instances.append(mask)
 
         return class_instances
+
+
+    def apply_calibration(self, image: np.ndarray):
+        return calibrate.apply_calibration(image, self.calib_config)
 
 
     def process_image(self, image: np.ndarray, homography: np.ndarray) -> np.ndarray:

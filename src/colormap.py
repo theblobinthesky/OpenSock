@@ -182,53 +182,79 @@ def calculate_optimal_lookup_table(hists: list, const_band_size: int):
     return dynamic_matrix, np.array(lookup_table)
 
 
+def calculate_lut(image: np.ndarray, masks: list[np.ndarray], const_band_size: int=64, full_bins: int=1024, part_bins: int=256) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    luts = []
 
-np.random.seed(4)
-num_points = 10
-num_bboxes = 10
-const_band_size = 100
-pixel_thresh = 200
+    for c in range(3):
 
-image = generate_image_with_radial_fades(num_points)
-bboxes = generate_bboxes(num_bboxes)
+        hists = []
+        for mask in masks:
+            channel = image[:, :, c]
+            hist = np.histogram(channel[mask], bins=full_bins, range=(0, full_bins))[0]
+            hists.append(hist)
 
-mapped_image_per_ch = []
-hists_per_ch = []
-hists_per_ch = []
-lut_per_ch = []
-dm_per_ch = []
-avg_perc_change = 0.0
+        _, lut = calculate_optimal_lookup_table(hists, const_band_size=const_band_size)
+        luts.append(lut)
 
-for channel in range(3):
-    hists = [[extract_channel_hist(image, bbox, channel) for bbox in bboxes] for channel in range(3)]
-    dynamic_matrix, lut = calculate_optimal_lookup_table(hists[channel], const_band_size=const_band_size)
+    return tuple(luts)
 
-    mapped_image = np.zeros((image.shape[0], image.shape[1]), dtype=np.uint8)
-    mapped_image = lut[image[:, :, channel]]
+def apply_luts(image: np.ndarray, luts: tuple[np.ndarray, np.ndarray, np.ndarray]) -> np.ndarray:
+    mapped = []
+    for c in range(3):
+        channel = image[:, :, c]
+        lut = luts[c]
+        mapped.append(lut[channel])
 
-    dynamic_matrix[dynamic_matrix == np.iinfo(np.uint64).max] = 0
-    sum_hist = np.sum(np.concat(hists, axis=0), axis=0)
+    return np.stack(mapped, axis=-1)
 
-    def get_avg_collisions(lut):
-        avg_collisions = 0.0
-        for full_idx in range(256):
-            indices = np.where(lut == full_idx)[0]
-            if indices.size:
-                hist_vals = sum_hist[indices]
-                avg_collisions += (np.sum(hist_vals) - np.max(hist_vals)) / 1024.0
-        return avg_collisions
 
-    basic_lut = np.round(np.linspace(0, 255, num=1024)).astype(np.uint32)
-    basic_cols = get_avg_collisions(basic_lut)
-    lut_cols = get_avg_collisions(lut)
-    print(lut_cols, basic_cols)
-    avg_perc_change += (lut_cols - basic_cols) / basic_cols
+if __name__ == "__main__":
+    np.random.seed(4)
+    num_points = 10
+    num_bboxes = 10
+    const_band_size = 100
+    pixel_thresh = 200
 
-    mapped_image_per_ch.append(mapped_image)
-    hists_per_ch.append(hists)
-    lut_per_ch.append(lut)
-    dm_per_ch.append(dynamic_matrix)
+    image = generate_image_with_radial_fades(num_points)
+    bboxes = generate_bboxes(num_bboxes)
 
-avg_perc_change /= 3
+    mapped_image_per_ch = []
+    hists_per_ch = []
+    hists_per_ch = []
+    lut_per_ch = []
+    dm_per_ch = []
+    avg_perc_change = 0.0
 
-visualize_results(image, mapped_image_per_ch, hists_per_ch, bboxes, lut_per_ch, dm_per_ch, avg_perc_change)
+    for channel in range(3):
+        hists = [[extract_channel_hist(image, bbox, channel) for bbox in bboxes] for channel in range(3)]
+        dynamic_matrix, lut = calculate_optimal_lookup_table(hists[channel], const_band_size=const_band_size)
+
+        mapped_image = np.zeros((image.shape[0], image.shape[1]), dtype=np.uint8)
+        mapped_image = lut[image[:, :, channel]]
+
+        dynamic_matrix[dynamic_matrix == np.iinfo(np.uint64).max] = 0
+        sum_hist = np.sum(np.concat(hists, axis=0), axis=0)
+
+        def get_avg_collisions(lut):
+            avg_collisions = 0.0
+            for full_idx in range(256):
+                indices = np.where(lut == full_idx)[0]
+                if indices.size:
+                    hist_vals = sum_hist[indices]
+                    avg_collisions += (np.sum(hist_vals) - np.max(hist_vals)) / 1024.0
+            return avg_collisions
+
+        basic_lut = np.round(np.linspace(0, 255, num=1024)).astype(np.uint32)
+        basic_cols = get_avg_collisions(basic_lut)
+        lut_cols = get_avg_collisions(lut)
+        print(lut_cols, basic_cols)
+        avg_perc_change += (lut_cols - basic_cols) / basic_cols
+
+        mapped_image_per_ch.append(mapped_image)
+        hists_per_ch.append(hists)
+        lut_per_ch.append(lut)
+        dm_per_ch.append(dynamic_matrix)
+
+    avg_perc_change /= 3
+
+    visualize_results(image, mapped_image_per_ch, hists_per_ch, bboxes, lut_per_ch, dm_per_ch, avg_perc_change)

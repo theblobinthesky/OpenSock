@@ -445,7 +445,7 @@ class TrackingVisualizer(QMainWindow):
         if self.highlighted_obj_id:
             self.delete_object(self.highlighted_obj_id)
     
-    def display_current_frame(self):
+    def display_current_frame(self, image_tracker):
         if not self.master_track:
             return
         
@@ -458,6 +458,7 @@ class TrackingVisualizer(QMainWindow):
         ret, frame = self.cap.read()
         if not ret:
             return
+        frame = image_tracker.apply_calibration(frame)
         
         frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         frame_rgb = apply_homography(frame_rgb, homography, frame_rgb.shape[:2])
