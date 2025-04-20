@@ -3,6 +3,7 @@ venv
 *.pt
 *.yaml
 data/sock_*
+data/data_*
 *.jpg
 __pycache__
 temp*
@@ -21,3 +22,4 @@ cmake-build-debug
 *.jax
 *.pickle
 *.png
+.vscode

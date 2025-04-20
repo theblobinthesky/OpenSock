@@ -1,3 +1,4 @@
+from .timing import timed
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
@@ -106,6 +107,7 @@ def extract_channel_hist(img, bbox, channel):
     hist = np.histogram(cutout, bins=1024, range=(0, 1024))[0]
     return hist
 
+@timed
 def calculate_optimal_lookup_table(hists: list, const_band_size: int):
     # The goal is to obtain a monotonic lookup table per color channel,
     # such that we preserve as much separation between hists as possible
@@ -182,7 +184,9 @@ def calculate_optimal_lookup_table(hists: list, const_band_size: int):
     return dynamic_matrix, np.array(lookup_table)
 
 
-def calculate_lut(image: np.ndarray, masks: list[np.ndarray], const_band_size: int=64, full_bins: int=1024, part_bins: int=256) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+@timed
+def calculate_luts(image: np.ndarray, masks: list[np.ndarray], const_band_size: int=64, full_bins: int=1024, part_bins: int=256) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    assert part_bins == 256
     luts = []
 
     for c in range(3):
@@ -247,7 +251,6 @@ if __name__ == "__main__":
         basic_lut = np.round(np.linspace(0, 255, num=1024)).astype(np.uint32)
         basic_cols = get_avg_collisions(basic_lut)
         lut_cols = get_avg_collisions(lut)
-        print(lut_cols, basic_cols)
         avg_perc_change += (lut_cols - basic_cols) / basic_cols
 
         mapped_image_per_ch.append(mapped_image)

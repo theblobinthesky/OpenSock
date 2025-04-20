@@ -6,7 +6,6 @@ class BaseConfig:
     imagenet_class: int
     input_dir: str
     output_dir: str
-    calibration_dir: str
     image_size: tuple
     output_warped_size: tuple
     aruco_dict_type: int = cv2.aruco.DICT_6X6_250
@@ -33,7 +32,6 @@ class BaseConfig:
     center_window_width_perc: float = 0.08
 
     classifier_confidence_threshold: float = 0.04
-    mask_contrast_control = 1.3     # contrast control (1.0-3.0)
-    mask_brightness_control = 10    # brightness control (0-100)
+    lut_band_size = 32
     video_tracker_inside_threshold = 1.0 # 0.99
     temp_fs_dir = "../data/temp_fs"

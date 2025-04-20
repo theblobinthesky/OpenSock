@@ -10,6 +10,16 @@ from PyQt5.QtGui import QImage, QPixmap, QPainter, QColor, QPen, QKeySequence, Q
 from .trackers import Stabilizer, ImageTracker, VideoTracker, apply_homography
 from .config import BaseConfig
 
+
+def import_master_track(self, dir: str, filename: str):
+    with open(f"{dir}/{filename}.json", 'r') as f:
+        data = json.load(f)
+
+    logging.info(f"Master track imported from {filename}")
+
+    return data
+
+
 class FrameViewer(QWidget):
     object_deleted = pyqtSignal(str)
     object_toggled = pyqtSignal(str)  # New signal for toggling is_class_instance

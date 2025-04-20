@@ -4,6 +4,7 @@ import scipy
 import json
 from pathlib import Path
 from tqdm import tqdm
+from .timing import timed
 
 IMAGE_DIR   = Path("../data/calibration")
 ROWS, COLS  = 6, 9            # inner‑corner grid
@@ -366,6 +367,7 @@ def calibrate_custom(obj_pts_list, img_pts_list, image_size):
     return {"name": "custom", "rms": rms, "mean": mean_error}
 
 
+@timed
 def calibrate_and_save(input_dir, output_dir):
     images = sorted(Path(input_dir).glob("*.jpg")) + sorted(Path(input_dir).glob("*.png"))
     objp, imgp, valid_imgs = detect_corners(images)
@@ -411,13 +413,30 @@ def apply_calibration(image: np.ndarray, calib: dict):
     intrin = calib["intrinsics"]
     fx, fy, scew, px, py = intrin["fx"], intrin["fy"], intrin["scew"], intrin["px"], intrin["py"]
     k1, k2 = calib["distortion_coeff"]
+
     calib_w, calib_h = calib["image_size"]
-    h, w, c = image.shape
+    h, w, _ = image.shape
 
-    print(h, w, c)
+    s = w / calib_w
+    if s != h / calib_h:
+        raise ValueError("Calibration size does not match the image size.")
 
+    fx *= s
+    fy *= s
+    scew *= s
+    px *= s
+    py *= s
 
-    return 0.0
+    K = np.array([
+        [fx, scew, px],
+        [0, fy, py],
+        [0,  0,  1]
+    ], dtype=np.float64)
+
+    D = np.array([k1, k2, 0.0, 0.0, 0.0], dtype=np.float64)
+
+    map1, map2 = cv2.initUndistortRectifyMap(K, D, None, K, (w,h), cv2.CV_32FC1)
+    return cv2.remap(image, map1, map2, interpolation=cv2.INTER_LINEAR)
 
 
 def main():

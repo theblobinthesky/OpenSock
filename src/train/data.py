@@ -10,8 +10,8 @@ from .config import DataConfig
 from .utils import compute_iou_with_sides
 
 
-dinov2 = torch.hub.load('facebookresearch/dinov2', 'dinov2_vitb14_reg').to('cuda')
-dinov2 = torch.compile(dinov2)
+# dinov2 = torch.hub.load('facebookresearch/dinov2', 'dinov2_vitb14_reg').to('cuda')
+# dinov2 = torch.compile(dinov2)
 
 def get_num_samples_from_class_samples(num_class_samples: int, other_total_perc: float, other_part_perc: float) -> int:
     total_samples = int(num_class_samples / (1.0 - other_total_perc))
