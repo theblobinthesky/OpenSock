@@ -20,7 +20,7 @@ class BaseConfig:
     automatic_mask_points_per_side = 64
     automatic_mask_quality_thresh = 0.75
 
-    diff_threshold: float = 0.05
+    diff_threshold: float = 0.1
     track_skip: int = 30
     max_interesting_frames: int = 180
     instance_merge_iou_thresh: float = 0.9

@@ -6,25 +6,27 @@ import torch, cv2, numpy as np
 import logging
 
 
-def extract_frames(video_ctx: VideoContext, temp_output_dir: str, frames: list[int]):
-    for sub_path in os.listdir(temp_output_dir):
-        os.remove(f"{temp_output_dir}/{sub_path}")
+def extract_frames(video_ctx: VideoContext, config: BaseConfig, frames: list[int]):
+    for sub_path in os.listdir(config.temp_fs_dir):
+        os.remove(f"{config.temp_fs_dir}/{sub_path}")
 
-    if not os.path.exists(temp_output_dir):
-        os.mkdir(temp_output_dir)
+    if not os.path.exists(config.temp_fs_dir):
+        os.mkdir(config.temp_fs_dir)
 
     for i, (_, frame) in enumerate(open_video_capture(video_ctx, frames)):
-        cv2.imwrite(f"{temp_output_dir}/{i}.jpeg", frame)
+        frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+        cv2.imwrite(f"{config.temp_fs_dir}/{i}.jpeg", frame)
 
 
-def track_forward(input_dir: str, frame_indices: list[int], masks: list, obj_ids: list, sam2_video):
+def track_forward(config: BaseConfig, frame_indices: list[int], masks: list, obj_ids: list, sam2_video):
     track = list(range(len(frame_indices)))
             
     with torch.inference_mode(), torch.autocast("cuda", dtype=torch.bfloat16):
-        state = sam2_video.init_state(input_dir)
+        state = sam2_video.init_state(config.temp_fs_dir)
 
         for mask, obj_id in zip(masks, obj_ids):
-            sam2_video.add_new_mask(state, 0, obj_id, mask['segmentation'])
+            mask = mask['segmentation']
+            sam2_video.add_new_mask(state, 0, obj_id, mask)
         
         for out_frame_idx, out_obj_ids, out_mask_logits in sam2_video.propagate_in_video(state):
             contours_of_obj_ids = []
@@ -217,31 +219,40 @@ def process_multiple_frames(interesting_frames: list[int], track_frames: list[in
         nonlocal obj_id_start
         ids = list(range(obj_id_start, obj_id_start + len(masks)))
         return ids
-    
-    for frame_idx, masks in zip(track_frames, masks_per_frame):
+
+    ext_track_frames = [0] + track_frames + [interesting_frames[-1]]
+    for i, (last_frame, frame, next_frame, masks) in enumerate(zip(ext_track_frames[:-2], ext_track_frames[1:-1], ext_track_frames[2:], masks_per_frame)):
         if len(masks) == 0:
             logging.info("Failed to find socks. Skipping the frame.")
             continue
 
         instances.extend(masks)
 
-        frame_indices = list(reversed([i for i in interesting_frames if i <= frame_idx]))
-        extract_frames(video_ctx, config.temp_fs_dir, frame_indices)
-        track_bw = track_forward(config.temp_fs_dir, frame_indices, masks, _get_obj_ids(masks), sam2_video)
+        frame_indices = list(reversed([i for i in interesting_frames if last_frame <= i <= frame]))
+        extract_frames(video_ctx, config, frame_indices)
+        track_bw = track_forward(config, frame_indices, masks, _get_obj_ids(masks), sam2_video)
 
-        frame_indices = [i for i in interesting_frames if i >= frame_idx]
-        extract_frames(video_ctx, config.temp_fs_dir, frame_indices)
-        track_fw = track_forward(config.temp_fs_dir, frame_indices, masks, _get_obj_ids(masks), sam2_video)
+        frame_indices = [i for i in interesting_frames if frame <= i <= next_frame]
+        extract_frames(video_ctx, config, frame_indices)
+        track_fw = track_forward(config, frame_indices, masks, _get_obj_ids(masks), sam2_video)
 
         track = [*reversed(track_bw[1:]), *track_fw]
         tracks.append(track)
         obj_id_start += len(masks)
 
-        track_frame_idx += 1
-        logging.info(f"Tracked frame {track_frame_idx}/{len(track_frames)}.")
+        logging.info(f"Tracked frame {i + 1}/{len(track_frames)}.")
 
+    import pickle
+    with open("../data/temp2.pickle", "wb") as file:
+        pickle.dump([interesting_frames, instances, tracks, video_ctx], file)
 
-    instances, master_track = merge_into_master_track(len(interesting_frames), 4, instances, tracks)
-    mark_occlusions(master_track)
+    exit(0)
 
-    return instances, master_track
+    import pickle
+    with open("../data/temp2.pickle", "rb") as file:
+        [interesting_frames, instances, tracks, video_ctx] = pickle.load(file)
+
+    # instances, master_track = merge_into_master_track(len(interesting_frames), 4, instances, tracks)
+    # mark_occlusions(master_track)
+
+    # return instances, master_track

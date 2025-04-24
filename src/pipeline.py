@@ -21,20 +21,22 @@ logging.basicConfig(
 
 class PretrainedClassifier:
     def __init__(self):
-        self.model = timm.create_model('eva02_large_patch14_448.mim_m38m_ft_in22k_in1k', pretrained=True)
-        self.model = self.model.to('cuda')
-        self.model.eval()
+        pass
+        # self.model = timm.create_model('eva02_large_patch14_448.mim_m38m_ft_in22k_in1k', pretrained=True)
+        # self.model = self.model.to('cuda')
+        # self.model.eval()
         
-        data_config = timm.data.resolve_model_data_config(self.model)
-        self.transforms = timm.data.create_transform(**data_config, is_training=False)
+        # data_config = timm.data.resolve_model_data_config(self.model)
+        # self.transforms = timm.data.create_transform(**data_config, is_training=False)
 
     def __call__(self, x: np.ndarray, class_idx: int):
-        x = cv2.resize(x, (448, 448)) * 255
-        x = Image.fromarray(x)
-        input_tensor = self.transforms(x).unsqueeze(0).float().to('cuda')
-        output = self.model(input_tensor)
-        probabilities = torch.nn.functional.softmax(output[0], dim=0)
-        return probabilities[class_idx]
+        return 1.0
+        # x = cv2.resize(x, (448, 448)) * 255
+        # x = Image.fromarray(x)
+        # input_tensor = self.transforms(x).unsqueeze(0).float().to('cuda')
+        # output = self.model(input_tensor)
+        # probabilities = torch.nn.functional.softmax(output[0], dim=0)
+        # return probabilities[class_idx]
 
 
 # class CustomClassifier:

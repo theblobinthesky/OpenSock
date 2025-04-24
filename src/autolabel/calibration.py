@@ -1,10 +1,8 @@
-import cv2
-import numpy as np
-import scipy
-import json
+from .timing import timed
+import numpy as np, cv2, scipy
+import logging, json
 from pathlib import Path
 from tqdm import tqdm
-from .timing import timed
 
 IMAGE_DIR   = Path("../data/calibration")
 ROWS, COLS  = 6, 9            # inner‑corner grid
@@ -404,9 +402,9 @@ def calibrate_and_save(input_dir, output_dir):
     with open(output_path / "calib.json", "w") as f:
         json.dump(calib_data, f, indent=4)
 
-    print(f"Calibration saved to {output_path / 'calib.json'}")
-    print(f"  RMS  : {rms_error:.4f} px")
-    print(f"  Mean : {mean_error:.4f} px")
+    logging.info(f"Calibration saved to {output_path / 'calib.json'}")
+    logging.info(f"  RMS  : {rms_error:.4f} px")
+    logging.info(f"  Mean : {mean_error:.4f} px")
 
 
 def apply_calibration(image: np.ndarray, calib: dict):

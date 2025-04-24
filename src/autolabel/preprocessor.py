@@ -10,7 +10,7 @@ def get_interesting_frames(video_ctx: VideoContext, config: BaseConfig) -> list[
     def _process(frame: np.ndarray):
         work_size = tuple(np.array(config.image_size) // config.performance_downscale_factor)
         frame = cv2.resize(frame, work_size, interpolation=cv2.INTER_AREA)
-        return cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        return frame
 
     cap = open_video_capture(video_ctx, load_in_8bit_mode=True)
     total_num_frames = len(cap)
@@ -27,7 +27,7 @@ def get_interesting_frames(video_ctx: VideoContext, config: BaseConfig) -> list[
         size = frame.shape[:-1]
         if original_size != size:
             raise ValueError("The frame sizes have to be consistent.")
-
+        
         gray = _process(frame)
 
         diff = cv2.absdiff(prev_frame, gray)
@@ -134,10 +134,7 @@ class StabilizerContext:
         self.secondary_aruco_marker_id = config.secondary_aruco_marker_id
 
     def detect_aruco_marker(self, image: np.ndarray) -> Tuple[bool, Optional[np.ndarray]]:
-        # Convert to grayscale for marker detection
         gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
-        
-        # Detect markers
         corners, ids, _ = self.aruco_detector.detectMarkers(gray)
         
         if ids is not None and len(ids) > 0:

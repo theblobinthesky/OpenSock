@@ -14,10 +14,10 @@
 - Autolabel pipeline stabilizer simultaneously optimizes for keeping the second marker quadratical
 + Autolabel pipeline video tracker merging: a inside b for mt. thresh frames -> remove a
 + Autolabel pipeline image tracker uses classification model and improves brightness+contrast of socks to make them more recognizable
-- Autolabel pipeline detects frames using some heuristic that is more useful than what we currently use
++ Autolabel pipeline detects frames using some heuristic that is more useful than what we currently use
 - Enable 0-100 autolabeling: autolabel, train custom classifier, autolabel with custom classifier
-- Support custom camera calibration
-- Autolabel stabilizer takes into account camera calibration
++ Support custom camera calibration
++ Autolabel stabilizer takes into account camera calibration
 + Add negative examples to the classification dataset: start with rejected objects, fill up with random views that are non-intersecting to all positive instances
 + Support learning rate scheduler
 - Support fp16 training
@@ -32,3 +32,6 @@
 - Improve video tracker performance using model inference adjustment and not tracking too far
 - Implement the advanced merging routine for the video tracker
 - Improve video tracker performance when tracking does not lead to new information anymore (requires advanced merging routine)
+- Do huge refactor of everything to allow for all new accomodations
+- Autolabel preprocessor finds floor plane in 3d using intrinsic calibration
+- Autolabel singleframe processor distinguishes objects on the floor and above using monocular depth model and ground truth from aruco markers

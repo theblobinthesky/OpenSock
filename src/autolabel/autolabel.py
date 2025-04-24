@@ -57,7 +57,7 @@ def _setup_sam2_model(config: BaseConfig, device):
         logging.info(f"Downloaded {config.sam2_config}.")
 
     sam2 = build_sam2("/" + os.path.abspath(config.sam2_config), config.sam2_checkpoint, device=device, apply_postprocessing=False)
-    sam2_video = build_sam2_video_predictor("/" + os.path.abspath(config.sam2_config), config.sam2_checkpoint, vos_optimized=True)
+    sam2_video = build_sam2_video_predictor("/" + os.path.abspath(config.sam2_config), config.sam2_checkpoint, vos_optimized=True, points_per_batch=64)
     return sam2, sam2_video
 
 
@@ -66,16 +66,16 @@ def process_video(config: BaseConfig, video_ctx: VideoContext, video_path, sam2,
     video_name = os.path.splitext(os.path.basename(video_path))[0]
     os.makedirs(config.output_dir, exist_ok=True)
 
-    interesting_frames, track_frames, homographies = preprocess(video_ctx, config)
-    masks_per_frame = process_single_frames(video_ctx, track_frames, config, sam2, classifier)
+    # interesting_frames, track_frames, homographies = preprocess(video_ctx, config)
+    # masks_per_frame = process_single_frames(video_ctx, track_frames, config, sam2, classifier)
 
-    import pickle
-    with open("../data/temp.pickle", "wb") as file:
-        pickle.dump([interesting_frames, track_frames, masks_per_frame, homographies], file)
+    # import pickle
+    # with open("../data/temp.pickle", "wb") as file:
+    #     pickle.dump([interesting_frames, track_frames, masks_per_frame, homographies, video_ctx], file)
 
     import pickle
     with open("../data/temp.pickle", "rb") as file:
-        [interesting_frames, track_frames, masks_per_frame, homographies] = pickle.load(file)
+        [interesting_frames, track_frames, masks_per_frame, homographies, video_ctx] = pickle.load(file)
 
     instances, master_track = process_multiple_frames(interesting_frames, track_frames, masks_per_frame, video_ctx, config, sam2_video)
     export_master_track(interesting_frames, instances, homographies, master_track, f"{config.output_dir}/{video_name}.json")
