@@ -21,14 +21,15 @@ class BaseConfig:
     automatic_mask_quality_thresh = 0.75
 
     diff_threshold: float = 0.1
-    track_skip: int = 30
-    max_interesting_frames: int = 180
     instance_merge_iou_thresh: float = 0.9
     no_change_threshold: float = 0.01
     consecutive_static_required: int = 10
     performance_downscale_factor: int = 4
-    num_track_frames: int = 5
-    min_partition_size_perc: float = 0.10
+
+    max_num_track_frames: int = 6
+    worst_allowed_quality: float = 3.0
+    error_window_radius: int = 8
+    min_partition_size_perc: float = 0.15
     center_window_width_perc: float = 0.08
 
     classifier_confidence_threshold: float = 0.04

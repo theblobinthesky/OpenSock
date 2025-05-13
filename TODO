@@ -35,3 +35,4 @@
 - Do huge refactor of everything to allow for all new accomodations
 - Autolabel preprocessor finds floor plane in 3d using intrinsic calibration
 - Autolabel singleframe processor distinguishes objects on the floor and above using monocular depth model and ground truth from aruco markers
++ Autolable singleframe processor find wider minimums and accomodates different numbers of track frames

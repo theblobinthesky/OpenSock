@@ -1,9 +1,10 @@
 from .config import BaseConfig
 from .timing import timed
-from .video_capture import VideoContext, open_video_capture
+from .video_capture import VideoContext, open_video_capture, is_high_bit_depth_video_capture
 from .colormap import calculate_luts
 import numpy as np, cv2 
 from typing import List, Dict
+import torch
 from sam2.automatic_mask_generator import SAM2AutomaticMaskGenerator
 
 
@@ -41,6 +42,34 @@ def _filter_masks(image: np.ndarray, masks: List[Dict]) -> List[Dict]:
     
     return sock_masks
 
+
+def _filter_masks2(image: np.ndarray, masks: List[Dict], zoe_depth):
+    return masks
+    # image_processor, model = zoe_depth
+    # inputs = image_processor(images=image, return_tensors="pt")
+
+    # with torch.no_grad():
+    #     outputs = model(**inputs)
+    
+    # post_processed_output = image_processor.post_process_depth_estimation(outputs, source_sizes=[(image.height, image.width)])
+    # depth_in_meters = post_processed_output[0]['predicted_depth'].detach().cpu().numpy()
+
+    # filtered_masks = []
+    # for mask in masks:
+    #     # Extract the masked region
+    #     mask_binary = mask['segmentation'].astype(np.uint8)
+    #     y_indices, x_indices = np.where(mask_binary > 0)
+    #     min_y, max_y = np.min(y_indices), np.max(y_indices)
+    #     min_x, max_x = np.min(x_indices), np.max(x_indices)
+
+
+
+    #     filtered_masks.append(mask)
+
+
+    # return filtered_masks
+
+
 def _classify_instances(image: np.ndarray, masks: List[Dict], config: BaseConfig, classifier) -> List[Dict]:
     class_instances = []
     
@@ -48,11 +77,6 @@ def _classify_instances(image: np.ndarray, masks: List[Dict], config: BaseConfig
         # Extract the masked region
         mask_binary = mask['segmentation'].astype(np.uint8)
         y_indices, x_indices = np.where(mask_binary > 0)
-        
-        if len(y_indices) == 0 or len(x_indices) == 0:
-            continue
-            
-        # Extract and pad the bounding box
         padding = 10
         min_y, max_y = np.min(y_indices), np.max(y_indices)
         min_x, max_x = np.min(x_indices), np.max(x_indices)
@@ -69,18 +93,19 @@ def _classify_instances(image: np.ndarray, masks: List[Dict], config: BaseConfig
 
 
 @timed
-def process_single_frames(video_ctx: VideoContext, frames: list[int], config: BaseConfig, sam2, classifier):
+def process_single_frames(video_ctx: VideoContext, frames: list[int], config: BaseConfig, sam2, classifier, zoe_depth):
     masks_per_frame = []
 
     for _, frame in open_video_capture(video_ctx, frames, load_in_8bit_mode=True):
         masks = _generate_masks(frame, config, sam2)
         sock_masks = _filter_masks(frame, masks)
+        sock_masks = _filter_masks2(frame, masks, zoe_depth)
         sock_masks = _classify_instances(frame, sock_masks, config, classifier)
         masks_per_frame.append(sock_masks)
 
     opt_frame = np.argmax([len(masks) for masks in masks_per_frame])
     cap = open_video_capture(video_ctx, [frames[opt_frame]])
-    if video_ctx.luts is None:
+    if video_ctx.luts is None and is_high_bit_depth_video_capture(video_ctx):
         masks = masks_per_frame[opt_frame]
         masks = [mask['segmentation'] for mask in masks]
         video_ctx.luts = calculate_luts(next(cap)[1], masks, const_band_size=config.lut_band_size)

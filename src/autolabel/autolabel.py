@@ -10,6 +10,7 @@ from .calibration import calibrate_and_save
 from .preprocessor import preprocess
 from .singleframe_processor import process_single_frames
 from .multiframe_processor import process_multiple_frames
+# from transformers import AutoImageProcessor, ZoeDepthForDepthEstimation
 
 
 def export_master_track(important_frames: list[int], instances: list, homographies: list[np.ndarray], master_track: list, path: str):
@@ -61,17 +62,26 @@ def _setup_sam2_model(config: BaseConfig, device):
     return sam2, sam2_video
 
 
+def _setup_zoe_depth_model():
+    # image_processor = AutoImageProcessor.from_pretrained("Intel/zoedepth-nyu-kitti")
+    # model = ZoeDepthForDepthEstimation.from_pretrained("Intel/zoedepth-nyu-kitti")
+    image_processor, model = None, None
+    return image_processor, model
+
+
 @timed
-def process_video(config: BaseConfig, video_ctx: VideoContext, video_path, sam2, sam2_video, classifier):
+def process_video(config: BaseConfig, video_ctx: VideoContext, video_path, sam2, sam2_video, classifier, zoe_depth):
     video_name = os.path.splitext(os.path.basename(video_path))[0]
     os.makedirs(config.output_dir, exist_ok=True)
 
-    # interesting_frames, track_frames, homographies = preprocess(video_ctx, config)
-    # masks_per_frame = process_single_frames(video_ctx, track_frames, config, sam2, classifier)
+    logging.info(f"Processing {video_name}.")
 
-    # import pickle
-    # with open("../data/temp.pickle", "wb") as file:
-    #     pickle.dump([interesting_frames, track_frames, masks_per_frame, homographies, video_ctx], file)
+    interesting_frames, track_frames, homographies = preprocess(video_ctx, config)
+    masks_per_frame = process_single_frames(video_ctx, track_frames, config, sam2, classifier, zoe_depth)
+
+    import pickle
+    with open("../data/temp.pickle", "wb") as file:
+        pickle.dump([interesting_frames, track_frames, masks_per_frame, homographies, video_ctx], file)
 
     import pickle
     with open("../data/temp.pickle", "rb") as file:
@@ -97,6 +107,7 @@ def label_automatically(classifier, config: BaseConfig):
         raise ValueError("The image shape does not have the same aspect ratio as the target shape.")
 
     sam2, sam2_video = _setup_sam2_model(config, torch.device("cuda"))
+    zoe_depth = _setup_zoe_depth_model()
     video_ctxs = sorted(os.listdir(config.input_dir))
 
     for video_ctx in video_ctxs:
@@ -114,6 +125,6 @@ def label_automatically(classifier, config: BaseConfig):
             video_path = f"{config.input_dir}/{video_ctx}/videos/{video_file}"
             video_ctx = VideoContext(video_path, config)
             video_ctx.calib_config = calib_config
-            process_video(config, video_ctx, video_path, sam2, sam2_video, classifier)
+            process_video(config, video_ctx, video_path, sam2, sam2_video, classifier, zoe_depth)
 
     logging.info("All operations completed successfully!")

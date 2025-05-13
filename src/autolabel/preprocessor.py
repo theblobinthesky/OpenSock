@@ -1,11 +1,14 @@
 from .config import BaseConfig
+from .utils import embed_into_projective, unembed_into_euclidean, get_euclidean_transform_matrix
 from .timing import timed
 from .video_capture import VideoContext, open_video_capture
-import numpy as np, cv2
+import numpy as np, cv2, scipy
 from typing import Tuple, Optional
 from tqdm import tqdm
+import logging
 
 
+@timed
 def get_interesting_frames(video_ctx: VideoContext, config: BaseConfig) -> list[int]:
     def _process(frame: np.ndarray):
         work_size = tuple(np.array(config.image_size) // config.performance_downscale_factor)
@@ -47,79 +50,104 @@ def get_interesting_frames(video_ctx: VideoContext, config: BaseConfig) -> list[
     if total_num_frames <= 1:
         raise ValueError("Video has too few frames.")
 
-    all_errors = [all_errors[0]] + all_errors + [all_errors[-1]]
-    bidir_errors = [all_errors[i] + all_errors[i + 1] for i in range(total_num_frames)]
+
+    w = config.error_window_radius
+    all_errors = np.pad(all_errors, (w, w), mode='edge')
+    kernel = np.ones(2 * w - 1) / (2 * w - 1)
+    all_errors = np.convolve(all_errors, kernel, mode='valid')
 
 
-    # Compute the best partitioning into config.num_track_frames partitions
-    # such that the sum over the minimums is minimal using dynamic programming.
+    def get_optimal_track_frames(num_track_frames: int):
+        # Compute the best partitioning into num_track_frames partitions
+        # such that the sum over the minimums is minimal using dynamic programming.
 
-    # Let RMC(i, k) be a O(1) way to get the minimum over the last k of the first i items.
-    # Let i be the number of items and j be the number of partitions. The recurrence is as follows:
-    # min_way_to_partition_i_items_into_j_partitions = d(j, i) = min_(1 <= k < i){d(j - 1, k) + RMC(i, i - k)}
-    # Backtrack through previous_matrix to find what the partitioning is. Simple enough?
+        # Let RMC(i, k) be a O(1) way to get the minimum over the last k of the first i items.
+        # Let i be the number of items and j be the number of partitions. The recurrence is as follows:
+        # min_way_to_partition_i_items_into_j_partitions = d(j, i) = min_(1 <= k < i){d(j - 1, k) + RMC(i, i - k)}
+        # Backtrack through previous_matrix to find what the partitioning is. Simple enough?
 
-    # Calculate RMC (rank minimum cache).
-    RMC = np.zeros((total_num_frames, total_num_frames))
-    center_window_width = int(round(config.center_window_width_perc * total_num_frames))
-    for i in range(total_num_frames):
-        last_err = float('inf')
-        window_size = min(i + 1, center_window_width)
-        for k in range(window_size):
-            last_err = min(last_err, bidir_errors[i - k])
-            RMC[i, k] = last_err
-
-
-    # Initialize dynamic matrix.
-    dynamic_matrix = np.full((config.num_track_frames, total_num_frames), np.inf)
-    last_error = float('inf')
-    for i in range(total_num_frames):
-        last_error = dynamic_matrix[0, i] = min(last_error, bidir_errors[i])
-
-    # Calculate dynamic matrix.
-    previous_matrix = np.zeros((config.num_track_frames, total_num_frames), np.uint32)
-    min_partition_size = int(round(config.min_partition_size_perc * total_num_frames))
-
-    for j in range(1, config.num_track_frames):
-        for i in range(max(j, 2 * min_partition_size), total_num_frames):
-            min_total = float('inf')
-            min_idx = -1
-            for k in range(min_partition_size - 1, i + 1 - min_partition_size):
-                total = dynamic_matrix[j - 1, k] + RMC[i, i - k - 1]
-                if total < min_total:
-                    min_total = total
-                    min_idx = k
-
-            if min_idx >= 0: 
-                dynamic_matrix[j, i] = min_total
-                previous_matrix[j, i] = min_idx
-
-    # Backtrack to find the solution.
-    j = config.num_track_frames - 1
-    i = total_num_frames - 1
-    partitions = []
-
-    while j >= 0:
-        k = int(previous_matrix[j, i])
-        partitions.append((k + 1, i + 1))
-        j, i = j - 1, k
-    
-    partitions.reverse()
+        # Calculate RMC (rank minimum cache).
+        RMC = np.zeros((total_num_frames, total_num_frames))
+        center_window_width = int(round(config.center_window_width_perc * total_num_frames))
+        for i in range(total_num_frames):
+            last_err = float('inf')
+            window_size = min(i + 1, center_window_width)
+            for k in range(window_size):
+                last_err = min(last_err, all_errors[i - k])
+                RMC[i, k] = last_err
 
 
-    # Find the track frames.
-    track_frames = []
-    for (begin, end) in partitions:
-        idx = begin + int(np.argmin(bidir_errors[begin:end]))
-        track_frames.append(idx)
+        # Initialize dynamic matrix.
+        dynamic_matrix = np.full((num_track_frames, total_num_frames), np.inf)
+        last_error = float('inf')
+        for i in range(total_num_frames):
+            last_error = dynamic_matrix[0, i] = min(last_error, all_errors[i])
 
-    interesting_frames = list(set(frames) | set(track_frames))
-    interesting_frames.sort()
+        # Calculate dynamic matrix.
+        previous_matrix = np.zeros((num_track_frames, total_num_frames), np.uint32)
+        min_partition_size = int(round(config.min_partition_size_perc * total_num_frames))
 
-    track_frame_indices = [interesting_frames.index(f) for f in track_frames]
+        for j in range(1, num_track_frames):
+            for i in range(max(j, 2 * min_partition_size), total_num_frames):
+                min_total = float('inf')
+                min_idx = -1
+                for k in range(min_partition_size - 1, i + 1 - min_partition_size):
+                    total = dynamic_matrix[j - 1, k] + RMC[i, i - k - 1]
+                    if total < min_total:
+                        min_total = total
+                        min_idx = k
 
-    return interesting_frames, track_frame_indices, np.array(original_size)
+                if min_idx >= 0: 
+                    dynamic_matrix[j, i] = min_total
+                    previous_matrix[j, i] = min_idx
 
+        # Backtrack to find the solution.
+        j = num_track_frames - 1
+        i = total_num_frames - 1
+        partitions = []
+
+        while j >= 0:
+            k = int(previous_matrix[j, i])
+            partitions.append((k + 1, i + 1))
+            j, i = j - 1, k
+        
+        partitions.reverse()
+
+
+        # Find the track frames.
+        track_frames = []
+        track_frame_errors = []
+        for (begin, end) in partitions:
+            idx = begin + int(np.argmin(all_errors[begin:end]))
+            track_frames.append(idx)
+            track_frame_errors.append(all_errors[idx])
+
+        interesting_frames = list(set(frames) | set(track_frames))
+        interesting_frames.sort()
+
+        quality_factor = np.max(track_frame_errors) / np.mean(track_frame_errors)
+
+        return interesting_frames, track_frames, quality_factor
+
+    interesting_frames = None
+    track_frames = None
+    quality_factor = None
+    for num_track_frames in range(1, config.max_num_track_frames + 1):
+        _interesting_frames, _track_frames, _quality_factor = get_optimal_track_frames(num_track_frames)
+
+        if _quality_factor <= config.worst_allowed_quality:
+            interesting_frames = _interesting_frames
+            track_frames = _track_frames
+            quality_factor = _quality_factor
+
+    logging.info(f"Found {len(track_frames)} track frames with quality {quality_factor:.2f} (<= {config.worst_allowed_quality:.2f}).")
+
+    return interesting_frames, track_frames, np.array(original_size)
+
+
+def get_null_space_vector(M: np.ndarray) -> np.ndarray:
+    _, _, Vh = np.linalg.svd(M)
+    return Vh[-1]
 
 class StabilizerContext:
     def __init__(self, config: BaseConfig):
@@ -130,64 +158,136 @@ class StabilizerContext:
         self.aruco_params = cv2.aruco.DetectorParameters()
         self.aruco_params.cornerRefinementMethod = cv2.aruco.CORNER_REFINE_SUBPIX
         self.aruco_detector = cv2.aruco.ArucoDetector(self.aruco_dict, self.aruco_params)
-        self.aruco_marker_id = config.aruco_marker_id
-        self.secondary_aruco_marker_id = config.secondary_aruco_marker_id
+        self.config = config
 
-    def detect_aruco_marker(self, image: np.ndarray) -> Tuple[bool, Optional[np.ndarray]]:
+    def detect_rectangles(self, image: np.ndarray) -> Tuple[bool, Optional[np.ndarray]]:
         gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
-        corners, ids, _ = self.aruco_detector.detectMarkers(gray)
-        
-        if ids is not None and len(ids) > 0:
-            marker_corners = None
-            secondary_marker_corners = None
+        list_of_corners, ids, _ = self.aruco_detector.detectMarkers(gray)
+        list_of_corners = np.array(list_of_corners).squeeze(axis=1)
+        corners_by_id = {id: corner for id, corner in zip(ids.flatten(), list_of_corners)}
+        return corners_by_id
 
-            for i, marker_id in enumerate(ids.flatten()):
-                if marker_id == self.aruco_marker_id:
-                    marker_corners = corners[i][0]
-                elif marker_id == self.secondary_aruco_marker_id:
-                    secondary_marker_corners = corners[i][0]
+    def compute_floor_plane_transform(self, frame, corners_by_id) -> np.ndarray:
+        # Compute linear initialization for 2d rectification.
 
-            return marker_corners, secondary_marker_corners
+        def get_constraint(l: np.ndarray, m: np.ndarray) -> np.ndarray:
+            return np.array([
+                l[0] * m[0], 
+                (l[0] * m[1] + l[1] * m[0]) * 0.5, 
+                l[1] * m[1],
+                (l[0] * m[2] + l[2] * m[0]) * 0.5, 
+                (l[1] * m[2] + l[2] * m[1]) * 0.5,
+                l[2] * m[2]
+            ])
+
+        constraints = []
+        for marker_corners in corners_by_id.values():
+            marker_corners = embed_into_projective(marker_corners)
+            l0 = np.cross(marker_corners[0], marker_corners[1])
+            m0 = np.cross(marker_corners[1], marker_corners[2])
+            l1 = np.cross(marker_corners[0], marker_corners[2])
+            m1 = np.cross(marker_corners[1], marker_corners[3])
+
+            # It's unclear to me how many constraints i should add.
+            # Technically only one since parallel lines don't add any new information.
+            # But they are not exactly parallel in my noisy measurements. So idk.
+            constraints.append(get_constraint(l0, m0))
+            constraints.append(get_constraint(l1, m1))
+
+
+        C = np.stack(constraints, axis=0)
+        v = get_null_space_vector(C)
+        v *= np.sign(v[0])
+        [a, b, c, d, e, f] = v
+        transformed_abs_conic = np.array([
+            [a, b / 2, d / 2],
+            [b / 2, c, e / 2],
+            [d / 2, e / 2, f]
+        ])
+
+        K = np.linalg.cholesky(transformed_abs_conic[:2, :2])
+        v = scipy.linalg.cho_solve((K, False), transformed_abs_conic[:2, 2])
+        scale = np.sqrt(transformed_abs_conic[2, 2] / (v.T @ K @ K.T @ v))
+
+
+        # Refine using levenberg-maquard gradient descent.
+        def pack_params(K: np.ndarray, v: np.ndarray, scale: np.ndarray):
+            params = np.array([K[0, 0], K[0, 1], K[1, 1], v[0], v[1], scale])
+            return params
         
-        return None, None
-    
-    def compute_floor_plane_transform(self, marker_corners: np.ndarray, from_pt: np.ndarray=None, to_pt: np.ndarray=None) -> np.ndarray:
-        w, h = self.output_warped_size
-        center_x, center_y = w // 8, h // 8
-        
-        # Calculate the vectors between opposite corners to find marker orientation
-        vec1 = marker_corners[2] - marker_corners[0]  # Diagonal from top-left to bottom-right
-        vec2 = marker_corners[3] - marker_corners[1]  # Diagonal from top-right to bottom-left
-        
-        # Estimate marker size in pixels (average of two diagonal lengths)
-        diag1_length = np.linalg.norm(vec1)
-        diag2_length = np.linalg.norm(vec2)
-        marker_size_px = (diag1_length + diag2_length) / (2 * np.sqrt(2))  # Divide by sqrt(2) to get side length
-        mm_per_pixel = self.marker_size_mm / marker_size_px
-        
-        # We will create a scaled square in the output image
-        # The size preserves the real-world scale based on the marker
-        output_marker_size_px = self.marker_size_mm / mm_per_pixel
-        
-        # Calculate the destination points for the marker in the output image
-        # Centered in the output image with proper scaling
-        half_size = output_marker_size_px / 1.5
-        dst_points = np.array([
-            [center_x - half_size, center_y - half_size],  # Top-left
-            [center_x + half_size, center_y - half_size],  # Top-right
-            [center_x + half_size, center_y + half_size],  # Bottom-right
-            [center_x - half_size, center_y + half_size]   # Bottom-left
-        ], dtype=np.float32)
-        
-        # Compute homography matrix that maps marker corners to the destination square
-        from_pts = marker_corners.astype(np.float32)
-        to_pts = dst_points
-        if from_pt is not None:
-            from_pts = np.concatenate([from_pts, from_pt[None, :]], axis=0)
-            to_pts = np.concatenate([to_pts, to_pt[None, :]], axis=0)
-            H, _ = cv2.findHomography(from_pts, to_pts, method=0)
-        else:
-            H = cv2.getPerspectiveTransform(from_pts, to_pts)
+        def unpack_params(params: np.ndarray):
+            [k00, k01, k11, v0, v1, scale] = params
+
+            K = np.array([
+                [k00, k01],
+                [k01, k11]
+            ])
+            v = np.array([v0, v1])
+
+            H = np.zeros((3, 3), np.float32)
+            H[:2, :2] = K
+            H[2, :2] = v
+            H[2, 2] = scale
+
+            return H
+
+
+        def get_residuals(corners, H):
+            proj_pts = embed_into_projective(corners) @ H.T
+            rolled_proj_pts = np.roll(proj_pts, shift=1, axis=0)
+            sides = np.cross(proj_pts, rolled_proj_pts, axis=1)
+
+            rolled_proj_pts = np.roll(proj_pts, shift=2, axis=0)
+            sides2 = np.cross(proj_pts, rolled_proj_pts, axis=1)
+
+            def get_sides_loss(sides):
+                prev_sides = np.roll(sides, shift=1, axis=0)
+
+                cutoff_dots = np.sum(sides[:, :2] * prev_sides[:, :2], axis=1)
+                cutoff_norms = np.linalg.norm(sides[:, :2], axis=1)
+                cutoff_prev_norms = np.linalg.norm(prev_sides[:, :2], axis=1)
+
+                angles = np.acos(cutoff_dots / (cutoff_norms * cutoff_prev_norms))
+                return (angles - np.pi / 2) * 100
+            
+            return get_sides_loss(sides) + get_sides_loss(sides2)
+
+
+        def reprojection_residuals(params, list_of_corners):
+            H = unpack_params(params)
+
+            angles = []
+            for corners in list_of_corners:
+                angles.append(get_residuals(corners, H))
+            
+            return np.hstack(angles)
+
+        try:
+            result = scipy.optimize.least_squares(
+                fun=reprojection_residuals,
+                x0=pack_params(K, v, scale),
+                args=(np.array(list(corners_by_id.values())),),
+                method='trf',
+                max_nfev=5000,
+                ftol = 1e-10,
+                xtol = 1e-10,
+                gtol = 1e-10
+            )
+            H = unpack_params(result.x)
+        except ValueError as e:
+            H = unpack_params(pack_params(K, v, scale))
+
+        # Calculate euclidean transformation.
+        from_pts = unembed_into_euclidean(embed_into_projective(corners_by_id[1]) @ H.T)
+        to_pts = np.array([
+            [0, 0],
+            [0, 1],
+            [1, 1],
+            [1, 0.0],
+        ]) * 100 + 100
+
+        E = get_euclidean_transform_matrix(from_pts, to_pts)
+        H = E @ H
 
         return H
 
@@ -195,83 +295,79 @@ class StabilizerContext:
 @timed
 def stabilize_frames(interesting_frames: list[int], config: BaseConfig, video_ctx: VideoContext):
     ctx = StabilizerContext(config)
-    primary_homographies = {}
-    primary_corners_dict = {}
-    secondary_midpoints = {}
+    homographies = []
 
     for frame_idx, frame in tqdm(open_video_capture(video_ctx, interesting_frames, load_in_8bit_mode=True)):
-        primary_corners, secondary_corners = ctx.detect_aruco_marker(frame)
+        corners_by_id = ctx.detect_rectangles(frame)
+        H = ctx.compute_floor_plane_transform(frame, corners_by_id)
+        homographies.append(H)
 
-        if primary_corners is not None:
-            H = ctx.compute_floor_plane_transform(primary_corners)
-            primary_homographies[frame_idx] = H
-            primary_corners_dict[frame_idx] = primary_corners
+    return homographies
 
-        if secondary_corners is not None:
-            secondary_midpoints[frame_idx] = np.mean(secondary_corners, axis=0)
+    #     if primary_corners is not None: 
+    #         primary_corners_dict[frame_idx] = primary_corners
 
-    def interpolate_all(existing_dict: dict[int, np.ndarray]):
-        found_frames = sorted(existing_dict.keys())
-        for curr, nxt in zip(found_frames[:-1], found_frames[1:]):
-            ten_curr = existing_dict[curr]
-            ten_next = existing_dict[nxt]
-            for idx in interesting_frames:
-                if curr <= idx <= nxt:
-                    t = float(idx - curr) / (nxt - curr)
-                    existing_dict[idx] = (1.0 - t) * ten_curr + t * ten_next
+    #     if secondary_corners is not None:
+    #         secondary_corners_dict[frame_idx] = secondary_corners
 
-        min_found_frame = np.min(np.array(found_frames))
-        max_found_frame = np.max(np.array(found_frames))
-        for idx in interesting_frames: 
-            if idx < min_found_frame:
-                existing_dict[idx] = existing_dict[min_found_frame]
-            elif idx > max_found_frame:
-                existing_dict[idx] = existing_dict[max_found_frame]
-            
-    
-    interpolate_all(primary_homographies)
-    interpolate_all(primary_corners_dict)
+    # def interpolate_all(existing_dict: dict[int, np.ndarray]):
+    #     found_frames = sorted(existing_dict.keys())
+    #     for curr, nxt in zip(found_frames[:-1], found_frames[1:]):
+    #         ten_curr = existing_dict[curr]
+    #         ten_next = existing_dict[nxt]
+    #         for idx in interesting_frames:
+    #             if curr <= idx <= nxt:
+    #                 t = float(idx - curr) / (nxt - curr)
+    #                 existing_dict[idx] = (1.0 - t) * ten_curr + t * ten_next
 
-    if len(list(secondary_midpoints.values())) == 0:
-        print("No secondary marker detected.")
-        return [primary_homographies[idx] for idx in sorted(primary_homographies.keys())]
+    #     min_found_frame = np.min(np.array(found_frames))
+    #     max_found_frame = np.max(np.array(found_frames))
+    #     for idx in interesting_frames: 
+    #         if idx < min_found_frame:
+    #             existing_dict[idx] = existing_dict[min_found_frame]
+    #         elif idx > max_found_frame:
+    #             existing_dict[idx] = existing_dict[max_found_frame]
 
-    interpolate_all(secondary_midpoints)
+    # interpolate_all(primary_corners_dict)
+    # interpolate_all(secondary_corners_dict)
 
-    avg_midpoint = np.mean(list(secondary_midpoints.values()), axis=0)
-    avg_midpoint = np.array([avg_midpoint[0], avg_midpoint[1], 1.0])
+    # mean = np.mean(np.array(list(primary_corners_dict.values())), axis=0)
+    # TODO: Hotfix.
 
-    corrected_homographies = {}
-    for frame_idx in interesting_frames:
-        primary_homography = primary_homographies[frame_idx]
-        primary_corners = primary_corners_dict[frame_idx]
-        secondary_midpoint = secondary_midpoints[frame_idx]
+    # import pickle
+    # with open("../data/temp3.pickle", "wb") as file:
+    #     pickle.dump([interesting_frames, primary_corners_dict, secondary_corners_dict], file)
 
-        transformed_avg_midpoint = primary_homography @ avg_midpoint
-        transformed_avg_midpoint /= transformed_avg_midpoint[2]
-        transformed_avg_midpoint = transformed_avg_midpoint[:2]
+    # import pickle
+    # with open("../data/temp3.pickle", "rb") as file:
+    #     [interesting_frames, primary_corners_dict, secondary_corners_dict] = pickle.load(file)
 
-        H = ctx.compute_floor_plane_transform(primary_corners, secondary_midpoint, transformed_avg_midpoint)
-        corrected_homographies[frame_idx] = H
-
-    # This quick fix assumes the camera is stationary.
-    avg_homography = np.zeros((3, 3))
-    for H in corrected_homographies.values():
-        avg_homography += H
-    avg_homography /= len(corrected_homographies)
-
-    # [corrected_homographies[idx] for idx in sorted(corrected_homographies.keys())]
-    return [avg_homography for _ in corrected_homographies.keys()]
+    return homographies
 
 
 @timed
 def preprocess(video_ctx: VideoContext, config: BaseConfig):
-    interesting_frames, track_frame_indices, original_size = get_interesting_frames(video_ctx, config)
+    # interesting_frames, track_frames, original_size = get_interesting_frames(video_ctx, config)
+
+    # import pickle
+    # with open("../data/temp.pickle", "wb") as file:
+    #     pickle.dump([video_ctx, interesting_frames, track_frames, original_size], file)
+
+    import pickle
+    with open("../data/temp.pickle", "rb") as file:
+        [video_ctx, interesting_frames, track_frames, original_size] = pickle.load(file)
+
     if np.any(original_size != config.image_size):
         raise ValueError(f"The image size {original_size} is not the expected large size {config.image_size}.")
-    track_frames = [interesting_frames[track_frame_idx] for track_frame_idx in track_frame_indices]
 
     homographies = stabilize_frames(interesting_frames, config, video_ctx)
-    video_ctx.homographies = {frame_idx: H for frame_idx, H in zip(track_frame_indices, homographies)}
+    video_ctx.homographies = {frame_idx: H for frame_idx, H in zip(interesting_frames, homographies)}
+
+    for idx, frame in open_video_capture(video_ctx, interesting_frames):
+        import matplotlib.pyplot as plt
+        plt.imshow(frame)
+        plt.show()
+
+    exit(0)
 
     return interesting_frames, track_frames, homographies
