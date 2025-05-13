@@ -9,7 +9,14 @@ def unembed_into_euclidean(array_of_vectors: np.ndarray) -> np.ndarray:
     return array_of_vectors[:, :-1] / array_of_vectors[:, -1, None]
 
 
-def get_euclidean_transform_matrix(from_pts: np.ndarray, to_pts: np.ndarray) -> np.ndarray:
+def subtract_projective_into_euclidean(a: np.ndarray, b: np.ndarray) -> np.ndarray:
+    if len(a.shape) == 1: a = a[None, :]
+    if len(b.shape) == 1: b = b[None, :]
+    a_hom = a[:, -1, None]
+    b_hom = b[:, -1, None]
+    return a[:, :-1] / a_hom - b[:, :-1] / b_hom
+
+def get_similarity_transform_matrix(from_pts: np.ndarray, to_pts: np.ndarray) -> np.ndarray:
     # This implements a Umeyama-like method.
 
     centroid_from = from_pts.mean(axis=0)
@@ -22,8 +29,6 @@ def get_euclidean_transform_matrix(from_pts: np.ndarray, to_pts: np.ndarray) -> 
     U, S, Vh = np.linalg.svd(cov_matrix)
     Q = Vh.T @ U.T
 
-    # Enforce rotation matrix.
-    # Q[:, -1] *= np.copysign(1, np.linalg.det(Q))
 
     # Assemble final matrix.
     M1 = np.array([

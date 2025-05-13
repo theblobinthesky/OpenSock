@@ -1,5 +1,5 @@
 from .config import BaseConfig
-from .utils import embed_into_projective, unembed_into_euclidean, get_euclidean_transform_matrix
+from .utils import embed_into_projective, unembed_into_euclidean, subtract_projective_into_euclidean, get_similarity_transform_matrix
 from .timing import timed
 from .video_capture import VideoContext, open_video_capture
 import numpy as np, cv2, scipy
@@ -167,9 +167,27 @@ class StabilizerContext:
         corners_by_id = {id: corner for id, corner in zip(ids.flatten(), list_of_corners)}
         return corners_by_id
 
-    def compute_floor_plane_transform(self, frame, corners_by_id) -> np.ndarray:
-        # Compute linear initialization for 2d rectification.
+    def compute_orthographic_birds_eye_view(self, frame, corners_by_id) -> np.ndarray:
+        # Normalize corner coordinates for better conditioning.
+        all_pts = np.vstack(list(corners_by_id.values()))  # shape (4*M, 2)
+        mean_xy = all_pts.mean(axis=0)
+        std_xy  = all_pts.std(axis=0)
+        s = np.mean(std_xy)
+        T_norm = np.array([
+            [1.0/s,    0,     -mean_xy[0]/s],
+            [   0,   1.0/s,   -mean_xy[1]/s],
+            [   0,      0,               1]
+        ], dtype=float)
 
+        # Apply T_norm to each corner set
+        norm_corners = {}
+        for mid, corners in corners_by_id.items():
+            h = embed_into_projective(corners)
+            h = (T_norm @ h.T).T
+            norm_corners[mid] = (h[:, :2] / h[:, 2:3])
+
+
+        # Compute linear initialization for 2d rectification.
         def get_constraint(l: np.ndarray, m: np.ndarray) -> np.ndarray:
             return np.array([
                 l[0] * m[0], 
@@ -209,8 +227,9 @@ class StabilizerContext:
         v = scipy.linalg.cho_solve((K, False), transformed_abs_conic[:2, 2])
         scale = np.sqrt(transformed_abs_conic[2, 2] / (v.T @ K @ K.T @ v))
 
+        # TODO: Remove normalization for better conditioning.
 
-        # Refine using levenberg-maquard gradient descent.
+        # Refine using gradient descent.
         def pack_params(K: np.ndarray, v: np.ndarray, scale: np.ndarray):
             params = np.array([K[0, 0], K[0, 1], K[1, 1], v[0], v[1], scale])
             return params
@@ -229,6 +248,19 @@ class StabilizerContext:
             H[2, :2] = v
             H[2, 2] = scale
 
+
+            # Normalise wrt. similarity transformations.
+            from_pts = unembed_into_euclidean(embed_into_projective(corners_by_id[1]) @ H.T)
+            to_pts = np.array([
+                [0, 0],
+                [0, 1],
+                [1, 1],
+                [1, 0.0],
+            ]) * 100 + 100
+
+            E = get_similarity_transform_matrix(from_pts, to_pts)
+            H = E @ H
+
             return H
 
 
@@ -240,27 +272,48 @@ class StabilizerContext:
             rolled_proj_pts = np.roll(proj_pts, shift=2, axis=0)
             sides2 = np.cross(proj_pts, rolled_proj_pts, axis=1)
 
-            def get_sides_loss(sides):
-                prev_sides = np.roll(sides, shift=1, axis=0)
-
-                cutoff_dots = np.sum(sides[:, :2] * prev_sides[:, :2], axis=1)
+            def get_dots(sides, other_sides):
+                cutoff_dots = np.sum(sides[:, :2] * other_sides[:, :2], axis=1)
                 cutoff_norms = np.linalg.norm(sides[:, :2], axis=1)
-                cutoff_prev_norms = np.linalg.norm(prev_sides[:, :2], axis=1)
+                cutoff_prev_norms = np.linalg.norm(other_sides[:, :2], axis=1)
+                return cutoff_dots / (cutoff_norms * cutoff_prev_norms)
 
-                angles = np.acos(cutoff_dots / (cutoff_norms * cutoff_prev_norms))
-                return (angles - np.pi / 2) * 100
-            
-            return get_sides_loss(sides) + get_sides_loss(sides2)
+            def get_angles(sides, other_sides):
+                dots = get_dots(sides, other_sides)
+                angles = np.acos(dots)
+                return angles
+
+            def loss_ortho(sides):
+                ortho_sides = np.roll(sides, shift=1, axis=0)
+                return get_angles(sides, ortho_sides) - np.pi / 2
+
+            def loss_parallel(sides):
+                parallel_sides = np.roll(sides, shift=2, axis=0)
+                return np.abs(get_dots(sides, parallel_sides)) - 1
+
+            def loss_lengths(pts, length: float, shift: int, cutoff: int):
+                prev_pts = np.roll(pts, shift=shift, axis=0)
+                diff = subtract_projective_into_euclidean(pts, prev_pts)
+                norms = np.linalg.norm(diff[:cutoff], axis=1)
+                loss = norms - length
+                return loss
+
+            return np.hstack([
+                loss_ortho(sides), loss_ortho(sides2), 
+                loss_parallel(sides), 
+                loss_lengths(proj_pts, length=100.0, shift=1, cutoff=4),
+                loss_lengths(proj_pts, length=np.sqrt(2) * 100.0, shift=2, cutoff=2)
+            ])
 
 
         def reprojection_residuals(params, list_of_corners):
             H = unpack_params(params)
 
-            angles = []
+            residuals = []
             for corners in list_of_corners:
-                angles.append(get_residuals(corners, H))
+                residuals.append(get_residuals(corners, H))
             
-            return np.hstack(angles)
+            return np.hstack(residuals)
 
         try:
             result = scipy.optimize.least_squares(
@@ -268,26 +321,14 @@ class StabilizerContext:
                 x0=pack_params(K, v, scale),
                 args=(np.array(list(corners_by_id.values())),),
                 method='trf',
-                max_nfev=5000,
-                ftol = 1e-10,
-                xtol = 1e-10,
-                gtol = 1e-10
+                max_nfev=15000,
+                ftol = 1e-12,
+                xtol = 1e-12,
+                gtol = 1e-12
             )
             H = unpack_params(result.x)
         except ValueError as e:
             H = unpack_params(pack_params(K, v, scale))
-
-        # Calculate euclidean transformation.
-        from_pts = unembed_into_euclidean(embed_into_projective(corners_by_id[1]) @ H.T)
-        to_pts = np.array([
-            [0, 0],
-            [0, 1],
-            [1, 1],
-            [1, 0.0],
-        ]) * 100 + 100
-
-        E = get_euclidean_transform_matrix(from_pts, to_pts)
-        H = E @ H
 
         return H
 
@@ -299,7 +340,7 @@ def stabilize_frames(interesting_frames: list[int], config: BaseConfig, video_ct
 
     for frame_idx, frame in tqdm(open_video_capture(video_ctx, interesting_frames, load_in_8bit_mode=True)):
         corners_by_id = ctx.detect_rectangles(frame)
-        H = ctx.compute_floor_plane_transform(frame, corners_by_id)
+        H = ctx.compute_orthographic_birds_eye_view(frame, corners_by_id)
         homographies.append(H)
 
     return homographies
