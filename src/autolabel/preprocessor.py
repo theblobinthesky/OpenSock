@@ -224,18 +224,20 @@ class StabilizerContext:
         ])
 
         K = np.linalg.cholesky(transformed_abs_conic[:2, :2])
-        v = scipy.linalg.cho_solve((K, False), transformed_abs_conic[:2, 2])
-        scale = np.sqrt(transformed_abs_conic[2, 2] / (v.T @ K @ K.T @ v))
+        detK = np.linalg.det(K)
+        K /= np.sqrt(detK)
+        v = scipy.linalg.cho_solve((K, False), transformed_abs_conic[:2, 2]) * detK
+        scale = transformed_abs_conic[2, 2] / (v.T @ K @ K.T @ v / detK)
 
         # TODO: Remove normalization for better conditioning.
 
         # Refine using gradient descent.
         def pack_params(K: np.ndarray, v: np.ndarray, scale: np.ndarray):
-            params = np.array([K[0, 0], K[0, 1], K[1, 1], v[0], v[1], scale])
+            params = np.array([K[0, 0], K[0, 1], K[1, 1], v[0], v[1]]) / scale
             return params
         
         def unpack_params(params: np.ndarray):
-            [k00, k01, k11, v0, v1, scale] = params
+            [k00, k01, k11, v0, v1] = params
 
             K = np.array([
                 [k00, k01],
@@ -244,9 +246,10 @@ class StabilizerContext:
             v = np.array([v0, v1])
 
             H = np.zeros((3, 3), np.float32)
-            H[:2, :2] = K
+            H[:2, :2] = K / np.linalg.det(K)
+            # print(np.linalg.det(K))
             H[2, :2] = v
-            H[2, 2] = scale
+            H[2, 2] = 1.0
 
 
             # Normalise wrt. similarity transformations.
