@@ -259,7 +259,7 @@ class StabilizerContext:
                 [0, 1],
                 [1, 1],
                 [1, 0.0],
-            ]) * 100 + 100
+            ])
 
             E = get_similarity_transform_matrix(from_pts, to_pts)
             H = E @ H
@@ -304,8 +304,8 @@ class StabilizerContext:
             return np.hstack([
                 loss_ortho(sides), loss_ortho(sides2), 
                 loss_parallel(sides), 
-                loss_lengths(proj_pts, length=100.0, shift=1, cutoff=4),
-                loss_lengths(proj_pts, length=np.sqrt(2) * 100.0, shift=2, cutoff=2)
+                loss_lengths(proj_pts, length=1.0, shift=1, cutoff=4),
+                loss_lengths(proj_pts, length=np.sqrt(2), shift=2, cutoff=2)
             ])
 
 
@@ -333,7 +333,19 @@ class StabilizerContext:
         except ValueError as e:
             H = unpack_params(pack_params(K, v, scale))
 
-        return H
+
+        T = np.array([
+            [1, 0, 100.0],
+            [0, 1, 100.0],
+            [0, 0, 1]
+        ]) @ np.array([
+            [100.0, 0, 0],
+            [0, 100.0, 0],
+            [0, 0, 1]
+        ])
+
+
+        return T @ H
 
 
 @timed
