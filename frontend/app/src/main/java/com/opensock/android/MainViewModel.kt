@@ -8,10 +8,7 @@ import androidx.core.net.toUri
 import androidx.lifecycle.ViewModel
 
 enum class InstanceSelectorState {
-    INITIAL,
-    CLICKED,
-    WAITING,
-    READY_TO_SAVE
+    INITIAL, CLICKED, WAITING, READY_TO_SAVE
 }
 
 class MainViewModel : ViewModel() {
@@ -27,8 +24,17 @@ class MainViewModel : ViewModel() {
     private val _pictureUri2 = mutableStateOf("".toUri())
     val pictureUri2: State<Uri> = _pictureUri2
 
+    private val _selectedMode = mutableIntStateOf(0)
+    val selectedMode: State<Int> = _selectedMode
+
     private val _instanceSelectorState = mutableStateOf(InstanceSelectorState.INITIAL)
     val instanceSelectorState: State<InstanceSelectorState> = _instanceSelectorState
+
+    private val _selectedInstanceIdx = mutableIntStateOf(0)
+    val selectedInstanceIdx: State<Int> = _selectedInstanceIdx
+
+    private val _selectedOwner = mutableIntStateOf(0)
+    val selectedOwner: State<Int> = _selectedOwner
 
     fun setPermissionGranted(granted: Boolean) {
         _isPermissionGranted.value = granted
@@ -46,8 +52,31 @@ class MainViewModel : ViewModel() {
         }
     }
 
+    fun setSelectedMode(mode: Int) {
+        _selectedMode.value = mode
+    }
+
     fun setInstanceSelectorState(state: InstanceSelectorState) {
         _instanceSelectorState.value = state
+    }
+
+    fun clickInstance(instances: Instances, idx: Int) {
+        if (isInstanceSelected(instances, idx)) {
+            _instanceSelectorState.value = InstanceSelectorState.WAITING
+        } else {
+            _instanceSelectorState.value = InstanceSelectorState.CLICKED
+            _selectedInstanceIdx.intValue = idx
+        }
+    }
+
+    fun isInstanceSelected(instances: Instances, idx: Int): Boolean {
+        val otherIdx = instances.getOtherIdx(idx)
+        return instanceSelectorState.value == InstanceSelectorState.CLICKED
+                && (selectedInstanceIdx.value == idx || selectedInstanceIdx.value == otherIdx)
+    }
+
+    fun setSelectedOwner(owner: Int) {
+        _selectedOwner.value = owner
     }
 
 }
