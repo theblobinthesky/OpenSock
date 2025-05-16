@@ -348,14 +348,19 @@ class StabilizerContext:
         return T @ H
 
 
+def stabilize_frame(frame: np.ndarray) -> np.ndarray:
+    corners_by_id = ctx.detect_rectangles(frame)
+    H = ctx.compute_orthographic_birds_eye_view(frame, corners_by_id)
+    return H
+
+
 @timed
 def stabilize_frames(interesting_frames: list[int], config: BaseConfig, video_ctx: VideoContext):
     ctx = StabilizerContext(config)
     homographies = []
 
     for frame_idx, frame in tqdm(open_video_capture(video_ctx, interesting_frames, load_in_8bit_mode=True)):
-        corners_by_id = ctx.detect_rectangles(frame)
-        H = ctx.compute_orthographic_birds_eye_view(frame, corners_by_id)
+        H = stabilize_frame(frame)
         homographies.append(H)
 
     return homographies
