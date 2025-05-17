@@ -43,17 +43,19 @@ def insert_scan(multipart_scan_id: int):
     upload_id = cursor.lastrowid
     return upload_id
 
+# TODO: Duplicate code.
+BACKEND_DATA_ROOT = "../data/backend"
 
 def get_multipart_scan_uploads(multipart_scan_id: int) -> List[str]:
     conn = get_conn()
     cursor = conn.cursor()
     cursor.execute("""
-        SELECT path FROM uploads u
-        INNER JOIN multipart_scans m IN u.id = m.multipart_scan_id
-        WHERE m.multipart_scan_id = ?;
+        SELECT multipart_scan_id, upload_id FROM uploads u
+        INNER JOIN multipart_scans m ON u.multipart_scan_id = m.id
+        WHERE m.id = ?;
         """, (multipart_scan_id,)
     )
     
     rows = cursor.fetchall()
-    paths = [row[0] for row in rows]
+    paths = [f"{BACKEND_DATA_ROOT}/{row[0]}_{row[1]}.jpg" for row in rows]
     return paths

@@ -26,7 +26,7 @@ def main():
     upload_scan(instance_id, "../data/scan2.jpg", host)
     upload_scan(instance_id, "../data/scan3.jpg", host)
 
-    resp = requests.get(f"{host}/process_multipart_scan/{instance_id}", files=files)
+    resp = requests.get(f"{host}/get_multipart_scan/{instance_id}")
 
 if __name__ == "__main__":
     main()

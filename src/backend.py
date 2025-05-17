@@ -27,8 +27,9 @@ def upload_file(multipart_scan_id: int):
     return "", 200
 
 
-@app.route("/process_multipart_scan/<int:multipart_scan_id>", methods=["GET"])
-def process_mulipart_scan(multipart_scan_id: int):
+@app.route("/get_multipart_scan/<int:multipart_scan_id>", methods=["GET"])
+def get_mulipart_scan(multipart_scan_id: int):
+    process_multipart_scan(multipart_scan_id)
     path = "..."
     return send_file(path, mimetype="image/jpeg")
 

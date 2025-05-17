@@ -344,13 +344,15 @@ class StabilizerContext:
             [0, 0, 1]
         ])
 
+        H = T @ H
+        trans_corners_by_id = {id: unembed_into_euclidean(embed_into_projective(corners) @ H.T) for id, corners in corners_by_id.items()}
 
-        return T @ H
+        return H, trans_corners_by_id
 
     def stabilize_frame(self, frame: np.ndarray) -> np.ndarray:
-        corners_by_id = detect_rectangles(frame)
-        H = compute_orthographic_birds_eye_view(frame, corners_by_id)
-        return H
+        corners_by_id = self.detect_rectangles(frame)
+        H, trans_corners_by_id = self.compute_orthographic_birds_eye_view(frame, corners_by_id)
+        return H, trans_corners_by_id
 
 
 @timed
@@ -359,7 +361,7 @@ def stabilize_frames(interesting_frames: list[int], config: BaseConfig, video_ct
     homographies = []
 
     for frame_idx, frame in tqdm(open_video_capture(video_ctx, interesting_frames, load_in_8bit_mode=True)):
-        H = ctx.stabilize_frame(frame)
+        H, _ = ctx.stabilize_frame(frame)
         homographies.append(H)
 
     return homographies
