@@ -1,5 +1,5 @@
 from .config import BaseConfig
-from .utils import embed_into_projective, unembed_into_euclidean, subtract_projective_into_euclidean, get_similarity_transform_matrix
+from shared.utils import embed_into_projective, unembed_into_euclidean, subtract_projective_into_euclidean, get_similarity_transform_matrix
 from .timing import timed
 from .video_capture import VideoContext, open_video_capture
 import numpy as np, cv2, scipy
@@ -347,11 +347,10 @@ class StabilizerContext:
 
         return T @ H
 
-
-def stabilize_frame(frame: np.ndarray) -> np.ndarray:
-    corners_by_id = ctx.detect_rectangles(frame)
-    H = ctx.compute_orthographic_birds_eye_view(frame, corners_by_id)
-    return H
+    def stabilize_frame(self, frame: np.ndarray) -> np.ndarray:
+        corners_by_id = detect_rectangles(frame)
+        H = compute_orthographic_birds_eye_view(frame, corners_by_id)
+        return H
 
 
 @timed
@@ -360,7 +359,7 @@ def stabilize_frames(interesting_frames: list[int], config: BaseConfig, video_ct
     homographies = []
 
     for frame_idx, frame in tqdm(open_video_capture(video_ctx, interesting_frames, load_in_8bit_mode=True)):
-        H = stabilize_frame(frame)
+        H = ctx.stabilize_frame(frame)
         homographies.append(H)
 
     return homographies
