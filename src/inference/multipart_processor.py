@@ -1,10 +1,12 @@
 from .persistence import get_multipart_scan_uploads
 from .image_processor import process_single_image
+from .config import InferenceConfig
 from shared.utils import unembed_into_euclidean, get_euclidean_transform_matrix, invert_euclidean_transform_matrix
 from typing import List, Dict, Set, Tuple
 from queue import PriorityQueue
 import numpy as np, cv2
 from tqdm import tqdm
+from pathlib import Path
 
 
 # TODO: Avoid zero edges explicitly?
@@ -31,8 +33,8 @@ def calc_max_sp_tree_without_zero_edges(ids: Set[int], nbs_and_weights_by_id: Di
 
 
 
-def process_multipart_scan(multipart_scan_id: int):
-    paths = get_multipart_scan_uploads(multipart_scan_id)
+def process_multipart_scan(config: InferenceConfig, multipart_scan_id: int):
+    paths = get_multipart_scan_uploads(config, multipart_scan_id)
     if len(paths) == 0:
         return None
 
@@ -49,32 +51,6 @@ def process_multipart_scan(multipart_scan_id: int):
 
         img_to_marker_ids.append(list(trans_corners_per_frame.keys()))
         img_to_marker_centers.append(np.mean(np.array(list(trans_corners_per_frame.values())), axis=1))
-
-    # img_size = (5.0, 5.0)
-    # img_ids = [0, 1, 2]
-
-    # img_to_marker_ids = [
-    #     [0, 1, 2],
-    #     [2],
-    #     [1, 2, 3]
-    # ]
-
-    # img_to_marker_centers = [
-    #     np.array([
-    #         [1.0, 1.0],
-    #         [3.0, 2.0],
-    #         [2.0, 3.0]
-    #     ]),
-    #     np.array([
-    #         [2.0, 3.0]
-    #     ]),
-    #     np.array([
-    #         [2.0, 3.0],
-    #         [3.0, 2.0],
-    #         [4.0, 4.0]
-    #     ]),
-    # ]
-
     # Find the tree of the images with the max. number of overlapping markers.
     marker_inters_by_ids = {}
     nbs_and_weights_by_id = {}
@@ -194,6 +170,8 @@ def process_multipart_scan(multipart_scan_id: int):
     ).astype(np.uint8)
 
     # display
-    cv2.imwrite("../data/test.jpg", avg_canvas)
-
-
+    multipart_output_dir = config.get_multipart_output_dir()
+    Path(multipart_output_dir).mkdir(exist_ok=True)
+    path = multipart_output_dir / f"{multipart_scan_id}.jpg"
+    cv2.imwrite(path, avg_canvas)
+    return path

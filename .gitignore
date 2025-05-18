@@ -4,6 +4,7 @@ venv
 *.yaml
 data/sock_*
 data/data_*
+data/backend
 *.jpg
 __pycache__
 temp*

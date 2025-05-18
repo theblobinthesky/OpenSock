@@ -1,15 +1,18 @@
 import sqlite3
 from flask import g
 from typing import List
+from pathlib import Path
+from .config import InferenceConfig
 
-DATABASE_PATH = "../data/database.db"
+DATABASE_DIR = Path("../data/backend/")
 
 def get_conn():
     if "db" not in g:
-        conn = sqlite3.connect(DATABASE_PATH)
+        DATABASE_DIR.mkdir(exist_ok=True)
+        conn = sqlite3.connect(DATABASE_DIR / "database.db")
         conn.cursor().executescript("""
             CREATE TABLE IF NOT EXISTS multipart_scans (
-                    id INTEGER PRIMARY KEY
+                    id INTEGER PRIMARY KEY AUTOINCREMENT
             );
 
             CREATE TABLE IF NOT EXISTS uploads (
@@ -24,12 +27,13 @@ def get_conn():
     return g.db
 
 
-def create_multipart_scan_if_necessary(multipart_scan_id: int):
-    cursor = get_conn().cursor()
-    cursor.execute("""
-            INSERT OR IGNORE INTO multipart_scans (id)
-            VALUES (?)
-    """, (multipart_scan_id,))
+def create_multipart_scan_if_necessary():
+    conn = get_conn()
+    cursor = conn.cursor()
+    cursor.execute("INSERT OR IGNORE INTO multipart_scans DEFAULT VALUES")
+    conn.commit()
+    multipart_scan_id = cursor.lastrowid
+    return multipart_scan_id
 
 
 def insert_scan(multipart_scan_id: int):
@@ -46,7 +50,7 @@ def insert_scan(multipart_scan_id: int):
 # TODO: Duplicate code.
 BACKEND_DATA_ROOT = "../data/backend"
 
-def get_multipart_scan_uploads(multipart_scan_id: int) -> List[str]:
+def get_multipart_scan_uploads(config: InferenceConfig, multipart_scan_id: int) -> List[str]:
     conn = get_conn()
     cursor = conn.cursor()
     cursor.execute("""
@@ -57,5 +61,5 @@ def get_multipart_scan_uploads(multipart_scan_id: int) -> List[str]:
     )
     
     rows = cursor.fetchall()
-    paths = [f"{BACKEND_DATA_ROOT}/{row[0]}_{row[1]}.jpg" for row in rows]
+    paths = [f"{config.get_multipart_input_dir()}/{row[0]}_{row[1]}.jpg" for row in rows]
     return paths
