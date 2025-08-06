@@ -2,7 +2,7 @@ from inference.config import InferenceConfig
 from flask import Flask, g, request, abort, send_file
 from inference.persistence import create_multipart_scan_if_necessary, insert_scan
 from inference.multipart_processor import process_multipart_scan
-import os
+from pathlib import Path
 
 
 app = Flask(__name__)
@@ -18,8 +18,10 @@ def upload_file_into_multipart_scan_id(multipart_scan_id: int):
 
     file_bytes = file.read()
     multipart_input_dir = config.get_multipart_input_dir()
-    if not os.path.exists(multipart_input_dir): os.mkdir(multipart_input_dir)
-    file_path = f"{multipart_input_dir}/{multipart_scan_id}_{upload_id}.jpg"
+    multipart_scan_dir = f"{multipart_input_dir}/{multipart_scan_id}"
+    Path(multipart_input_dir).mkdir(exist_ok=True)
+    Path(multipart_scan_dir).mkdir(exist_ok=True)
+    file_path = f"{multipart_scan_dir}/{upload_id}.jpg"
     with open(file_path, "wb") as out:
         out.write(file_bytes)
 

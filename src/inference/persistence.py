@@ -61,5 +61,5 @@ def get_multipart_scan_uploads(config: InferenceConfig, multipart_scan_id: int) 
     )
     
     rows = cursor.fetchall()
-    paths = [f"{config.get_multipart_input_dir()}/{row[0]}_{row[1]}.jpg" for row in rows]
+    paths = [f"{config.get_multipart_input_dir()}/{row[0]}/{row[1]}.jpg" for row in rows]
     return paths

@@ -83,3 +83,4 @@ def get_similarity_transform_matrix(from_pts: np.ndarray, to_pts: np.ndarray) ->
     ])
 
     return M2 @ M1
+

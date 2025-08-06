@@ -32,14 +32,8 @@ def calc_max_sp_tree_without_zero_edges(ids: Set[int], nbs_and_weights_by_id: Di
     return max_sp_tree
 
 
-
-def process_multipart_scan(config: InferenceConfig, multipart_scan_id: int):
-    paths = get_multipart_scan_uploads(config, multipart_scan_id)
-    if len(paths) == 0:
-        return None
-
+def collect_marker_data(paths: List[str]):
     img_size = None 
-    img_ids = list(range(len(paths)))
     img_to_marker_ids = []
     img_to_marker_centers = []
 
@@ -51,7 +45,11 @@ def process_multipart_scan(config: InferenceConfig, multipart_scan_id: int):
 
         img_to_marker_ids.append(list(trans_corners_per_frame.keys()))
         img_to_marker_centers.append(np.mean(np.array(list(trans_corners_per_frame.values())), axis=1))
-    # Find the tree of the images with the max. number of overlapping markers.
+    
+    return img_size, img_to_marker_ids, img_to_marker_centers
+
+
+def get_max_overlap_tree(img_ids: List[int], img_to_marker_ids):
     marker_inters_by_ids = {}
     nbs_and_weights_by_id = {}
     for img_id in img_ids:
@@ -69,7 +67,10 @@ def process_multipart_scan(config: InferenceConfig, multipart_scan_id: int):
 
     max_sp_tree = calc_max_sp_tree_without_zero_edges(img_ids, nbs_and_weights_by_id)
 
+    return max_sp_tree, marker_inters_by_ids
 
+
+def get_accumulated_inverse_transforms_wrt_reference(img_ids, marker_inters_by_ids, img_to_marker_ids, img_to_marker_centers, max_sp_tree):
     # Calculate the pairwise orthogonal procrustes transforms.
     procrustes_inv = {}
     for (last, curr) in max_sp_tree:
@@ -95,7 +96,10 @@ def process_multipart_scan(config: InferenceConfig, multipart_scan_id: int):
             if parent in accumulated_inv and child not in accumulated_inv:
                 accumulated_inv[child] = accumulated_inv[parent] @ procrustes_inv[(parent, child)]
 
+    return accumulated_inv, ref_img
 
+
+def shift_transforms_into_image_space(accumulated_inv, img_size, img_ids, ref_img):
     # Calculate the new bounding boxes.
     bboxes = {}
     for img_id, inv_transform in accumulated_inv.items():
@@ -123,13 +127,24 @@ def process_multipart_scan(config: InferenceConfig, multipart_scan_id: int):
         [0, 1, -union_tl_corner[1]],
         [0, 0, 1.0]
     ])
-    procrustes_inv = {key: T @ M for key, M in procrustes_inv.items()}
-
 
     # Calculate the final transforms for each image.
-    transforms = {curr: M for (_, curr), M in procrustes_inv.items()}
-    # transforms = {i: T @ accumulated_inv[i] for i in img_ids}
-    transforms[ref_img] = np.eye(3)
+    transforms = {img_id: T @ accumulated_inv[img_id] for img_id in img_ids}
+
+    return transforms, union_size
+
+
+def process_multipart_scan(config: InferenceConfig, multipart_scan_id: int):
+    paths = get_multipart_scan_uploads(config, multipart_scan_id)
+    if len(paths) == 0:
+        return None
+    
+    img_ids = list(range(len(paths)))
+    img_size, img_to_marker_ids, img_to_marker_centers = collect_marker_data(paths)
+
+    max_sp_tree, marker_inters_by_ids = get_max_overlap_tree(img_ids, img_to_marker_ids)
+    accumulated_inv, ref_img = get_accumulated_inverse_transforms_wrt_reference(img_ids, marker_inters_by_ids, img_to_marker_ids, img_to_marker_centers, max_sp_tree)
+    transforms, union_size = shift_transforms_into_image_space(accumulated_inv, img_size, img_ids, ref_img)
 
 
     # Output final composite.
