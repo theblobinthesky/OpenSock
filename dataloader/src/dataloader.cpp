@@ -136,6 +136,9 @@ void DataLoader::threadMain() {
 
 void deleter(DLManagedTensor *self) {
     ResourcePool::getInstance().release();
+    delete[] self->dl_tensor.shape;
+    delete[] self->dl_tensor.strides;
+    delete self;
 }
 
 py::dict DataLoader::getNextBatch() {
@@ -189,7 +192,7 @@ py::dict DataLoader::getNextBatch() {
                 .data = gpuAllocation,
                 .device = {
                     .device_type = kDLCUDA,
-                    .device_id = 0 // This hardcodes GPU0.
+                    .device_id = 0 // TODO: This hardcodes GPU0.
                 },
                 .ndim = ndim,
                 .dtype = {
@@ -206,13 +209,7 @@ py::dict DataLoader::getNextBatch() {
         };
 
         ResourcePool::getInstance().acquire();
-        pyBatch[head.getDictName().c_str()] = py::capsule(
-            dlMngTensor, "dltensor", [](void *ptr) {
-                const auto *dlManagedTensor = static_cast<DLManagedTensor *>(ptr);
-                delete[] dlManagedTensor->dl_tensor.shape;
-                delete[] dlManagedTensor->dl_tensor.strides;
-                delete dlManagedTensor;
-            });
+        pyBatch[head.getDictName().c_str()] = py::capsule(dlMngTensor, "dltensor");
     }
 
     /*for (size_t i = 0; i < prefetchCache.size(); i++) {
