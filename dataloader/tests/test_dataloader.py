@@ -50,29 +50,7 @@ def test_get_length():
     _, dl, _ = get_dataloader(batch_size=bs)
     assert len(dl) == (633 + bs - 1) // bs
 
-# def verify_correctness(ds, dl, root_dir, bs):
-#     import matplotlib.pyplot as plt
-#     num = len(dl)
-#     _, axs = plt.subplots(num, 16)
-
-#     entries = [[f"{root_dir}{sub_path}" for sub_path in item] for item in ds.entries]
-
-#     for j in range(num):
-#         batch = dl.get_next_batch()
-#         for i, batch_paths in enumerate(entries[j * 16:16 + j * 16]):
-#             pil_img = Image.open(batch_paths[0]).convert("RGB")
-#             pil_img = np.array(pil_img.resize((WIDTH, HEIGHT)), np.float32)
-#             pil_img = pil_img / 255.0
-
-#             # err = np.mean(np.abs(batch['img'][i] - pil_img))
-#             # axs[0 + j * 2, i].imshow(pil_img)
-#             # axs[1 + j * 2, i].imshow(batch['img'][i])
-#             # axs[0 + j * 2, i].axis('off')
-#             # axs[1 + j * 2, i].axis('off')
-#             axs[j, i].imshow(batch['img'][i])
-#             axs[j, i].axis('off')
-
-#     plt.show()
+import matplotlib.pyplot as plt
 
 def verify_correctness(ds, dl, root_dir, bs):
     entries = [[f"{root_dir}{sub_path}" for sub_path in item] for item in ds.entries]
@@ -86,18 +64,57 @@ def verify_correctness(ds, dl, root_dir, bs):
             pil_img = pil_img / 255.0
 
             err = np.mean(np.abs(batch['img'][i] - pil_img))
+            if not np.all(err < 10 / 255.0):
+                print(f"{batch_idx=}, {i=}")
+                _, axs = plt.subplots(2, 2)
+                axs[0][0].imshow(batch['img'][i])
+                axs[0][1].imshow(pil_img)
+                plt.show()
+
+            # err = np.mean(np.abs(batch['img'][i] - pil_img))
             assert np.all(err < 10 / 255.0), f"Error too high for image {path}"
+
+def verify_correctness(ds, dl, root_dir, bs):
+    entries = [[f"{root_dir}{sub_path}" for sub_path in item] for item in ds.entries]
+    images_to_plot = []
+    threshold = 10 / 255.0
+
+    for batch_idx in range(len(dl)):
+        batch = dl.get_next_batch()
+        for i, da_img in enumerate(batch['img']):
+            path = entries[batch_idx][i]
+            pil_img = Image.open(path).convert("RGB")
+            pil_img = np.array(pil_img.resize((WIDTH, HEIGHT)), np.float32) / 255.0
+
+            images_to_plot.append((da_img, pil_img, path))
+            err = np.mean(np.abs(da_img - pil_img))
+
+            if err >= threshold:
+                print(f"{batch_idx=}, {i=}")
+                n = len(images_to_plot)
+                fig, axs = plt.subplots(n, 2, figsize=(4, n * 2))
+                if n == 1:
+                    axs = np.expand_dims(axs, axis=0)
+                for idx, (dimg, pimg, _) in enumerate(images_to_plot):
+                    axs[idx][0].imshow(dimg); axs[idx][0].axis('off')
+                    axs[idx][1].imshow(pimg); axs[idx][1].axis('off')
+                plt.show()
+
+                assert err < threshold, f"Error too high for image {path}"
 
 def test_correctness_one_dataloader():
     ds, dl, root_dir = get_dataloader(batch_size=16)
     verify_correctness(ds, dl, root_dir, bs=16)
 
-# def test_correctness_multiple_dataloaders():
-#     (dl1, dl2, dl3), (ds1, ds2, ds3), root_dir = get_dataloaders(batch_size=16)
-#     dl2.get_next_batch()
-#     verify_correctness(ds1, dl1, root_dir, bs=16)
-#     verify_correctness(ds2, dl2, root_dir, bs=16)
-#     verify_correctness(ds3, dl3, root_dir, bs=16)
+def test_correctness_multiple_dataloaders():
+    (dl1, dl2, dl3), (ds1, ds2, ds3), root_dir = get_dataloaders(batch_size=16)
+    dl2.get_next_batch()
+    verify_correctness(ds1, dl1, root_dir, bs=16)
+    print("dl1 ok")
+    verify_correctness(ds2, dl2, root_dir, bs=16)
+    print("dl2 ok")
+    verify_correctness(ds3, dl3, root_dir, bs=16)
+    print("dl3 ok")
 
 # def hash_array(arr):
 #     arr_np = np.asarray(arr)
@@ -138,7 +155,6 @@ def test_correctness_one_dataloader():
 
 #     for name, dl in dataloaders.items():
 #         batch_list = []
-#         # Gather images and titles for each batch.
 #         for batch_index in range(len(dl)):
 #             batch = dl.get_next_batch()
 #             images = batch['img']
@@ -148,8 +164,7 @@ def test_correctness_one_dataloader():
 #         nrows = len(batch_list)
 #         ncols = max(len(images) for images, _ in batch_list)
 
-#         fig, axs = plt.subplots(nrows, ncols, figsize=(ncols * 2, nrows * 2))
-#         # Make sure axs is a 2D array.
+#         _, axs = plt.subplots(nrows, ncols, figsize=(ncols * 2, nrows * 2))
 #         if nrows == 1:
 #             axs = np.expand_dims(axs, axis=0)
 #         if ncols == 1:
@@ -170,7 +185,51 @@ def test_correctness_one_dataloader():
 #         plt.show()
 
 
+# def test_visualize_3_dataloaders_three_rows_each(batch_size=16):
+#     import matplotlib.pyplot as plt
+#     import numpy as np
 
+#     (dl1, dl2, dl3), _, _ = get_dataloaders(batch_size=batch_size)
+#     dl2.get_next_batch()
+#     dataloaders = {"dl1": dl1, "dl2": dl2, "dl3": dl3}
+#     rows = 3
+
+#     plot_batches = []  # Each element: (loader_name, images, titles)
+#     max_imgs_in_row = 0
+
+#     for loader_name, dl in dataloaders.items():
+#         for batch_idx in range(len(dl)):
+#             batch = dl.get_next_batch()
+#             imgs = batch["img"]
+#             titles = [f"{loader_name} {batch_idx}:{i}" for i in range(len(imgs))]
+#             if batch_idx < rows:
+#                 plot_batches.append((loader_name, imgs, titles))
+#             max_imgs_in_row = max(max_imgs_in_row, len(imgs))
+
+#     total_rows = len(dataloaders) * rows
+#     total_cols = max_imgs_in_row
+
+#     _, axs = plt.subplots(total_rows, total_cols, figsize=(total_cols * 2, total_rows * 2))
+
+#     if total_rows == 1:
+#         axs = np.expand_dims(axs, axis=0)
+#     if total_cols == 1:
+#         axs = np.expand_dims(axs, axis=1)
+
+#     for row_idx, (loader_name, imgs, titles) in enumerate(plot_batches):
+#         for col_idx in range(total_cols):
+#             ax = axs[row_idx][col_idx]
+#             if col_idx < len(imgs):
+#                 ax.imshow(imgs[col_idx])
+#                 ax.set_title(titles[col_idx], fontsize=7)
+#                 ax.axis("off")
+#             else:
+#                 ax.set_visible(False)
+
+#     plt.suptitle(f"First {rows} batches (rows) for each dataloader "
+#                  f"— columns vary with batch size", fontsize=14, y=1.02)
+#     plt.tight_layout()
+#     plt.show()
 
 
 # def test_perf(benchmark):

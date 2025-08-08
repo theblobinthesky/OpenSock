@@ -118,6 +118,7 @@ void DataLoader::threadMain() {
         if (shutdown) break;
 
         if (dataset.getGenIdx().load() == genIdx) {
+            std::printf("saving into; startingOffset: %d, genIdx: %d\n", startingOffset, genIdx);
             prefetchCache.push({
                 .datasetStartingOffset = startingOffset,
                 .barrierIdx = barrierIdx,
@@ -143,6 +144,7 @@ py::dict DataLoader::getNextBatch() {
         dataset.resetByNumBatches(prefetchCache.size(), batchSize);
         lastStartingOffset = dataset.getOffset() - static_cast<int>(batchSize);
         while (!prefetchCache.empty()) prefetchCache.pop(); // Clear is not supported
+        std::printf("prefetchCache emptied\n");
         lock.unlock();
 
         prefetchSemaphore.releaseAll();
@@ -152,11 +154,13 @@ py::dict DataLoader::getNextBatch() {
     std::unique_lock lock(prefetchCacheMutex);
     prefetchCacheNotify.wait(lock, [this] { return !prefetchCache.empty(); });
 
-    const auto [_, barrierIdx, gpuAllocations] = prefetchCache.top();
+    const auto [startingOffset, barrierIdx, gpuAllocations] = prefetchCache.top();
     prefetchCache.pop();
 
     lock.unlock();
     prefetchSemaphore.release();
+
+    std::printf("loading from; startingOffset: %d, genIdx: %d\n", startingOffset, dataset.getGenIdx().load());
 
     py::dict pyBatch;
     const auto &heads = dataset.getHeads(); // TODO: Prevent copy.

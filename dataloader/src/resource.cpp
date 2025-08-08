@@ -49,6 +49,7 @@ ResourcePool::~ResourcePool() {
 }
 
 bool ResourcePool::acquire(const int clientId) {
+    std::printf("resource pool acquired with clientId: %d\n", clientId);
     const bool clientChanged = currentClientId != clientId;
 
     if (clientChanged) {

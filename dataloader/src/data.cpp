@@ -173,12 +173,21 @@ Allocation loadNpyFiles(MultipleAllocations &allocations,
     for (size_t j = 0; j < batchPaths.size(); j++) {
         // Load the NPY file from the path
         cnpy::NpyArray arr = cnpy::npy_load(batchPaths[j][headIdx]);
-        // Ensure the file contains float data
+
+        // Ensure the file contains valid data.
+        const std::string & filePath = batchPaths[j][headIdx];
         if (arr.word_size != sizeof(float)) {
             throw std::runtime_error(
                 std::format("NPY file {} has word size {} and does not contain float32 data.",
-                            batchPaths[j][headIdx], arr.word_size));
+                            filePath, arr.word_size));
         }
+
+        if (arr.fortran_order) {
+            throw std::runtime_error(
+                std::format("NPY file {} has fortran order, e.g. column-major rather than row-major ordering.",
+                            filePath));
+        }
+
         // Compute the total number of elements in the array
         size_t npy_num_elements = 1;
         for (const unsigned long d: arr.shape) {

@@ -213,8 +213,8 @@ std::tuple<Dataset, Dataset, Dataset> Dataset::splitTrainValidationTest(
             "Train and validation set must contain more than 0% of elements.");
     }
 
-    const int numTrain = static_cast<int>(std::round(trainPercentage * entries.size()));
-    const int numValid = static_cast<int>(std::round(validPercentage * entries.size()));
+    const int numTrain = static_cast<int>(std::round(trainPercentage * static_cast<float>(entries.size())));
+    const int numValid = static_cast<int>(std::round(validPercentage * static_cast<float>(entries.size())));
 
     if (numTrain + numValid > static_cast<int>(entries.size())) {
         throw std::runtime_error(
