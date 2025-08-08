@@ -127,7 +127,7 @@ Dataset::Dataset(std::string _rootDir, std::vector<Head> _heads,
         if (!file.ends_with(h0.getExt())) {
             debugLog(
                 "Got erroneous dataset with anchor path '%s' that does not end on '%s'!\n",
-                file.c_str(), s0.getExt().c_str());
+                file.c_str(), h0.getExt().c_str());
             continue;
         }
 
