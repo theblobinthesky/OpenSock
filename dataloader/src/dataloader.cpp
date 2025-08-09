@@ -17,19 +17,18 @@ bool PrefetchItem::operator<(const PrefetchItem &other) const {
 std::atomic_int DataLoader::nextId;
 
 DataLoader::DataLoader(
-    const Dataset &_dataset,
+    Dataset &_dataset,
     const int _batchSize,
     const int _numThreads,
     const int _prefetchSize
 ) : id(nextId.fetch_add(1)),
-    dataset(_dataset),
+    batchedDataset(std::move(_dataset), _batchSize),
     batchSize(_batchSize),
     numThreads(_numThreads),
     prefetchSize(_prefetchSize),
     // The memory of the last getNextBatch cannot be invalidated until the next getNextBatch call.
     // Therefore, make sure the semaphore can't wrap around the buffer directly after the first call.
     prefetchSemaphore(_prefetchSize - 1),
-    lastStartingOffset(-static_cast<int>(batchSize)),
     outputBatchMemorySize(0),
     resourceClient(id, _prefetchSize),
     threadPool([this] { this->threadMain(); }, _numThreads) {
@@ -44,9 +43,9 @@ DataLoader::DataLoader(
             "Prefetch size must be larger or equal than the number of threads.");
     }
 
-    numberOfBatches = (dataset.getEntries().size() + batchSize - 1) / batchSize;
+    numberOfBatches = (batchedDataset.getDataset().getEntries().size() + batchSize - 1) / batchSize;
 
-    for (const Head &head: dataset.getHeads()) {
+    for (const Head &head: batchedDataset.getDataset().getHeads()) {
         size_t itemMemorySize = sizeof(float);
         for (const int dim: head.getShape()) {
             itemMemorySize *= dim;
@@ -72,18 +71,16 @@ void DataLoader::threadMain() {
         prefetchSemaphore.acquire();
         if (shutdown) break;
 
-        datasetMutex.lock();
-        const auto [startingOffset, genIdx, batchPaths] = dataset.getNextBatchI(batchSize);
-        datasetMutex.unlock();
-
+        const auto [startingOffset, genIdx, batchPaths] = batchedDataset.getNextInFlightBatch();
         const size_t barrierIdx = lastBarrierIdx++ % prefetchSize;
-        const std::vector<Head> &heads = dataset.getHeads();
+        const std::vector<Head> &heads = batchedDataset.getDataset().getHeads();
 
         // For each head, load all batch items into one contigous cpu array.
         MultipleAllocations allocations = resourceClient.allocate(outputBatchMemorySize);
 
         // Make sure to not touch the allocation if the current resource client has lost access to the pool.
         // Otherwise, you'd get null pointer exceptions.
+        // TODO: Modularize supported file types. Move this out of here.
         if (allocations) {
             for (size_t headIdx = 0; headIdx < heads.size(); headIdx++) {
                 const Head &head = heads[headIdx];
@@ -112,12 +109,12 @@ void DataLoader::threadMain() {
         prefetchCacheNotify.wait(lock, [this, startingOffset, genIdx] {
             // Make sure to leave the conditional variable when shutdown is already enabled.
             return shutdown
-                   || dataset.getGenIdx().load() != genIdx
-                   || startingOffset - static_cast<int>(batchSize) == lastStartingOffset.load();
+                   || batchedDataset.getGenIdx().load() != genIdx
+                   || startingOffset - static_cast<int>(batchSize) == batchedDataset.getLastWaitingBatch().load();
         });
         if (shutdown) break;
 
-        if (dataset.getGenIdx().load() == genIdx) {
+        if (batchedDataset.getGenIdx().load() == genIdx) {
             std::printf("saving into; startingOffset: %d, genIdx: %d\n", startingOffset, genIdx);
             prefetchCache.push({
                 .datasetStartingOffset = startingOffset,
@@ -125,7 +122,7 @@ void DataLoader::threadMain() {
                 .gpuAllocations = allocations.getGpuAllocations() // Maybe std::move ?
             });
 
-            lastStartingOffset = startingOffset;
+            batchedDataset.markBatchWaiting(startingOffset);
         }
 
         lock.unlock();
@@ -144,11 +141,9 @@ void deleter(DLManagedTensor *self) {
 py::dict DataLoader::getNextBatch() {
     if (resourceClient.acquire()) {
         std::unique_lock lock(prefetchCacheMutex);
-        dataset.resetByNumBatches(prefetchCache.size(), batchSize);
-        lastStartingOffset = dataset.getOffset() - static_cast<int>(batchSize);
+
+        batchedDataset.forgetInFlightBatches();
         while (!prefetchCache.empty()) prefetchCache.pop(); // Clear is not supported
-        std::printf("prefetchCache emptied\n");
-        lock.unlock();
 
         prefetchSemaphore.releaseAll();
         prefetchCacheNotify.notify_all();
@@ -159,14 +154,15 @@ py::dict DataLoader::getNextBatch() {
 
     const auto [startingOffset, barrierIdx, gpuAllocations] = prefetchCache.top();
     prefetchCache.pop();
+    batchedDataset.popWaitingBatch(startingOffset);
 
     lock.unlock();
     prefetchSemaphore.release();
 
-    std::printf("loading from; startingOffset: %d, genIdx: %d\n", startingOffset, dataset.getGenIdx().load());
+    std::printf("loading from; startingOffset: %d, genIdx: %d\n", startingOffset, batchedDataset.getGenIdx().load());
 
     py::dict pyBatch;
-    const auto &heads = dataset.getHeads(); // TODO: Prevent copy.
+    const auto &heads = batchedDataset.getDataset().getHeads();
     for (size_t i = 0; i < heads.size(); i++) {
         const Head &head = heads[i];
         uint8_t *gpuAllocation = gpuAllocations[i];
@@ -196,8 +192,8 @@ py::dict DataLoader::getNextBatch() {
                 },
                 .ndim = ndim,
                 .dtype = {
-                    .code = kDLFloat,
-                    .bits = 32,
+                    .code = kDLFloat, // TODO: kDLUint switch
+                    .bits = 32, // TODO: 8 switch
                     .lanes = 1
                 },
                 .shape = shapeArr,

@@ -39,11 +39,14 @@ PYBIND11_MODULE(_core, m) {
                 >())
 
             .def("splitTrainValidationTest", &Dataset::splitTrainValidationTest)
-            .def("getEntries", &Dataset::getEntries)
-            .def("getNextBatch", &Dataset::getNextBatch);
+            .def("getEntries", &Dataset::getEntries);
+
+    py::class_<BatchedDataset>(m, "BatchedDataset")
+            .def(py::init<const Dataset&, size_t>())
+            .def("getNextBatch", &BatchedDataset::getNextBatch);
 
     py::class_<DataLoader>(m, "DataLoader")
-            .def(py::init<Dataset, int, int, int>())
+            .def(py::init<Dataset&, int, int, int>())
             .def("getNextBatch", &DataLoader::getNextBatch)
             .def("__len__", &DataLoader::getNumberOfBatches);
     // TODO Comment(getNextBatch): Important convention is that memory of the last batch gets invalid when you call getNextBatch!

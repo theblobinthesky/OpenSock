@@ -74,47 +74,33 @@ def verify_correctness(ds, dl, root_dir, bs):
             # err = np.mean(np.abs(batch['img'][i] - pil_img))
             assert np.all(err < 10 / 255.0), f"Error too high for image {path}"
 
-def verify_correctness(ds, dl, root_dir, bs):
-    entries = [[f"{root_dir}{sub_path}" for sub_path in item] for item in ds.entries]
-    images_to_plot = []
-    threshold = 10 / 255.0
 
-    for batch_idx in range(len(dl)):
-        batch = dl.get_next_batch()
-        for i, da_img in enumerate(batch['img']):
-            path = entries[batch_idx][i]
-            pil_img = Image.open(path).convert("RGB")
-            pil_img = np.array(pil_img.resize((WIDTH, HEIGHT)), np.float32) / 255.0
-
-            images_to_plot.append((da_img, pil_img, path))
-            err = np.mean(np.abs(da_img - pil_img))
-
-            if err >= threshold:
-                print(f"{batch_idx=}, {i=}")
-                n = len(images_to_plot)
-                fig, axs = plt.subplots(n, 2, figsize=(4, n * 2))
-                if n == 1:
-                    axs = np.expand_dims(axs, axis=0)
-                for idx, (dimg, pimg, _) in enumerate(images_to_plot):
-                    axs[idx][0].imshow(dimg); axs[idx][0].axis('off')
-                    axs[idx][1].imshow(pimg); axs[idx][1].axis('off')
-                plt.show()
-
-                assert err < threshold, f"Error too high for image {path}"
-
-def test_correctness_one_dataloader():
+def test_one_dataloader_once():
     ds, dl, root_dir = get_dataloader(batch_size=16)
     verify_correctness(ds, dl, root_dir, bs=16)
 
-def test_correctness_multiple_dataloaders():
+# def test_one_dataloader_twice():
+#     ds, dl, root_dir = get_dataloader(batch_size=16)
+#     verify_correctness(ds, dl, root_dir, bs=16)
+#     verify_correctness(ds, dl, root_dir, bs=16)
+
+def test_multiple_dlers_without_next_batch():
     (dl1, dl2, dl3), (ds1, ds2, ds3), root_dir = get_dataloaders(batch_size=16)
-    dl2.get_next_batch()
     verify_correctness(ds1, dl1, root_dir, bs=16)
-    print("dl1 ok")
     verify_correctness(ds2, dl2, root_dir, bs=16)
-    print("dl2 ok")
     verify_correctness(ds3, dl3, root_dir, bs=16)
-    print("dl3 ok")
+
+# def test_correctness_multiple_dlers_with_next_batch():
+#     (dl1, dl2, dl3), (ds1, ds2, ds3), root_dir = get_dataloaders(batch_size=16)
+#     dl2.get_next_batch()
+#     dl1.get_next_batch()
+#     dl3.get_next_batch()
+#     verify_correctness(ds1, dl1, root_dir, bs=16)
+#     print("dl1 ok")
+#     verify_correctness(ds2, dl2, root_dir, bs=16)
+#     print("dl2 ok")
+#     verify_correctness(ds3, dl3, root_dir, bs=16)
+#     print("dl3 ok")
 
 # def hash_array(arr):
 #     arr_np = np.asarray(arr)

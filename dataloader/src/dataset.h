@@ -41,6 +41,7 @@ struct DatasetBatch {
     std::vector<std::vector<std::string>> batchPaths;
 };
 
+// The dataset is threadsafe by-default and tracks in-flight batches.
 class Dataset {
 public:
     Dataset(std::string _rootDir, std::vector<Head> _heads,
@@ -55,21 +56,15 @@ public:
 
     Dataset(const Dataset &other);
 
-    std::tuple<Dataset, Dataset, Dataset> splitTrainValidationTest(float trainPercentage, float validPercentage);
+    std::tuple<Dataset, Dataset, Dataset> splitTrainValidationTest(float trainPercentage, float validPercentage); // *
 
-    [[nodiscard]] DatasetBatch getNextBatchI(size_t batchSize);
-    [[nodiscard]] std::vector<std::vector<std::string>> getNextBatch(size_t batchSize);
+    [[nodiscard]] const std::string &getRootDir() const; // *
 
-    void resetByNumBatches(size_t numBatches, size_t batchSize);
+    [[nodiscard]] const std::vector<Head> &getHeads() const; // *
 
-    [[nodiscard]] std::string getRootDir() const;
+    [[nodiscard]] const std::vector<std::vector<std::string> > &getEntries() const; // *
 
-    [[nodiscard]] std::vector<Head> getHeads() const;
-
-    [[nodiscard]] std::vector<std::vector<std::string> > getEntries() const;
-
-    [[nodiscard]] int32_t getOffset() const;
-    [[nodiscard]] const std::atomic_uint32_t &getGenIdx() const;
+    [[nodiscard]] int32_t getOffset() const; // *
 
 private:
     void init();
@@ -79,6 +74,37 @@ private:
     std::vector<std::string> subDirs;
     std::vector<std::vector<std::string> > entries;
     std::atomic_int32_t offset;
+};
+
+class BatchedDataset {
+public:
+    BatchedDataset(const Dataset& dataset, size_t batchSize);
+
+    BatchedDataset(const Dataset&& dataset, size_t batchSize);
+
+    [[nodiscard]] DatasetBatch getNextInFlightBatch();
+
+    [[nodiscard]] std::vector<std::vector<std::string>> getNextBatch();
+
+    void markBatchWaiting(int32_t batch);
+
+    void popWaitingBatch(int32_t batch);
+
+    void forgetInFlightBatches();
+
+    [[nodiscard]] const Dataset &getDataset() const noexcept;
+
+    [[nodiscard]] const std::atomic_int32_t &getLastWaitingBatch() const;
+
+    [[nodiscard]] const std::atomic_uint32_t &getGenIdx() const;
+
+private:
+    Dataset dataset;
+    size_t batchSize;
+    std::mutex mutex;
+    std::unordered_set<int32_t> inFlightBatches;
+    std::atomic_int32_t currInFlightBatch;
+    std::atomic_int32_t lastWaitingBatch;
     std::atomic_uint32_t genIdx;
 };
 

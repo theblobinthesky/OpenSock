@@ -31,7 +31,7 @@ private:
     explicit ResourcePool();
     PREVENT_COPY_OR_MOVE(ResourcePool)
 
-    void _reserve(size_t totalSize);
+    void _reserve(size_t newTotalSize);
 
     static SharedPtr<ResourcePool> instance;
 

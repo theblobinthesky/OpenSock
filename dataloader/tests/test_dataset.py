@@ -1,4 +1,4 @@
-from native_dataloader import Head, Dataset, FileType
+from native_dataloader import Head, Dataset, BatchedDataset, FileType
 import pytest as t
 from pathlib import PosixPath
 
@@ -26,6 +26,10 @@ def get_dataset(tmp_path: PosixPath, eroneous: bool):
         ["subdir0", "subdir1", "subdir2"],
         init_fn
     )
+
+def get_batched_dataset(ds: Dataset):
+    return BatchedDataset(ds, len(ds))
+
 
 def test_get_eroneous_dataset(tmp_path):
     ds = get_dataset(tmp_path, eroneous=True)
@@ -59,8 +63,8 @@ def verify_dataset_reconstruction(tmp_path, add_trailing_slash: bool, use_absolu
         entries
     )
 
-    b1 = ds.get_next_batch(len(ds))
-    b2 = ds2.get_next_batch(len(ds2))
+    b1 = get_batched_dataset(ds).get_next_batch()
+    b2 = get_batched_dataset(ds2).get_next_batch()
 
     assert sorted(tuple(b1)) == sorted(tuple(b2))
 
@@ -80,10 +84,10 @@ def test_split_dataset(tmp_path):
     ds = get_dataset(tmp_path, eroneous=False)
     train_ds, valid_ds, test_ds = ds.split_train_validation_test(0.5, 0.2)
 
-    b = ds.get_next_batch(len(ds))
-    train_b = train_ds.get_next_batch(len(train_ds))
-    valid_b = valid_ds.get_next_batch(len(valid_ds))
-    test_b = test_ds.get_next_batch(len(test_ds))
+    b = get_batched_dataset(ds).get_next_batch()
+    train_b = get_batched_dataset(train_ds).get_next_batch()
+    valid_b = get_batched_dataset(valid_ds).get_next_batch()
+    test_b = get_batched_dataset(test_ds).get_next_batch()
 
     assert len(train_ds) == 5 and len(valid_ds) == 2 and len(test_ds) == 3
     assert sorted(tuple([*train_b, *valid_b, *test_b])) == sorted(tuple(b))

@@ -22,7 +22,7 @@ struct PrefetchItem {
 class DataLoader {
 public:
     DataLoader(
-        const Dataset& _dataset,
+        Dataset& _dataset,
         int _batchSize,
         int _numThreads,
         int _prefetchSize
@@ -41,15 +41,13 @@ public:
 private:
     static std::atomic_int nextId;
     int id;
-    Dataset dataset;
+    BatchedDataset batchedDataset;
     const size_t batchSize;
     const size_t numThreads;
     const size_t prefetchSize;
     size_t numberOfBatches;
     Semaphore prefetchSemaphore;
-    std::mutex datasetMutex;
-    std::priority_queue<PrefetchItem> prefetchCache;
-    std::atomic_int32_t lastStartingOffset;
+    std::priority_queue<PrefetchItem> prefetchCache; // *
     std::condition_variable prefetchCacheNotify;
     std::atomic_int lastBarrierIdx;
     std::mutex prefetchCacheMutex;

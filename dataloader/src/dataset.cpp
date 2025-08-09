@@ -42,8 +42,8 @@ Head::Head(
         }
         break;
         default: break; // TODO
-        // throw std::runtime_error(
-        //     "File types other than jpg and npy are not supported.");
+            // throw std::runtime_error(
+            //     "File types other than jpg and npy are not supported.");
     }
 }
 
@@ -232,48 +232,15 @@ std::tuple<Dataset, Dataset, Dataset> Dataset::splitTrainValidationTest(
     );
 }
 
-DatasetBatch Dataset::getNextBatchI(const size_t batchSize) {
-    std::vector<std::vector<std::string> > batchPaths;
-
-    const uint32_t lastOffset = offset.fetch_add(static_cast<int>(batchSize));
-    for (size_t i = lastOffset; i < lastOffset + batchSize; i++) {
-        std::vector<std::string> entry;
-
-        for (auto subPath: entries[i % entries.size()]) {
-            entry.push_back(std::format("{}{}", rootDir, subPath));
-        }
-
-        batchPaths.push_back(std::move(entry));
-    }
-
-    return {
-        .startingOffset = static_cast<int32_t>(lastOffset),
-        .genIdx = genIdx.load(),
-        .batchPaths = std::move(batchPaths)
-    };
-}
-
-std::vector<std::vector<std::string> > Dataset::getNextBatch(const size_t batchSize) {
-    return getNextBatchI(batchSize).batchPaths;
-}
-
-void Dataset::resetByNumBatches(const size_t numBatches, const size_t batchSize) {
-    offset -= static_cast<int>(numBatches * batchSize);
-    if (offset < 0) {
-        throw std::runtime_error("Offset cannot be negative.");
-    }
-    genIdx += 1;
-}
-
-std::string Dataset::getRootDir() const {
+const std::string &Dataset::getRootDir() const {
     return rootDir;
 }
 
-std::vector<Head> Dataset::getHeads() const {
+const std::vector<Head> &Dataset::getHeads() const {
     return heads;
 }
 
-std::vector<std::vector<std::string> > Dataset::getEntries() const {
+const std::vector<std::vector<std::string> > &Dataset::getEntries() const {
     return entries;
 }
 
@@ -281,6 +248,81 @@ int32_t Dataset::getOffset() const {
     return offset.load();
 }
 
-const std::atomic_uint32_t &Dataset::getGenIdx() const {
+BatchedDataset::BatchedDataset(const Dataset &dataset, const size_t batchSize) : dataset(dataset),
+    batchSize(batchSize), currInFlightBatch(0), lastWaitingBatch(-static_cast<int>(batchSize)) {
+}
+
+BatchedDataset::BatchedDataset(const Dataset &&dataset, const size_t batchSize) : dataset(dataset),
+    batchSize(batchSize), currInFlightBatch(0), lastWaitingBatch(-static_cast<int>(batchSize)) {
+}
+
+DatasetBatch BatchedDataset::getNextInFlightBatch() {
+    std::unique_lock lock(mutex);
+
+    std::vector<std::vector<std::string> > batchPaths;
+
+    const int32_t offset = currInFlightBatch.fetch_add(static_cast<int32_t>(batchSize));
+    for (size_t i = offset; i < offset + batchSize; i++) {
+        std::vector<std::string> entry;
+
+        for (auto subPath: dataset.getEntries()[i % dataset.getEntries().size()]) {
+            entry.push_back(std::format("{}{}", dataset.getRootDir(), subPath));
+        }
+
+        batchPaths.push_back(std::move(entry));
+    }
+
+    inFlightBatches.emplace(offset);
+    std::printf("getNextInFlightBatch: lastWaitingBatch=%d, offset=%d\n", lastWaitingBatch.load(), offset);
+    return {
+        .startingOffset = offset,
+        .genIdx = genIdx.load(),
+        .batchPaths = std::move(batchPaths)
+    };
+}
+
+std::vector<std::vector<std::string> > BatchedDataset::getNextBatch() {
+    return getNextInFlightBatch().batchPaths;
+}
+
+void BatchedDataset::markBatchWaiting(const int32_t batch) {
+    std::unique_lock lock(mutex);
+    std::printf("markBatchWaiting: batch=%d\n", batch);
+    lastWaitingBatch = batch;
+}
+
+void BatchedDataset::popWaitingBatch(const int32_t batch) {
+    std::unique_lock lock(mutex);
+    std::printf("popWaitingBatch: batch=%d\n", batch);
+    inFlightBatches.erase(batch);
+}
+
+void BatchedDataset::forgetInFlightBatches() {
+    std::unique_lock lock(mutex);
+
+    // TODO: This isn't actually right, because the dataset wraps around.
+    // TODO: Need to account for wrapping. min just assumes no wrapping.
+    const int firstInFlightBatch = *std::ranges::min_element(inFlightBatches);
+    currInFlightBatch = firstInFlightBatch;
+    lastWaitingBatch = firstInFlightBatch - static_cast<int32_t>(batchSize);
+    inFlightBatches.clear();
+
+    if (currInFlightBatch < 0) {
+        throw std::runtime_error("Offset cannot be negative.");
+    }
+
+    genIdx += 1;
+    std::printf("forgetInFlightBatches\n");
+}
+
+const Dataset &BatchedDataset::getDataset() const noexcept {
+    return dataset;
+}
+
+const std::atomic_int32_t &BatchedDataset::getLastWaitingBatch() const {
+    return lastWaitingBatch;
+}
+
+const std::atomic_uint32_t &BatchedDataset::getGenIdx() const {
     return genIdx;
 }

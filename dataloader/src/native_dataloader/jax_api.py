@@ -84,10 +84,6 @@ class Dataset:
         train, valid, test = self._native.splitTrainValidationTest(train_percentage, valid_percentage)
         return Dataset(train, self.post_process_fn), Dataset(valid, self.post_process_fn), Dataset(test, self.post_process_fn)
 
-    def get_next_batch(self, batch_size: int) -> List[List[str]]:
-        """Return the next batch of file entries."""
-        return self._native.getNextBatch(batch_size)
-
     @property
     def root_dir(self) -> str:
         """Return the root directory of the dataset."""
@@ -105,6 +101,15 @@ class Dataset:
     
     def __len__(self) -> int:
         return len(self._native.getEntries())
+
+
+class BatchedDataset:
+    def __init__(self, dataset: Dataset, batch_size: int):
+        self._native = m.BatchedDataset(dataset._native, batch_size)
+
+    def get_next_batch(self) -> List[List[str]]:
+        """Return the next batch of file entries."""
+        return self._native.getNextBatch()
 
 
 class DLManagedTensorWrapper:

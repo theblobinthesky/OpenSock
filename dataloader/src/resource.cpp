@@ -60,26 +60,26 @@ bool ResourcePool::acquire(const int clientId) {
     return clientChanged;
 }
 
-void ResourcePool::_reserve(const size_t totalSize) {
-    if (this->allocSize >= totalSize) {
-        this->totalSize = totalSize;
+void ResourcePool::_reserve(const size_t newTotalSize) {
+    if (this->allocSize >= newTotalSize) {
+        this->totalSize = newTotalSize;
         return;
     }
 
     // TODO: Free if necessary......
-    // THIS IS BAD IT CAN'T UPSIZE YET!!!!
+    // TODO: THIS IS BAD IT CAN'T UPSIZE YET!!!!
 
-    this->totalSize = totalSize;
-    this->allocSize = std::max(this->allocSize, totalSize);
+    this->totalSize = newTotalSize;
+    this->allocSize = std::max(this->allocSize, newTotalSize);
 
-    cudaError_t err = cudaMallocHost(&hostData, totalSize);
+    cudaError_t err = cudaMallocHost(&hostData, newTotalSize);
     if (err != cudaSuccess) {
         throw std::runtime_error("cudaHostMalloc failed");
     }
 
-    err = cudaMalloc(&gpuData, totalSize);
+    err = cudaMalloc(&gpuData, newTotalSize);
     if (err != cudaSuccess) {
-        throw std::runtime_error(std::format("cudaMalloc failed to allocate {} MB", totalSize / 1024 / 1024));
+        throw std::runtime_error(std::format("cudaMalloc failed to allocate {} MB", newTotalSize / 1024 / 1024));
     }
 }
 
