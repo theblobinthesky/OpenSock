@@ -273,7 +273,7 @@ DatasetBatch BatchedDataset::getNextInFlightBatch() {
     }
 
     inFlightBatches.emplace(offset);
-    std::printf("getNextInFlightBatch: lastWaitingBatch=%d, offset=%d\n", lastWaitingBatch.load(), offset);
+    debugLog("getNextInFlightBatch: lastWaitingBatch=%d, offset=%d\n", lastWaitingBatch.load(), offset);
     return {
         .startingOffset = offset,
         .genIdx = genIdx.load(),
@@ -287,13 +287,13 @@ std::vector<std::vector<std::string> > BatchedDataset::getNextBatch() {
 
 void BatchedDataset::markBatchWaiting(const int32_t batch) {
     std::unique_lock lock(mutex);
-    std::printf("markBatchWaiting: batch=%d\n", batch);
+    debugLog("markBatchWaiting: batch=%d\n", batch);
     lastWaitingBatch = batch;
 }
 
 void BatchedDataset::popWaitingBatch(const int32_t batch) {
     std::unique_lock lock(mutex);
-    std::printf("popWaitingBatch: batch=%d\n", batch);
+    debugLog("popWaitingBatch: batch=%d\n", batch);
     inFlightBatches.erase(batch);
 }
 
@@ -302,7 +302,7 @@ void BatchedDataset::forgetInFlightBatches() {
 
     // TODO: This isn't actually right, because the dataset wraps around.
     // TODO: Need to account for wrapping. min just assumes no wrapping.
-    const int firstInFlightBatch = *std::ranges::min_element(inFlightBatches);
+    const int firstInFlightBatch = 0; // TODO: Uncomment *std::ranges::min_element(inFlightBatches);
     currInFlightBatch = firstInFlightBatch;
     lastWaitingBatch = firstInFlightBatch - static_cast<int32_t>(batchSize);
     inFlightBatches.clear();
@@ -312,7 +312,7 @@ void BatchedDataset::forgetInFlightBatches() {
     }
 
     genIdx += 1;
-    std::printf("forgetInFlightBatches\n");
+    debugLog("forgetInFlightBatches\n");
 }
 
 const Dataset &BatchedDataset::getDataset() const noexcept {

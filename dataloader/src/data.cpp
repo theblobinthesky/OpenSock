@@ -115,7 +115,7 @@ struct BatchAllocation {
 };
 
 BatchAllocation getBatchAllocation(const Head &head,
-                                   MultipleAllocations &allocations,
+                                   ContiguousAllocation &allocations,
                                    const size_t batchSize) {
     const auto itemSize = head.getShapeSize();
     const auto batchBufferSize = batchSize * itemSize * sizeof(float);
@@ -130,7 +130,7 @@ BatchAllocation getBatchAllocation(const Head &head,
     };
 }
 
-Allocation loadJpgFiles(MultipleAllocations &allocations,
+Allocation loadJpgFiles(ContiguousAllocation &allocations,
                         const std::vector<std::vector<std::string> > &batchPaths,
                         const std::vector<Head> &heads, const size_t headIdx) {
     const Head &head = heads[headIdx];
@@ -163,7 +163,7 @@ Allocation loadJpgFiles(MultipleAllocations &allocations,
     return batchAllocation;
 }
 
-Allocation loadNpyFiles(MultipleAllocations &allocations,
+Allocation loadNpyFiles(ContiguousAllocation &allocations,
                         const std::vector<std::vector<std::string> > &batchPaths,
                         const std::vector<Head> &heads, const size_t headIdx) {
     const Head &head = heads[headIdx];

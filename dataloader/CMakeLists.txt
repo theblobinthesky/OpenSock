@@ -45,5 +45,6 @@ target_compile_options(_core PRIVATE -fvisibility=hidden -Wall -Wextra -Wpedanti
 # Pass parameters to the program:
 target_compile_definitions(_core PRIVATE VERSION_INFO=${PROJECT_VERSION})
 target_compile_definitions(_core PRIVATE PLATFORM_LINUX)
+target_compile_definitions(_core PRIVATE $<$<CONFIG:Debug>: ENABLE_DEBUG_PRINT=1>)
 
 install(TARGETS _core DESTINATION native_dataloader)

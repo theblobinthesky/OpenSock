@@ -5,13 +5,12 @@
 #include <functional>
 #include <condition_variable>
 #include <csignal>
-#include <latch>
 #include <semaphore>
 #include <string>
 
 #define null nullptr
 
-#if false
+#ifdef ENABLE_DEBUG_PRINT
 #define debugLog(...) std::printf(__VA_ARGS__)
 #else
 #define debugLog(...)
@@ -33,7 +32,7 @@
 template<typename T>
 class SharedPtr {
 public:
-    SharedPtr(): refCounter(nullptr), ptr(nullptr), weakPtr(false) {
+    SharedPtr() : refCounter(nullptr), ptr(nullptr), weakPtr(false) {
     }
 
     explicit SharedPtr(T *ptr, const bool weakPtr = false)
@@ -183,6 +182,28 @@ private:
     std::barrier<> shutdownBarrier;
 
     void extendedThreadMain();
+};
+
+template<typename T>
+class BumpAllocator {
+public:
+    BumpAllocator(T arena, const size_t arenaSize) : arena(arena), offset(0), arenaSize(arenaSize) {
+    }
+
+    T allocate(const size_t size) {
+        T t = arena + offset % arenaSize;
+        offset += size;
+        return t;
+    }
+
+    void reset() {
+        offset = 0;
+    }
+
+private:
+    T arena;
+    size_t offset;
+    size_t arenaSize;
 };
 
 inline bool existsEnvVar(const std::string &name) {

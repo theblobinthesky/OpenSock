@@ -32,7 +32,6 @@ DataLoader::DataLoader(
     outputBatchMemorySize(0),
     resourceClient(id, _prefetchSize),
     threadPool([this] { this->threadMain(); }, _numThreads) {
-
     if (batchSize <= 0 || _numThreads <= 0 || _prefetchSize <= 0) {
         throw std::runtime_error(
             "Batch size, the number of threads and the prefetch size need to be strictly positive.");
@@ -54,8 +53,8 @@ DataLoader::DataLoader(
         outputBatchMemorySize += batchSize * itemMemorySize;
     }
 
-    ResourcePool::reserveAtLeast(outputBatchMemorySize * _prefetchSize);
-    resourceClient.acquire();
+    // TODO: Not necessary probably? ResourcePool::getInstance()->getAllocator()->reserveAtLeast(_prefetchSize, outputBatchMemorySize);
+    resourceClient.acquire(prefetchSize, outputBatchMemorySize);
 
     threadPool.start();
 }
@@ -76,7 +75,17 @@ void DataLoader::threadMain() {
         const std::vector<Head> &heads = batchedDataset.getDataset().getHeads();
 
         // For each head, load all batch items into one contigous cpu array.
-        MultipleAllocations allocations = resourceClient.allocate(outputBatchMemorySize);
+        auto allocations = ContiguousAllocation{Allocation{}};
+        if (!resourceClient.allocate(allocations)) {
+            MirroredAllocator &allocator = *ResourcePool::getInstance()->getAllocator();
+            while (!allocations) {
+                std::unique_lock lock(allocator.memoryMutex);
+                allocator.memoryNotify.wait(lock, [this, &allocations] {
+                    return shutdown || resourceClient.allocate(allocations);
+                });
+            }
+        }
+
 
         // Make sure to not touch the allocation if the current resource client has lost access to the pool.
         // Otherwise, you'd get null pointer exceptions.
@@ -115,7 +124,6 @@ void DataLoader::threadMain() {
         if (shutdown) break;
 
         if (batchedDataset.getGenIdx().load() == genIdx) {
-            std::printf("saving into; startingOffset: %d, genIdx: %d\n", startingOffset, genIdx);
             prefetchCache.push({
                 .datasetStartingOffset = startingOffset,
                 .barrierIdx = barrierIdx,
@@ -131,15 +139,16 @@ void DataLoader::threadMain() {
     }
 }
 
+// ReSharper disable once CppParameterMayBeConstPtrOrRef
 void deleter(DLManagedTensor *self) {
-    ResourcePool::getInstance().release();
+    ResourcePool::getInstance()->getAllocator()->free(static_cast<uint8_t *>(self->dl_tensor.data));
     delete[] self->dl_tensor.shape;
     delete[] self->dl_tensor.strides;
     delete self;
 }
 
 py::dict DataLoader::getNextBatch() {
-    if (resourceClient.acquire()) {
+    if (resourceClient.acquire(prefetchSize, outputBatchMemorySize)) {
         std::unique_lock lock(prefetchCacheMutex);
 
         batchedDataset.forgetInFlightBatches();
@@ -159,13 +168,14 @@ py::dict DataLoader::getNextBatch() {
     lock.unlock();
     prefetchSemaphore.release();
 
-    std::printf("loading from; startingOffset: %d, genIdx: %d\n", startingOffset, batchedDataset.getGenIdx().load());
+    debugLog("loading from; startingOffset: %d, genIdx: %d\n", startingOffset, batchedDataset.getGenIdx().load());
 
     py::dict pyBatch;
     const auto &heads = batchedDataset.getDataset().getHeads();
     for (size_t i = 0; i < heads.size(); i++) {
         const Head &head = heads[i];
         uint8_t *gpuAllocation = gpuAllocations[i];
+        ResourcePool::getInstance()->getAllocator()->handOff(gpuAllocation);
 
         const std::vector<int> &shape = head.getShape();
         const int ndim = static_cast<int>(shape.size()) + 1;
@@ -175,13 +185,6 @@ py::dict DataLoader::getNextBatch() {
         for (size_t s = 0; s < shape.size(); s++) {
             shapeArr[s + 1] = shape[s];
         }
-
-        /*int64_t lastStride = 1;
-        const auto stridesArr = new int64_t[shape.size() + 1]{};
-        for (int s = static_cast<int>(shape.size()); s >= 0; s--) {
-            stridesArr[s] = lastStride;
-            lastStride *= shapeArr[s];
-        }*/
 
         const auto *dlMngTensor = new DLManagedTensor{
             .dl_tensor = {
@@ -200,7 +203,7 @@ py::dict DataLoader::getNextBatch() {
                 .strides = null,
                 .byte_offset = 0
             },
-            .manager_ctx = null,
+            .manager_ctx = this,
             .deleter = &deleter
         };
 
@@ -211,7 +214,7 @@ py::dict DataLoader::getNextBatch() {
     /*for (size_t i = 0; i < prefetchCache.size(); i++) {
         const auto &pair = prefetchCache[i];
         if (pair.barrierIdx == barrierIdx) {
-            std::printf("Idiot index ++ (%lu, %lu, idx %lu, size %lu) \n",
+            debugLog("Idiot index ++ (%lu, %lu, idx %lu, size %lu) \n",
                         pair.barrierIdx,
                         barrierIdx, i, prefetchCache.size() + 1);
         }

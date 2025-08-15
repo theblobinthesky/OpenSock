@@ -2,7 +2,6 @@
 #define DATALOADER_H
 #include "dataset.h"
 #include "resource.h"
-#include <cstddef>
 #include <vector>
 #include <condition_variable>
 #include <atomic>
@@ -47,7 +46,7 @@ private:
     const size_t prefetchSize;
     size_t numberOfBatches;
     Semaphore prefetchSemaphore;
-    std::priority_queue<PrefetchItem> prefetchCache; // *
+    std::priority_queue<PrefetchItem> prefetchCache;
     std::condition_variable prefetchCacheNotify;
     std::atomic_int lastBarrierIdx;
     std::mutex prefetchCacheMutex;
@@ -55,6 +54,8 @@ private:
     ResourceClient resourceClient;
     ThreadPool threadPool;
     std::atomic_bool shutdown;
+
+public:
 
     void threadMain();
 };
