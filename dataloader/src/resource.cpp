@@ -203,30 +203,6 @@ bool ResourcePool::acquire(const int clientId, const size_t numItems, const size
     return clientChanged;
 }
 
-ContiguousAllocation::ContiguousAllocation(const Allocation &totalAllocation) : totalAllocation(totalAllocation),
-    offset(0) {
-}
-
-ContiguousAllocation::operator bool() const {
-    return totalAllocation.host != null;
-}
-
-Allocation ContiguousAllocation::allocate(const size_t size) {
-    const Allocation allocation = {
-        .host = totalAllocation.host + offset,
-        .gpu = totalAllocation.gpu + offset,
-        .size = size
-    };
-
-    gpuAllocations.push_back(allocation.gpu);
-    offset += size;
-    return allocation;
-}
-
-std::vector<uint8_t *> ContiguousAllocation::getGpuAllocations() const {
-    return gpuAllocations;
-}
-
 ResourceClient::ResourceClient(const int clientId, const size_t numBarriers) : clientId(clientId),
                                                                                pool(ResourcePool::getInstance()) {
     for (size_t i = 0; i < numBarriers; i++) {
@@ -250,17 +226,17 @@ bool ResourceClient::acquire(const size_t numItems, const size_t itemSize) {
     return pool->acquire(clientId, numItems, itemSize);
 }
 
-bool ResourceClient::allocate(ContiguousAllocation &contiguousAlloc) {
+bool ResourceClient::allocate(BumpAllocator<Allocation> &subAllocator) {
     std::unique_lock lock(mutex);
     if (ResourcePool::currentClientId.load() != clientId) {
         // Do not allocate if the client has not acquired the pool.
-        contiguousAlloc = ContiguousAllocation({});
+        subAllocator = BumpAllocator<Allocation>({}, 0);
         return false;
     }
 
     Allocation alloc = {};
     const bool success = pool->getAllocator()->allocate(alloc);
-    contiguousAlloc = ContiguousAllocation(alloc);
+    subAllocator = BumpAllocator(alloc, alloc.size);
     return success;
 }
 

@@ -53,7 +53,6 @@ DataLoader::DataLoader(
         outputBatchMemorySize += batchSize * itemMemorySize;
     }
 
-    // TODO: Not necessary probably? ResourcePool::getInstance()->getAllocator()->reserveAtLeast(_prefetchSize, outputBatchMemorySize);
     resourceClient.acquire(prefetchSize, outputBatchMemorySize);
 
     threadPool.start();
@@ -75,10 +74,10 @@ void DataLoader::threadMain() {
         const std::vector<Head> &heads = batchedDataset.getDataset().getHeads();
 
         // For each head, load all batch items into one contigous cpu array.
-        auto allocations = ContiguousAllocation{Allocation{}};
+        auto allocations = BumpAllocator(Allocation{}, 0);
         if (!resourceClient.allocate(allocations)) {
             MirroredAllocator &allocator = *ResourcePool::getInstance()->getAllocator();
-            while (!allocations) {
+            while (!allocations.getArena()) {
                 std::unique_lock lock(allocator.memoryMutex);
                 allocator.memoryNotify.wait(lock, [this, &allocations] {
                     return shutdown || resourceClient.allocate(allocations);
@@ -89,25 +88,14 @@ void DataLoader::threadMain() {
 
         // Make sure to not touch the allocation if the current resource client has lost access to the pool.
         // Otherwise, you'd get null pointer exceptions.
-        // TODO: Modularize supported file types. Move this out of here.
-        if (allocations) {
+        std::vector<uint8_t *> gpuAllocations;
+        if (allocations.getArena()) {
             for (size_t headIdx = 0; headIdx < heads.size(); headIdx++) {
-                const Head &head = heads[headIdx];
-
-                Allocation allocation = {};
-                switch (head.getFilesType()) {
-                    case FileType::JPG:
-                        allocation = loadJpgFiles(allocations, batchPaths, heads, headIdx);
-                        break;
-                    case FileType::NPY:
-                        allocation = loadNpyFiles(allocations, batchPaths, heads, headIdx);
-                        break;
-                    default:
-                        throw std::runtime_error("Cannot load an unsupported file type.");
-                }
+                const auto [host, gpu, size] = loadFiles(allocations, batchPaths, heads, headIdx);
 
                 // Start async upload to gpu memory as soon as possible.
-                resourceClient.copy(allocation.gpu, allocation.host, allocation.size);
+                resourceClient.copy(gpu, host, size);
+                gpuAllocations.push_back(gpu);
             }
         }
 
@@ -127,7 +115,7 @@ void DataLoader::threadMain() {
             prefetchCache.push({
                 .datasetStartingOffset = startingOffset,
                 .barrierIdx = barrierIdx,
-                .gpuAllocations = allocations.getGpuAllocations() // Maybe std::move ?
+                .gpuAllocations = gpuAllocations
             });
 
             batchedDataset.markBatchWaiting(startingOffset);
@@ -168,7 +156,7 @@ py::dict DataLoader::getNextBatch() {
     lock.unlock();
     prefetchSemaphore.release();
 
-    debugLog("loading from; startingOffset: %d, genIdx: %d\n", startingOffset, batchedDataset.getGenIdx().load());
+    debugLog("Loading from; startingOffset: %d, genIdx: %d\n", startingOffset, batchedDataset.getGenIdx().load());
 
     py::dict pyBatch;
     const auto &heads = batchedDataset.getDataset().getHeads();

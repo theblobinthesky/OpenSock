@@ -6,7 +6,7 @@
 #include <cstdio>
 #include <cstring>
 #include <jpeglib.h>
-#include <setjmp.h>
+#include <csetjmp>
 #include "cnpy.h"
 #define STB_IMAGE_RESIZE_IMPLEMENTATION
 
@@ -14,8 +14,8 @@
 
 struct ImageData {
     std::vector<unsigned char> data;
-    int width;
-    int height;
+    int width = 0;
+    int height = 0;
 };
 
 // Custom error manager structure.
@@ -115,7 +115,7 @@ struct BatchAllocation {
 };
 
 BatchAllocation getBatchAllocation(const Head &head,
-                                   ContiguousAllocation &allocations,
+                                   BumpAllocator<Allocation> &allocations,
                                    const size_t batchSize) {
     const auto itemSize = head.getShapeSize();
     const auto batchBufferSize = batchSize * itemSize * sizeof(float);
@@ -130,7 +130,7 @@ BatchAllocation getBatchAllocation(const Head &head,
     };
 }
 
-Allocation loadJpgFiles(ContiguousAllocation &allocations,
+Allocation loadJpgFiles(BumpAllocator<Allocation> &allocations,
                         const std::vector<std::vector<std::string> > &batchPaths,
                         const std::vector<Head> &heads, const size_t headIdx) {
     const Head &head = heads[headIdx];
@@ -163,7 +163,7 @@ Allocation loadJpgFiles(ContiguousAllocation &allocations,
     return batchAllocation;
 }
 
-Allocation loadNpyFiles(ContiguousAllocation &allocations,
+Allocation loadNpyFiles(BumpAllocator<Allocation> &allocations,
                         const std::vector<std::vector<std::string> > &batchPaths,
                         const std::vector<Head> &heads, const size_t headIdx) {
     const Head &head = heads[headIdx];
@@ -175,7 +175,7 @@ Allocation loadNpyFiles(ContiguousAllocation &allocations,
         cnpy::NpyArray arr = cnpy::npy_load(batchPaths[j][headIdx]);
 
         // Ensure the file contains valid data.
-        const std::string & filePath = batchPaths[j][headIdx];
+        const std::string &filePath = batchPaths[j][headIdx];
         if (arr.word_size != sizeof(float)) {
             throw std::runtime_error(
                 std::format("NPY file {} has word size {} and does not contain float32 data.",
@@ -206,4 +206,17 @@ Allocation loadNpyFiles(ContiguousAllocation &allocations,
     }
 
     return batchAllocation;
+}
+
+Allocation loadFiles(BumpAllocator<Allocation> &allocations,
+                     const std::vector<std::vector<std::string> > &batchPaths,
+                     const std::vector<Head> &heads, const size_t headIdx) {
+    switch (const Head &head = heads[headIdx]; head.getFilesType()) {
+        case FileType::JPG:
+            return loadJpgFiles(allocations, batchPaths, heads, headIdx);
+        case FileType::NPY:
+            return loadNpyFiles(allocations, batchPaths, heads, headIdx);
+        default:
+            throw std::runtime_error("Cannot load an unsupported file type.");
+    }
 }

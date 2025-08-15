@@ -19,6 +19,10 @@ struct Allocation {
             .size = size
         };
     }
+
+    explicit operator bool() const {
+        return host != null;
+    }
 };
 
 // The host memory can downsize to the target size, as the dataloader has full control over it.
@@ -137,31 +141,6 @@ private:
     cudaStream_t stream;
 };
 
-// TODO: Make one general purpose bump allocator i can use everywhere.
-class ContiguousAllocation {
-public:
-    explicit ContiguousAllocation(const Allocation &totalAllocation);
-
-    ContiguousAllocation(const ContiguousAllocation &allocs) = delete;
-
-    ContiguousAllocation(ContiguousAllocation &&allocs) = default;
-
-    ContiguousAllocation &operator=(ContiguousAllocation &&allocs) noexcept = default;
-
-    explicit operator bool() const;
-
-    // TODO: Make thread safe.
-    Allocation allocate(size_t size);
-
-    // TODO: Make thread safe.
-    [[nodiscard]] std::vector<uint8_t *> getGpuAllocations() const;
-
-private:
-    Allocation totalAllocation;
-    size_t offset;
-    std::vector<uint8_t *> gpuAllocations;
-};
-
 class ResourceClient {
 public:
     explicit ResourceClient(int clientId, size_t numBarriers);
@@ -171,7 +150,7 @@ public:
     bool acquire(size_t numItems, size_t itemSize);
 
     // TODO: Maybe make the Allocation a bump allocator by default. So no conversion is necessary?
-    [[nodiscard]] bool allocate(ContiguousAllocation &alloc);
+    [[nodiscard]] bool allocate(BumpAllocator<Allocation> &subAllocator);
 
     void copy(uint8_t *gpuBuffer, const uint8_t *buffer, uint32_t size);
 

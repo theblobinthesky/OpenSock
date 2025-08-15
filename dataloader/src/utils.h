@@ -200,6 +200,10 @@ public:
         offset = 0;
     }
 
+    [[nodiscard]] T &getArena() {
+        return arena;
+    }
+
 private:
     T arena;
     size_t offset;
