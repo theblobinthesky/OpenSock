@@ -8,6 +8,9 @@ class FileType(Enum):
     EXR = m.FileType.EXR
     NPY = m.FileType.NPY
 
+class ItemFormat(Enum):
+    FLOAT = m.ItemFormat.FLOAT
+    UINT = m.ItemFormat.UINT
 
 class Head:
     def __init__(self, file_type: FileType, dict_name: str,
@@ -49,6 +52,20 @@ class Head:
             return FileType.NPY
         else:
             raise ValueError("Unknown file type")
+
+    def item_format(self) -> ItemFormat:
+        """Return the item format as a ItemFormat enum."""
+        native_if = self._native.getItemFormat()
+        if native_if == m.ItemFormat.FLOAT:
+            return ItemFormat.FLOAT
+        elif native_if == m.ItemFormat.UINT:
+            return ItemFormat.UINT
+        else:
+            raise ValueError("Unknown item format")
+
+    def bytes_per_item(self) -> int:
+        """Return the number of bytes per item as an integer."""
+        return self._native.getBytesPerItem()
 
 
 class Dataset:
@@ -161,6 +178,7 @@ class DataLoader:
         JaxSingleton()
         self.dataset = dataset
         self._native = m.DataLoader(dataset._native, batch_size, num_threads, prefetch_size)
+        self.head_dict = {h.dict_name(): h for h in self.dataset.heads}
 
     def __len__(self) -> int:
         """Return number of batches."""
@@ -174,4 +192,10 @@ class DataLoader:
 
         batch = self._native.getNextBatch()
         batch = {key: from_dlpack(x) for key, x in batch.items()}
+
+        # Cast JPG entries to float32 and normalize
+        for key in list(batch.keys()):
+            if self.head_dict[key].file_type() == FileType.JPG:
+                batch[key] = batch[key].astype(jnp.float32) / 255.0
+
         return self.dataset.post_process_fn(batch)

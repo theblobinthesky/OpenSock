@@ -108,25 +108,29 @@ void resizeImage(const ImageData &image, unsigned char *outputBuffer,
 #define IMAGE_WIDTH(subDir) static_cast<size_t>(subDir.getShape()[1])
 
 struct BatchAllocation {
-    size_t itemSize;
+    size_t shapeSize;
     size_t batchBufferSize;
     Allocation batchAllocation;
-    float *batchBuffer;
+
+    union {
+        uint8_t *uint8;
+        float *float32;
+    } batchBuffer;
 };
 
 BatchAllocation getBatchAllocation(const Head &head,
                                    BumpAllocator<Allocation> &allocations,
-                                   const size_t batchSize) {
-    const auto itemSize = head.getShapeSize();
-    const auto batchBufferSize = batchSize * itemSize * sizeof(float);
+                                   const size_t batchSize,
+                                   const size_t itemSize) {
+    const auto shapeSize = head.getShapeSize();
+    const auto batchBufferSize = batchSize * shapeSize * itemSize;
     const auto batchAllocation = allocations.allocate(batchBufferSize);
-    const auto batchBuffer = reinterpret_cast<float *>(batchAllocation.host);
 
     return {
-        .itemSize = itemSize,
+        .shapeSize = shapeSize,
         .batchBufferSize = batchBufferSize,
         .batchAllocation = batchAllocation,
-        .batchBuffer = batchBuffer
+        .batchBuffer = {batchAllocation.host}
     };
 }
 
@@ -135,31 +139,14 @@ Allocation loadJpgFiles(BumpAllocator<Allocation> &allocations,
                         const std::vector<Head> &heads, const size_t headIdx) {
     const Head &head = heads[headIdx];
     auto [itemSize, batchBufferSize, batchAllocation, batchBuffer]
-            = getBatchAllocation(head, allocations, batchPaths.size());
-
-    const auto batchBufferOld = new uint8_t[batchPaths.size() * itemSize];
+            = getBatchAllocation(head, allocations, batchPaths.size(), 1);
 
     for (size_t j = 0; j < batchPaths.size(); j++) {
         ImageData imgData = readJpegFile(batchPaths[j][headIdx]);
-        resizeImage(imgData, batchBufferOld + j * itemSize,
+        resizeImage(imgData, batchBuffer.uint8 + j * itemSize,
                     IMAGE_WIDTH(head), IMAGE_HEIGHT(head));
     }
 
-    for (size_t b = 0; b < batchPaths.size(); b++) {
-        for (size_t y = 0; y < IMAGE_HEIGHT(head); y++) {
-            for (size_t j = 0; j < IMAGE_WIDTH(head); j++) {
-                for (size_t c = 0; c < 3; c++) {
-                    const size_t idx = b * itemSize
-                                       + y * IMAGE_WIDTH(head) * 3
-                                       + j * 3
-                                       + c;
-                    batchBuffer[idx] = static_cast<float>(batchBufferOld[idx]) / 255.0f;
-                }
-            }
-        }
-    }
-
-    delete[] batchBufferOld;
     return batchAllocation;
 }
 
@@ -168,7 +155,7 @@ Allocation loadNpyFiles(BumpAllocator<Allocation> &allocations,
                         const std::vector<Head> &heads, const size_t headIdx) {
     const Head &head = heads[headIdx];
     auto [itemSize, batchBufferSize, batchAllocation, batchBuffer]
-            = getBatchAllocation(head, allocations, batchPaths.size());
+            = getBatchAllocation(head, allocations, batchPaths.size(), 4);
 
     for (size_t j = 0; j < batchPaths.size(); j++) {
         // Load the NPY file from the path
@@ -202,7 +189,7 @@ Allocation loadNpyFiles(BumpAllocator<Allocation> &allocations,
         }
         // Copy the float data into the batch buffer
         const auto *npy_data = arr.data<float>();
-        std::memcpy(batchBuffer + j * itemSize, npy_data, itemSize * sizeof(float));
+        std::memcpy(batchBuffer.float32 + j * itemSize, npy_data, itemSize * sizeof(float));
     }
 
     return batchAllocation;

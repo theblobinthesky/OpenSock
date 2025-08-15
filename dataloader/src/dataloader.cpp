@@ -45,7 +45,7 @@ DataLoader::DataLoader(
     numberOfBatches = (batchedDataset.getDataset().getEntries().size() + batchSize - 1) / batchSize;
 
     for (const Head &head: batchedDataset.getDataset().getHeads()) {
-        size_t itemMemorySize = sizeof(float);
+        size_t itemMemorySize = head.getBytesPerItem();
         for (const int dim: head.getShape()) {
             itemMemorySize *= dim;
         }
@@ -174,6 +174,16 @@ py::dict DataLoader::getNextBatch() {
             shapeArr[s + 1] = shape[s];
         }
 
+        uint8_t itemCode;
+        switch (head.getItemFormat()) {
+            case ItemFormat::FLOAT: itemCode = kDLFloat;
+                break;
+            case ItemFormat::UINT: itemCode = kDLUInt;
+                break;
+            default:
+                throw std::runtime_error("Invalid item format.");
+        }
+
         const auto *dlMngTensor = new DLManagedTensor{
             .dl_tensor = {
                 .data = gpuAllocation,
@@ -183,8 +193,8 @@ py::dict DataLoader::getNextBatch() {
                 },
                 .ndim = ndim,
                 .dtype = {
-                    .code = kDLFloat, // TODO: kDLUint switch
-                    .bits = 32, // TODO: 8 switch
+                    .code = itemCode,
+                    .bits = static_cast<uint8_t>(8 * head.getBytesPerItem()),
                     .lanes = 1
                 },
                 .shape = shapeArr,

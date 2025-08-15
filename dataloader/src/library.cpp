@@ -25,28 +25,42 @@ PYBIND11_MODULE(_core, m) {
             .value("NPY", FileType::NPY)
             .export_values();
 
+    py::enum_<ItemFormat>(m, "ItemFormat")
+            .value("FLOAT", ItemFormat::FLOAT)
+            .value("UINT", ItemFormat::UINT)
+            .export_values();
+
     py::class_<Head>(m, "Head")
-            .def(py::init<const FileType, std::string, std::vector<int> >());
+            .def(py::init<const FileType, std::string, std::vector<int> >())
+            .def("getExt", &Head::getExt)
+            .def("getDictName", &Head::getDictName)
+            .def("getShape", &Head::getShape)
+            .def("getShapeSize", &Head::getShapeSize)
+            .def("getFilesType", &Head::getFilesType)
+            .def("getItemFormat", &Head::getItemFormat)
+            .def("getBytesPerItem", &Head::getBytesPerItem);
 
     py::class_<Dataset>(m, "Dataset")
             .def(py::init<std::string, std::vector<Head>,
                 std::vector<std::string>,
-                const pybind11::function&,
+                const pybind11::function &,
                 bool>())
 
             .def(py::init<std::string, std::vector<Head>,
                 std::vector<std::vector<std::string> >
-                >())
+            >())
 
             .def("splitTrainValidationTest", &Dataset::splitTrainValidationTest)
+            .def("getRootDir", &Dataset::getRootDir)
+            .def("getHeads", &Dataset::getHeads)
             .def("getEntries", &Dataset::getEntries);
 
     py::class_<BatchedDataset>(m, "BatchedDataset")
-            .def(py::init<const Dataset&, size_t>())
+            .def(py::init<const Dataset &, size_t>())
             .def("getNextBatch", &BatchedDataset::getNextBatch);
 
     py::class_<DataLoader>(m, "DataLoader")
-            .def(py::init<Dataset&, int, int, int>())
+            .def(py::init<Dataset &, int, int, int>())
             .def("getNextBatch", &DataLoader::getNextBatch)
             .def("__len__", &DataLoader::getNumberOfBatches);
     // TODO Comment(getNextBatch): Important convention is that memory of the last batch gets invalid when you call getNextBatch!

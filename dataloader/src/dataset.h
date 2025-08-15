@@ -12,6 +12,11 @@ enum class FileType {
     NPY
 };
 
+enum class ItemFormat {
+    UINT,
+    FLOAT
+};
+
 class Head {
 public:
     Head(FileType _filesType, std::string _dictName, std::vector<int> _shape);
@@ -25,6 +30,10 @@ public:
     [[nodiscard]] size_t getShapeSize() const;
 
     [[nodiscard]] FileType getFilesType() const;
+
+    [[nodiscard]] ItemFormat getItemFormat() const;
+
+    [[nodiscard]] int32_t getBytesPerItem() const;
 
 private:
     FileType filesType;
@@ -56,15 +65,13 @@ public:
 
     Dataset(const Dataset &other);
 
-    std::tuple<Dataset, Dataset, Dataset> splitTrainValidationTest(float trainPercentage, float validPercentage); // *
+    std::tuple<Dataset, Dataset, Dataset> splitTrainValidationTest(float trainPercentage, float validPercentage);
 
-    [[nodiscard]] const std::string &getRootDir() const; // *
+    [[nodiscard]] const std::string &getRootDir() const;
 
-    [[nodiscard]] const std::vector<Head> &getHeads() const; // *
+    [[nodiscard]] const std::vector<Head> &getHeads() const;
 
-    [[nodiscard]] const std::vector<std::vector<std::string> > &getEntries() const; // *
-
-    [[nodiscard]] int32_t getOffset() const; // *
+    [[nodiscard]] const std::vector<std::vector<std::string> > &getEntries() const;
 
 private:
     void init();
@@ -73,7 +80,6 @@ private:
     std::vector<Head> heads;
     std::vector<std::string> subDirs;
     std::vector<std::vector<std::string> > entries;
-    std::atomic_int32_t offset;
 };
 
 class BatchedDataset {

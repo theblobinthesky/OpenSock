@@ -64,7 +64,7 @@ const std::vector<int> &Head::getShape() const {
     return shape;
 }
 
-[[nodiscard]] size_t Head::getShapeSize() const {
+size_t Head::getShapeSize() const {
     size_t totalSize = 1;
     for (const int dim: shape) {
         totalSize *= dim;
@@ -73,8 +73,32 @@ const std::vector<int> &Head::getShape() const {
     return totalSize;
 }
 
-[[nodiscard]] FileType Head::getFilesType() const {
+FileType Head::getFilesType() const {
     return filesType;
+}
+
+ItemFormat Head::getItemFormat() const {
+    switch (filesType) {
+        case FileType::JPG:
+            return ItemFormat::UINT; // uint8
+        case FileType::EXR:
+        case FileType::NPY:
+            return ItemFormat::FLOAT; // float32
+        default:
+            throw std::runtime_error("");
+    }
+}
+
+int32_t Head::getBytesPerItem() const {
+    switch (filesType) {
+        case FileType::JPG:
+            return 1; // uint8
+        case FileType::EXR:
+        case FileType::NPY:
+            return 4; // float32
+        default:
+            throw std::runtime_error("");
+    }
 }
 
 std::string replaceAll(std::string str, const std::string &from,
@@ -100,7 +124,7 @@ Dataset::Dataset(std::string _rootDir, std::vector<Head> _heads,
                  std::vector<std::string> _subDirs,
                  const pybind11::function &createDatasetFunction,
                  const bool isVirtualDataset
-) : rootDir(std::move(_rootDir)), heads(std::move(_heads)), subDirs(std::move(_subDirs)), entries({}), offset(0) {
+) : rootDir(std::move(_rootDir)), heads(std::move(_heads)), subDirs(std::move(_subDirs)), entries({}) {
     initRootDir(rootDir);
 
     if (subDirs.empty()) {
@@ -161,7 +185,7 @@ Dataset::Dataset(std::string _rootDir, std::vector<Head> _heads,
 
 Dataset::Dataset(std::string _rootDir, std::vector<Head> _heads,
                  std::vector<std::vector<std::string> > _entries
-) : rootDir(std::move(_rootDir)), heads(std::move(_heads)), subDirs({}), entries(std::move(_entries)), offset(0) {
+) : rootDir(std::move(_rootDir)), heads(std::move(_heads)), subDirs({}), entries(std::move(_entries)) {
     initRootDir(rootDir);
 
     if (entries.empty()) {
@@ -181,8 +205,7 @@ Dataset::Dataset(std::string _rootDir, std::vector<Head> _heads,
 
 Dataset::Dataset(const Dataset &other)
     : rootDir(other.rootDir), heads(other.heads),
-      subDirs(other.subDirs), entries(other.entries),
-      offset(other.offset.load()) {
+      subDirs(other.subDirs), entries(other.entries) {
 }
 
 void Dataset::init() {
@@ -242,10 +265,6 @@ const std::vector<Head> &Dataset::getHeads() const {
 
 const std::vector<std::vector<std::string> > &Dataset::getEntries() const {
     return entries;
-}
-
-int32_t Dataset::getOffset() const {
-    return offset.load();
 }
 
 BatchedDataset::BatchedDataset(const Dataset &dataset, const size_t batchSize) : dataset(dataset),
