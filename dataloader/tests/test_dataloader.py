@@ -5,9 +5,18 @@ import io
 import native_dataloader as m
 import numpy as np
 from PIL import Image
+os.environ["OPENCV_IO_ENABLE_OPENEXR"] = "1"
+import cv2 # for exr
 
 JPG_DATASET_URL = "https://storage.googleapis.com/download.tensorflow.org/example_images/flower_photos.tgz"
 JPG_DATASET_DIR = os.path.join("temp", "jpg_dataset")
+
+PNG_DATASET_URL = "https://upload.wikimedia.org/wikipedia/commons/thumb/1/17/PNG-Gradient_hex.png/250px-PNG-Gradient_hex.png"
+PNG_DATASET_FILE = os.path.join("temp", "img", "file.png")
+
+EXR_DATASET_URL = "https://github.com/ampas/ACES_ODT_SampleFrames/raw/refs/heads/main/ACES_OT_VWG_SampleFrames/ACES_OT_VWG_SampleFrames.0001.exr"
+EXR_DATASET_FILE = os.path.join("temp", "img", "file.exr")
+
 HEIGHT, WIDTH = 300, 300
 NUM_THREADS, PREFETCH_SIZE = 16, 16
 NUM_REPEATS = 16
@@ -21,6 +30,16 @@ def ensure_jpg_dataset():
             tar.extractall(path=JPG_DATASET_DIR, filter=lambda tarinfo, _: tarinfo)
         
     return "temp/jpg_dataset/flower_photos", "daisy"
+
+def download_file(url: str, path: str):
+    os.makedirs("temp/img", exist_ok=True)
+    if not os.path.exists(path):
+        response = requests.get(url)
+        response.raise_for_status()
+        with open(path, "wb") as file:
+            bytes = io.BytesIO(response.content).read()
+            file.write(bytes)
+
 
 def init_ds_fn():
     pass
@@ -236,34 +255,44 @@ def test_one_dataloader_trice():
 #     _, dl, _ = get_dataloader(batch_size=16)
 #     benchmark(performance_benchmark, dl)
 
-# def test_correctness_npy(tmp_path):
-#     subdir = tmp_path / "subdir"
-#     subdir.mkdir()
+def test_correctness_exr():
+    download_file(EXR_DATASET_URL, EXR_DATASET_FILE)
+    ds = m.Dataset.from_subdirs("temp", [m.Head(m.FileType.EXR, "img", (1080, 1920, 3))], ["img"], init_ds_fn)
+    dl = m.DataLoader(ds, 1, NUM_THREADS, PREFETCH_SIZE)
+    img = dl.get_next_batch()['img'][0]
 
-#     for i in range(16):
-#         testFile = tmp_path / "subdir" / f"file{i}"
-#         np.save(testFile, np.ones((1, 3, 3, 4), dtype=np.float32))
+    gt_img = cv2.imread(EXR_DATASET_FILE, cv2.IMREAD_UNCHANGED).astype(np.float32)
+    gt_img = cv2.cvtColor(gt_img, cv2.COLOR_BGR2RGB)
 
-#     ds = m.Dataset.from_subdirs(
-#         str(tmp_path), 
-#         [m.Head(m.FileType.NPY, "np", (3, 3, 4))],
-#         ["subdir"],
-#         init_ds_fn
-#     )
+    assert np.allclose(img, gt_img)
 
-#     dl = m.DataLoader(ds, 16, NUM_THREADS, PREFETCH_SIZE)
+def test_correctness_png():
+    download_file(PNG_DATASET_URL, PNG_DATASET_FILE)
+    ds = m.Dataset.from_subdirs("temp", [m.Head(m.FileType.PNG, "img", (191, 250, 3))], ["img"], init_ds_fn)
+    dl = m.DataLoader(ds, 1, NUM_THREADS, PREFETCH_SIZE)
+    img = dl.get_next_batch()['img'][0]
 
-#     batch = dl.get_next_batch()['np']
-#     assert np.all(np.ones((16, 3, 3, 4)) == batch)
+    pil_img = np.array(Image.open(PNG_DATASET_FILE).convert("RGB"), np.float32)
+    pil_img = pil_img / 255.0
 
-# def test_two_dataloaders_simultaneously():
-#     bs = 16
-#     _, dl, _ = get_dataloader(batch_size=bs)
-#     _, dl2, _ = get_dataloader(batch_size=bs)
+    assert np.all((img - pil_img) < 1 / 255.0)
 
-#     b1 = dl.get_next_batch()
-#     b2 = dl2.get_next_batch()
-#     b3 = dl.get_next_batch()
+def test_correctness_npy(tmp_path):
+    subdir = tmp_path / "subdir"
+    subdir.mkdir()
 
-#     assert jnp.all(b1['img'] == b2['img']).item()
-#     assert jnp.all(b1['img'] == b3['img']).item()
+    for i in range(16):
+        testFile = tmp_path / "subdir" / f"file{i}"
+        np.save(testFile, np.ones((1, 3, 3, 4), dtype=np.float32))
+
+    ds = m.Dataset.from_subdirs(
+        str(tmp_path), 
+        [m.Head(m.FileType.NPY, "np", (3, 3, 4))],
+        ["subdir"],
+        init_ds_fn
+    )
+
+    dl = m.DataLoader(ds, 16, NUM_THREADS, PREFETCH_SIZE)
+
+    batch = dl.get_next_batch()['np']
+    assert np.all(np.ones((16, 3, 3, 4)) == batch)

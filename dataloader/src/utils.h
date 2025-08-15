@@ -167,6 +167,8 @@ public:
 
     void start();
 
+    void resize(size_t newThreadCount);
+
     ThreadPool &operator=(ThreadPool &&pool) noexcept = delete;
 
     ThreadPool(const ThreadPool &pool) = delete;
@@ -212,6 +214,10 @@ private:
 
 inline bool existsEnvVar(const std::string &name) {
     return std::getenv(name.c_str()) != null;
+}
+
+inline uint64_t alignUp(const uint64_t offset, const uint64_t alignTo) {
+    return (offset + alignTo - 1) & ~(alignTo - 1);
 }
 
 #define INVALID_DS_ENV_VAR "INVALIDATE_DATASET"

@@ -14,8 +14,21 @@ find_package(pybind11 CONFIG REQUIRED)
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(URING REQUIRED liburing)
 find_package(JPEG REQUIRED)
+find_package(PNG REQUIRED)
 find_package(CUDAToolkit REQUIRED)
 find_package(dlpack CONFIG REQUIRED)
+
+
+find_package(Imath 3.0 REQUIRED CONFIG) # for OpenEXR
+find_package(OpenEXR 3.0 REQUIRED CONFIG)
+
+if(DEFINED OpenEXR_VERSION AND OpenEXR_VERSION VERSION_LESS 3.0)
+    message(FATAL_ERROR "Found OpenEXR ${OpenEXR_VERSION}, but >= 3.0 is required.")
+endif()
+if(DEFINED Imath_VERSION AND Imath_VERSION VERSION_LESS 3.0)
+    message(FATAL_ERROR "Found Imath ${Imath_VERSION}, but >= 3.0 is required.")
+endif()
+
 
 message(CMAKE_CXX_STANDARD="${CMAKE_CXX_STANDARD}")
 message(URING_LIBRARIES="${URING_LIBRARIES}")
@@ -38,6 +51,8 @@ target_include_directories(_core PRIVATE ${CUDAToolkit_INCLUDE_DIRS})
 target_link_libraries(_core PRIVATE pybind11::headers)
 target_link_libraries(_core PRIVATE ${URING_LIBRARIES})
 target_link_libraries(_core PRIVATE JPEG::JPEG)
+target_link_libraries(_core PRIVATE PNG::PNG)
+target_link_libraries(_core PRIVATE OpenEXR::OpenEXR Imath::Imath)
 target_link_libraries(_core PRIVATE CUDA::cudart)
 target_link_libraries(_core PRIVATE dlpack::dlpack)
 target_compile_options(_core PRIVATE -fvisibility=hidden -Wall -Wextra -Wpedantic -Werror -Wno-unused-parameter)

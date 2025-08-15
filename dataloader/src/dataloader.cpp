@@ -52,6 +52,7 @@ DataLoader::DataLoader(
 
         outputBatchMemorySize += batchSize * itemMemorySize;
     }
+    outputBatchMemorySize = alignUp(outputBatchMemorySize, 16);
 
     resourceClient.acquire(prefetchSize, outputBatchMemorySize);
 

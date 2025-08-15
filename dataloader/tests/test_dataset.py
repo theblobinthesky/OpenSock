@@ -32,8 +32,8 @@ def get_batched_dataset(ds: Dataset):
 
 
 def test_get_eroneous_dataset(tmp_path):
-    ds = get_dataset(tmp_path, eroneous=True)
-    assert len(ds.entries) == 0
+    with t.raises(RuntimeError):
+        get_dataset(tmp_path, eroneous=True)
 
 def test_get_dataset(tmp_path):
     ds = get_dataset(tmp_path, eroneous=False)

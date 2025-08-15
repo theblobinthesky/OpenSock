@@ -6,10 +6,17 @@
 #include <format>
 #include <pybind11/stl.h>
 
+enum class DirectoryType {
+    UNPACKED_IN_FILES,
+    PACKED_INTO_SHARDS
+};
+
 enum class FileType {
     JPG,
+    PNG,
     EXR,
-    NPY
+    NPY,
+    COMPRESSED
 };
 
 enum class ItemFormat {
@@ -36,6 +43,7 @@ public:
     [[nodiscard]] int32_t getBytesPerItem() const;
 
 private:
+    DirectoryType directoryType;
     FileType filesType;
     std::string dictName;
     std::vector<int> shape;
@@ -47,7 +55,7 @@ private:
 struct DatasetBatch {
     int32_t startingOffset;
     uint32_t genIdx;
-    std::vector<std::vector<std::string>> batchPaths;
+    std::vector<std::vector<std::string> > batchPaths;
 };
 
 // The dataset is threadsafe by-default and tracks in-flight batches.
@@ -63,7 +71,7 @@ public:
             std::vector<std::vector<std::string> > _entries
     );
 
-    Dataset(const Dataset &other);
+    Dataset(const Dataset &other) = default;
 
     std::tuple<Dataset, Dataset, Dataset> splitTrainValidationTest(float trainPercentage, float validPercentage);
 
@@ -84,13 +92,13 @@ private:
 
 class BatchedDataset {
 public:
-    BatchedDataset(const Dataset& dataset, size_t batchSize);
+    BatchedDataset(const Dataset &dataset, size_t batchSize);
 
-    BatchedDataset(const Dataset&& dataset, size_t batchSize);
+    BatchedDataset(const Dataset &&dataset, size_t batchSize);
 
     [[nodiscard]] DatasetBatch getNextInFlightBatch();
 
-    [[nodiscard]] std::vector<std::vector<std::string>> getNextBatch();
+    [[nodiscard]] std::vector<std::vector<std::string> > getNextBatch();
 
     void markBatchWaiting(int32_t batch);
 

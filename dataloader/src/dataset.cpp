@@ -14,7 +14,8 @@ Head::Head(
     const FileType _filesType,
     std::string _dictName,
     std::vector<int> _shape
-) : filesType(_filesType),
+) : directoryType(DirectoryType::UNPACKED_IN_FILES),
+    filesType(_filesType),
     dictName(std::move(_dictName)), shape(std::move(_shape)) {
     for (const int dim: shape) {
         if (dim <= 0) {
@@ -29,7 +30,8 @@ Head::Head(
     }
 
     switch (filesType) {
-        case FileType::JPG: {
+        case FileType::JPG:
+        case FileType::PNG: {
             if (shape.size() != 3) {
                 throw std::invalid_argument(
                     "Jpeg images have shape (h, w, 3).");
@@ -51,7 +53,9 @@ std::string Head::getExt() const {
     switch (filesType) {
         case FileType::EXR: return "exr";
         case FileType::JPG: return "jpg";
+        case FileType::PNG: return "png";
         case FileType::NPY: return "npy";
+        case FileType::COMPRESSED: return "compressed";
         default: return "";
     }
 }
@@ -80,24 +84,28 @@ FileType Head::getFilesType() const {
 ItemFormat Head::getItemFormat() const {
     switch (filesType) {
         case FileType::JPG:
+        case FileType::PNG:
             return ItemFormat::UINT; // uint8
         case FileType::EXR:
         case FileType::NPY:
+        case FileType::COMPRESSED:
             return ItemFormat::FLOAT; // float32
         default:
-            throw std::runtime_error("");
+            throw std::runtime_error("Item format not available for file type.");
     }
 }
 
 int32_t Head::getBytesPerItem() const {
     switch (filesType) {
         case FileType::JPG:
+        case FileType::PNG:
             return 1; // uint8
         case FileType::EXR:
         case FileType::NPY:
+        case FileType::COMPRESSED:
             return 4; // float32
         default:
-            throw std::runtime_error("");
+            throw std::runtime_error("Bytes per item not available for file type.");
     }
 }
 
@@ -203,12 +211,11 @@ Dataset::Dataset(std::string _rootDir, std::vector<Head> _heads,
     init();
 }
 
-Dataset::Dataset(const Dataset &other)
-    : rootDir(other.rootDir), heads(other.heads),
-      subDirs(other.subDirs), entries(other.entries) {
-}
-
 void Dataset::init() {
+    if (entries.empty()) {
+        throw std::runtime_error("Cannot instantiate an empty dataset.");
+    }
+
     // Remove root directory, if necessary.
     for (auto &item: entries) {
         for (auto &subPath: item) {

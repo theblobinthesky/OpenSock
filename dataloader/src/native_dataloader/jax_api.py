@@ -5,8 +5,10 @@ import jax, jax.numpy as jnp
 
 class FileType(Enum):
     JPG = m.FileType.JPG
+    PNG = m.FileType.PNG
     EXR = m.FileType.EXR
     NPY = m.FileType.NPY
+    COMPRESSED = m.FileType.COMPRESSED
 
 class ItemFormat(Enum):
     FLOAT = m.ItemFormat.FLOAT
@@ -44,14 +46,14 @@ class Head:
     def file_type(self) -> FileType:
         """Return the file type as a FileType enum."""
         native_ft = self._native.getFilesType()
-        if native_ft == m.FileType.JPG:
-            return FileType.JPG
-        elif native_ft == m.FileType.EXR:
-            return FileType.EXR
-        elif native_ft == m.FileType.NPY:
-            return FileType.NPY
-        else:
-            raise ValueError("Unknown file type")
+        mapping = {
+            m.FileType.JPG: FileType.JPG,
+            m.FileType.PNG: FileType.PNG,
+            m.FileType.EXR: FileType.EXR,
+            m.FileType.NPY: FileType.NPY,
+            m.FileType.COMPRESSED: FileType.COMPRESSED,
+        }
+        return mapping[native_ft]
 
     def item_format(self) -> ItemFormat:
         """Return the item format as a ItemFormat enum."""
@@ -188,14 +190,15 @@ class DataLoader:
         """Return next batch as a dict of jax arrays."""
 
         def from_dlpack(x):
-            return jax.dlpack.from_dlpack(DLManagedTensorWrapper(x))
+            return jax.dlpack.from_dlpack(DLManagedTensorWrapper(x), copy=False)
 
         batch = self._native.getNextBatch()
         batch = {key: from_dlpack(x) for key, x in batch.items()}
 
         # Cast JPG entries to float32 and normalize
         for key in list(batch.keys()):
-            if self.head_dict[key].file_type() == FileType.JPG:
+            ft = self.head_dict[key].file_type()
+            if ft == FileType.JPG or ft == FileType.PNG:
                 batch[key] = batch[key].astype(jnp.float32) / 255.0
 
         return self.dataset.post_process_fn(batch)

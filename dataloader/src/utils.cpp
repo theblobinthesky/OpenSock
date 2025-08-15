@@ -40,6 +40,14 @@ void ThreadPool::start() {
     }
 }
 
+void ThreadPool::resize(const size_t newThreadCount) {
+    if (newThreadCount < threadCount) {
+        // TODO: Shutdown logic.
+    } else if (newThreadCount > threadCount) {
+        threads.emplace_back(&ThreadPool::extendedThreadMain, this);
+    }
+}
+
 ThreadPool::~ThreadPool() noexcept {
     for (auto &thread: threads) {
         if (thread.joinable()) thread.join();

@@ -20,9 +20,11 @@ PYBIND11_MODULE(_core, m) {
     )pbdoc";
 
     py::enum_<FileType>(m, "FileType")
-            .value("EXR", FileType::EXR)
             .value("JPG", FileType::JPG)
+            .value("PNG", FileType::PNG)
+            .value("EXR", FileType::EXR)
             .value("NPY", FileType::NPY)
+            .value("COMPRESSED", FileType::COMPRESSED)
             .export_values();
 
     py::enum_<ItemFormat>(m, "ItemFormat")
