@@ -11,27 +11,24 @@ project(
 
 find_package(Python REQUIRED COMPONENTS Interpreter Development.Module)
 find_package(pybind11 CONFIG REQUIRED)
-find_package(PkgConfig REQUIRED)
-pkg_check_modules(URING REQUIRED liburing)
 find_package(JPEG REQUIRED)
 find_package(PNG REQUIRED)
 find_package(CUDAToolkit REQUIRED)
 find_package(dlpack CONFIG REQUIRED)
-
-
 find_package(Imath 3.0 REQUIRED CONFIG) # for OpenEXR
 find_package(OpenEXR 3.0 REQUIRED CONFIG)
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(ZSTD REQUIRED libzstd)
 
-if(DEFINED OpenEXR_VERSION AND OpenEXR_VERSION VERSION_LESS 3.0)
+if (DEFINED OpenEXR_VERSION AND OpenEXR_VERSION VERSION_LESS 3.0)
     message(FATAL_ERROR "Found OpenEXR ${OpenEXR_VERSION}, but >= 3.0 is required.")
-endif()
-if(DEFINED Imath_VERSION AND Imath_VERSION VERSION_LESS 3.0)
+endif ()
+if (DEFINED Imath_VERSION AND Imath_VERSION VERSION_LESS 3.0)
     message(FATAL_ERROR "Found Imath ${Imath_VERSION}, but >= 3.0 is required.")
-endif()
+endif ()
 
 
 message(CMAKE_CXX_STANDARD="${CMAKE_CXX_STANDARD}")
-message(URING_LIBRARIES="${URING_LIBRARIES}")
 
 python_add_library(_core MODULE
         src/async_io_linux.cpp
@@ -43,18 +40,20 @@ python_add_library(_core MODULE
         src/utils.cpp
         src/library.cpp
         src/cnpy.cpp
+        src/compression.cpp
         WITH_SOABI
 )
 
 target_include_directories(_core PRIVATE src/)
 target_include_directories(_core PRIVATE ${CUDAToolkit_INCLUDE_DIRS})
+target_include_directories(_core PRIVATE ${ZSTD_INCLUDE_DIRS})
 target_link_libraries(_core PRIVATE pybind11::headers)
-target_link_libraries(_core PRIVATE ${URING_LIBRARIES})
 target_link_libraries(_core PRIVATE JPEG::JPEG)
 target_link_libraries(_core PRIVATE PNG::PNG)
 target_link_libraries(_core PRIVATE OpenEXR::OpenEXR Imath::Imath)
 target_link_libraries(_core PRIVATE CUDA::cudart)
 target_link_libraries(_core PRIVATE dlpack::dlpack)
+target_link_libraries(_core PRIVATE ${ZSTD_LIBRARIES})
 target_compile_options(_core PRIVATE -fvisibility=hidden -Wall -Wextra -Wpedantic -Werror -Wno-unused-parameter)
 
 # Pass parameters to the program:

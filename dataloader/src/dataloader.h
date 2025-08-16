@@ -56,7 +56,6 @@ private:
     std::atomic_bool shutdown;
 
 public:
-
     void threadMain();
 };
 
