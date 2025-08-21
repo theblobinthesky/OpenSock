@@ -1,5 +1,6 @@
 #include "dataset.h"
 #include "dataloader.h"
+#include "compression.h"
 #include <pybind11/numpy.h>
 
 #define STRINGIFY(x) #x
@@ -61,11 +62,57 @@ PYBIND11_MODULE(_core, m) {
             .def(py::init<const Dataset &, size_t>())
             .def("getNextBatch", &BatchedDataset::getNextBatch);
 
+    // TODO Comment(getNextBatch): Important convention is that memory of the last batch gets invalid when you call getNextBatch!
     py::class_<DataLoader>(m, "DataLoader")
             .def(py::init<Dataset &, int, int, int>())
             .def("getNextBatch", &DataLoader::getNextBatch)
             .def("__len__", &DataLoader::getNumberOfBatches);
-    // TODO Comment(getNextBatch): Important convention is that memory of the last batch gets invalid when you call getNextBatch!
+
+    py::enum_<Codec>(m, "Codec")
+            .value("ZSTD_LEVEL_3", Codec::ZSTD_LEVEL_3)
+            .value("ZSTD_LEVEL_7", Codec::ZSTD_LEVEL_7)
+            .value("ZSTD_LEVEL_22", Codec::ZSTD_LEVEL_22)
+            .export_values();
+
+    py::class_<CompressorOptions>(m, "CompressorOptions")
+            .def(py::init<const size_t,
+                std::string,
+                std::string,
+                std::vector<int>,
+                const bool,
+                std::vector<std::vector<int> >,
+                const bool,
+                const std::vector<Codec> &,
+                const float>());
+
+    py::class_<Compressor>(m, "Compressor")
+            .def(py::init<CompressorOptions>())
+            .def("start", &Compressor::start);
+
+    py::class_<Decompressor>(m, "Decompressor")
+            .def(py::init<std::vector<int> >())
+            .def("decompress", [](const Decompressor &self, const std::string &path) -> py::array {
+                // ReSharper disable once CppDFAMemoryLeak
+                const auto data = new std::vector<uint8_t>();
+                std::vector<size_t> shape;
+                int bytesPerItem;
+                self.decompress(path, *data, shape, bytesPerItem);
+
+                std::string dtypeString;
+                if (bytesPerItem == 2) {
+                    dtypeString = "float16";
+                } else if (bytesPerItem == 4) {
+                    dtypeString = "float32";
+                } else {
+                    throw std::runtime_error("Encountered unsupported dtype.");
+                }
+                const py::dtype dtype(dtypeString);
+
+                const py::capsule capsule(data, [](void *p) {
+                    delete static_cast<std::vector<uint8_t> *>(p);
+                });
+                return {dtype, shape, data->data(), capsule};
+            });
 
 #ifdef VERSION_INFO
     m.attr("__version__") = MACRO_STRINGIFY(VERSION_INFO);

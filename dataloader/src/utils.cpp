@@ -49,9 +49,11 @@ void ThreadPool::resize(const size_t newThreadCount) {
 }
 
 ThreadPool::~ThreadPool() noexcept {
+    debugLog("~ThreadPool() begin\n");
     for (auto &thread: threads) {
         if (thread.joinable()) thread.join();
     }
+    debugLog("~ThreadPool() end\n");
 }
 
 void ThreadPool::extendedThreadMain() {

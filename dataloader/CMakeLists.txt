@@ -1,12 +1,12 @@
 cmake_minimum_required(VERSION 3.30)
 set(CMAKE_CXX_STANDARD 20)
-set(CMAKE_CXX_FLAGS_DEBUG "-g3 -O0 -fno-omit-frame-pointer")
-set(CMAKE_CXX_FLAGS_RELEASE "-O3 -DNDEBUG -ffast-math -mavx2")
+set(CMAKE_CXX_FLAGS_DEBUG "-g3 -O0 -fno-omit-frame-pointer -mavx2 -mf16c -Wno-unused-variable")
+set(CMAKE_CXX_FLAGS_RELEASE "-O3 -DNDEBUG -ffast-math -mavx2 -mf16c")
 
 project(
         ${SKBUILD_PROJECT_NAME}
         VERSION ${SKBUILD_PROJECT_VERSION}
-        LANGUAGES CXX
+        LANGUAGES C CXX
 )
 
 find_package(Python REQUIRED COMPONENTS Interpreter Development.Module)
@@ -27,11 +27,33 @@ if (DEFINED Imath_VERSION AND Imath_VERSION VERSION_LESS 3.0)
     message(FATAL_ERROR "Found Imath ${Imath_VERSION}, but >= 3.0 is required.")
 endif ()
 
-
 message(CMAKE_CXX_STANDARD="${CMAKE_CXX_STANDARD}")
 
+
+# Build the bitshuffle library.
+set(BITSHUFFLE_CORE ${CMAKE_SOURCE_DIR}/submodules/bitshuffle)
+add_library(bitshuffle_core STATIC
+        ${BITSHUFFLE_CORE}/src/bitshuffle_core.c
+        ${BITSHUFFLE_CORE}/src/iochain.c
+)
+target_include_directories(bitshuffle_core PUBLIC ${BITSHUFFLE_CORE}/src)
+target_compile_options(bitshuffle_core PRIVATE -O3 -Wall -Wextra -Wno-unused-parameter -mavx2)
+set_target_properties(bitshuffle_core PROPERTIES
+        C_STANDARD 99
+        C_STANDARD_REQUIRED YES
+        POSITION_INDEPENDENT_CODE ON
+        C_VISIBILITY_PRESET hidden
+)
+
+# Build the cnpy library.
+set(CNPY_CORE ${CMAKE_SOURCE_DIR}/submodules/cnpy)
+add_library(cnpy_core STATIC ${CNPY_CORE}/cnpy.cpp)
+target_include_directories(cnpy_core PUBLIC ${CNPY_CORE})
+target_compile_options(cnpy_core PRIVATE -O3 -Wall -Wextra -Wno-unused-parameter -Wno-unused-but-set-variable -mavx2)
+set_target_properties(cnpy_core PROPERTIES POSITION_INDEPENDENT_CODE ON)
+
+# Build the python library.
 python_add_library(_core MODULE
-        src/async_io_linux.cpp
         src/dataloader.cpp
         src/dataset.cpp
         src/io.cpp
@@ -39,7 +61,6 @@ python_add_library(_core MODULE
         src/resource.cpp
         src/utils.cpp
         src/library.cpp
-        src/cnpy.cpp
         src/compression.cpp
         WITH_SOABI
 )
@@ -47,6 +68,7 @@ python_add_library(_core MODULE
 target_include_directories(_core PRIVATE src/)
 target_include_directories(_core PRIVATE ${CUDAToolkit_INCLUDE_DIRS})
 target_include_directories(_core PRIVATE ${ZSTD_INCLUDE_DIRS})
+target_include_directories(_core PUBLIC ${CMAKE_SOURCE_DIR}/submodules/stb)
 target_link_libraries(_core PRIVATE pybind11::headers)
 target_link_libraries(_core PRIVATE JPEG::JPEG)
 target_link_libraries(_core PRIVATE PNG::PNG)
@@ -54,6 +76,7 @@ target_link_libraries(_core PRIVATE OpenEXR::OpenEXR Imath::Imath)
 target_link_libraries(_core PRIVATE CUDA::cudart)
 target_link_libraries(_core PRIVATE dlpack::dlpack)
 target_link_libraries(_core PRIVATE ${ZSTD_LIBRARIES})
+target_link_libraries(_core PRIVATE bitshuffle_core cnpy_core)
 target_compile_options(_core PRIVATE -fvisibility=hidden -Wall -Wextra -Wpedantic -Werror -Wno-unused-parameter)
 
 # Pass parameters to the program:

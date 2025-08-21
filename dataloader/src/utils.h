@@ -222,5 +222,8 @@ inline uint64_t alignUp(const uint64_t offset, const uint64_t alignTo) {
 
 #define INVALID_DS_ENV_VAR "INVALIDATE_DATASET"
 
+#if !defined(__AVX2__)
+#error This project requires avx2 support.
+#endif
 
 #endif

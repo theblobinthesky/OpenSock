@@ -1,5 +1,5 @@
 from enum import Enum
-from typing import Callable, List, Optional, Tuple
+from typing import Callable, List, Tuple
 from . import _core as m
 import jax, jax.numpy as jnp
 
@@ -202,3 +202,66 @@ class DataLoader:
                 batch[key] = batch[key].astype(jnp.float32) / 255.0
 
         return self.dataset.post_process_fn(batch)
+
+
+class Codec(Enum):
+    ZSTD_LEVEL_3 = m.Codec.ZSTD_LEVEL_3
+    ZSTD_LEVEL_7 = m.Codec.ZSTD_LEVEL_7
+    ZSTD_LEVEL_22 = m.Codec.ZSTD_LEVEL_22
+
+class CompressorOptions:
+    def __init__(self,
+                 num_threads: int,
+                 input_directory: str,
+                 output_directory: str,
+                 shape: List[int],
+                 cast_to_fp16: bool,
+                 permutations: List[List[int]],
+                 with_bitshuffle: bool,
+                 allowed_codecs: List[Codec],
+                 tolerance_for_worse_codec: float):
+        """
+        Options for configuring the Compressor.
+
+        Args:
+            num_threads: Number of threads to use.
+            input_directory: Directory containing input data.
+            output_directory: Directory to write compressed output.
+            shape: Shape of the data to be compressed.
+            cast_to_fp16: Whether to cast data to FP16.
+            permutations: List of permutations to apply.
+            with_bitshuffle: Enable bitshuffle filter.
+            allowed_codecs: List of allowed compression codecs.
+            tolerance_for_worse_codec: Error tolerance for codec fallback.
+        """
+        self._native = m.CompressorOptions(
+            num_threads,
+            input_directory,
+            output_directory,
+            shape,
+            cast_to_fp16,
+            permutations,
+            with_bitshuffle,
+            [c.value for c in allowed_codecs],
+            tolerance_for_worse_codec
+        )
+
+
+class Compressor:
+    def __init__(self, options: CompressorOptions):
+        """Wrapper around the native Compressor."""
+        self._native = m.Compressor(options._native)
+
+    def start(self):
+        """Begin the compression process."""
+        return self._native.start()
+
+import numpy as np
+# TODO: Use jax??? Idk. Maybe not, since this is just for testing.
+class Decompressor:
+    def __init__(self, shape: np.ndarray):
+        """Wrapper around the native Decompressor."""
+        self._native = m.Decompressor(shape)
+
+    def decompress(self, path: str) -> np.ndarray:
+        return self._native.decompress(path)
