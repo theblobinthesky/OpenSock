@@ -52,6 +52,18 @@ target_include_directories(cnpy_core PUBLIC ${CNPY_CORE})
 target_compile_options(cnpy_core PRIVATE -O3 -Wall -Wextra -Wno-unused-parameter -Wno-unused-but-set-variable -mavx2)
 set_target_properties(cnpy_core PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
+# Build the logging library.
+set(SPDLOG_SUBMODULE_DIR "${CMAKE_SOURCE_DIR}/submodules/spdlog")
+set(SPDLOG_BUILD_EXAMPLE OFF CACHE BOOL "" FORCE)
+set(SPDLOG_BUILD_TESTS   OFF CACHE BOOL "" FORCE)
+set(SPDLOG_BUILD_BENCH   OFF CACHE BOOL "" FORCE)
+set(SPDLOG_INSTALL       OFF CACHE BOOL "" FORCE)
+set(SPDLOG_FMT_EXTERNAL OFF CACHE BOOL "" FORCE)
+set(SPDLOG_BUILD_SHARED OFF CACHE BOOL "" FORCE)
+set(SPDLOG_BUILD_PIC    ON  CACHE BOOL "" FORCE)
+add_subdirectory("${SPDLOG_SUBMODULE_DIR}" EXCLUDE_FROM_ALL) # EXCLUDE_FROM_ALL means it doesn't compile unless the lib is linked into the program.
+
+
 # Build the python library.
 python_add_library(_core MODULE
         src/dataloader.cpp
@@ -77,11 +89,18 @@ target_link_libraries(_core PRIVATE CUDA::cudart)
 target_link_libraries(_core PRIVATE dlpack::dlpack)
 target_link_libraries(_core PRIVATE ${ZSTD_LIBRARIES})
 target_link_libraries(_core PRIVATE bitshuffle_core cnpy_core)
+target_link_libraries(_core PRIVATE spdlog::spdlog)
 target_compile_options(_core PRIVATE -fvisibility=hidden -Wall -Wextra -Wpedantic -Werror -Wno-unused-parameter)
 
 # Pass parameters to the program:
 target_compile_definitions(_core PRIVATE VERSION_INFO=${PROJECT_VERSION})
 target_compile_definitions(_core PRIVATE PLATFORM_LINUX)
 target_compile_definitions(_core PRIVATE $<$<CONFIG:Debug>: ENABLE_DEBUG_PRINT=1>)
+
+# Set logging level based on build type.
+target_compile_definitions(_core PRIVATE
+        $<$<CONFIG:Debug>: SPDLOG_ACTIVE_LEVEL=SPDLOG_LEVEL_DEBUG>
+        $<$<CONFIG:Release>: SPDLOG_ACTIVE_LEVEL=SPDLOG_LEVEL_OFF>
+)
 
 install(TARGETS _core DESTINATION native_dataloader)

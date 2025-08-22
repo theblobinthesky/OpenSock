@@ -7,3 +7,6 @@
 [submodule "dataloader/submodules/stb"]
 	path = dataloader/submodules/stb
 	url = https://github.com/nothings/stb
+[submodule "dataloader/submodules/spdlog"]
+	path = dataloader/submodules/spdlog
+	url = https://github.com/gabime/spdlog.git
