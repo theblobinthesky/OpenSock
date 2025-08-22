@@ -107,12 +107,12 @@ struct CompressionStatistics {
 };
 
 struct CompressionItem {
-    std::string path;
+    std::string fileName;
 };
 
 class Compressor {
 public:
-    explicit Compressor(const CompressorOptions &options);
+    explicit Compressor(CompressorOptions _options);
 
     PREVENT_COPY_OR_MOVE(Compressor)
 

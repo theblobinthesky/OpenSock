@@ -2,6 +2,7 @@
 
 #include <cstring>
 #include <format>
+#include <utility>
 #include <immintrin.h>
 #include <zstd.h>
 #include "cnpy.h"
@@ -271,14 +272,14 @@ size_t getMaxSizeRequiredByCodec(const std::vector<int> &shape) {
     return ZSTD_compressBound(size);
 }
 
-Compressor::Compressor(const CompressorOptions &options) : options(options),
-                                                           threadPool([this] { this->threadMain(); },
-                                                                      options.numThreads),
-                                                           bufferSize(
-                                                               alignUp(getMaxSizeRequiredByCodec(options.shape), 16)
-                                                               + alignUp(sizeof(CompressorSettings), 16)),
-                                                           arenaSize(options.numThreads * 3 * bufferSize),
-                                                           allocator(new uint8_t[arenaSize], arenaSize) {
+Compressor::Compressor(CompressorOptions _options) : options(std::move(_options)),
+                                                     threadPool([this] { this->threadMain(); },
+                                                                options.numThreads),
+                                                     bufferSize(
+                                                         alignUp(getMaxSizeRequiredByCodec(options.shape), 16)
+                                                         + alignUp(sizeof(CompressorSettings), 16)),
+                                                     arenaSize(options.numThreads * 3 * bufferSize),
+                                                     allocator(new uint8_t[arenaSize], arenaSize) {
     for (const auto dim: options.shape) {
         if (dim <= 0) {
             throw std::runtime_error("The dimension of a shape cannot be negative.");
@@ -305,9 +306,16 @@ Compressor::Compressor(const CompressorOptions &options) : options(options),
         }
     }
 
+    if (options.inputDirectory.ends_with("/")) {
+        options.inputDirectory = options.inputDirectory.substr(0, options.inputDirectory.size() - 1);
+    }
+    if (options.outputDirectory.ends_with("/")) {
+        options.outputDirectory = options.outputDirectory.substr(0, options.outputDirectory.size() - 1);
+    }
+
     for (const auto files = listAllFiles(options.inputDirectory); const std::string &file: files) {
         if (file.ends_with(".npy")) {
-            workQueue.push({file});
+            workQueue.push({file.substr(options.inputDirectory.size() + 1)});
         }
     }
     workQueueSize = workQueue.size();
@@ -434,12 +442,13 @@ void Compressor::threadMain() {
 
     while (workQueueSize > 0) {
         mutex.lock();
-        const auto [path] = workQueue.front();
+        const auto [fileName] = workQueue.front();
         workQueue.pop();
         --workQueueSize;
         mutex.unlock();
 
-        loadNpyAsFloat32(path, dataIn);
+        const std::string inputPath = std::format("{}/{}", options.inputDirectory, fileName);
+        loadNpyAsFloat32(inputPath, dataIn);
 
         CompressorSettings settingsOut = {};
         uint8_t *dataOut;
@@ -450,8 +459,8 @@ void Compressor::threadMain() {
         const size_t dataSizeOutAligned = alignUp(dataSizeOut, 16);
         *reinterpret_cast<CompressorSettings *>(dataOut + dataSizeOutAligned) = settingsOut;
 
-        std::string outPath = path + ".compressed";
-        writeBinaryFile(outPath.c_str(), dataOut, dataSizeOutAligned + sizeof(CompressorSettings));
+        const std::string outputPath = std::format("{}/{}.compressed", options.outputDirectory, fileName);
+        writeBinaryFile(outputPath.c_str(), dataOut, dataSizeOutAligned + sizeof(CompressorSettings));
     }
 
     ++shutdownCounter;
