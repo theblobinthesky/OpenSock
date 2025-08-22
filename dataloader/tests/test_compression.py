@@ -7,6 +7,7 @@ from PIL import Image
 import native_dataloader as m
 import pytest
 import time
+from dataclasses import dataclass
 
 JPG_DATASET_URL = "https://storage.googleapis.com/download.tensorflow.org/example_images/flower_photos.tgz"
 JPG_DATASET_DIR = os.path.join("temp", "jpg_dataset")
@@ -116,10 +117,10 @@ def compute_and_save_features_jpgs(image_paths, features_dir=FEATURES_DIR):
     return saved
 
 
-def ensure_features_prepared():
+def ensure_features_prepared(limit: int=64):
     if not os.path.isdir(FEATURES_DIR) or not any(f.endswith(".npy") for f in os.listdir(FEATURES_DIR)):
         root = ensure_jpg_dataset()
-        jpgs = list_some_jpgs(root, subfolder="daisy", limit=2)
+        jpgs = list_some_jpgs(root, subfolder="daisy", limit=limit)
         assert jpgs, "No JPGs found."
         compute_and_save_features_jpgs(jpgs, FEATURES_DIR)
 
@@ -262,31 +263,65 @@ def _gather_raw_feature_files():
             for f in os.listdir(FEATURES_DIR)
             if f.endswith(".npy")]
 
-def _run_single_compression(shape, out_dir, *, fp16, bitshuffle, codecs, permutations):
+def _humansize(n: int) -> str:
+    for unit in ("B","KB","MB","GB","TB"):
+        if n < 1024 or unit == "TB":
+            return f"{n:6.2f} {unit}"
+        n /= 1024.0
+    return f"{n:6.2f} TB"
+
+@dataclass(frozen=True)
+class BenchConfig:
+    name: str
+    fp16: bool
+    bitshuffle: bool
+    codecs: list  # list[m.Codec]
+    permutations: list[list[int]]
+
+@dataclass
+class BenchResult:
+    cfg: BenchConfig
+    compressed_bytes: int
+    n_out: int
+    comp_secs: float
+    decomp_secs: float
+
+def _run_compress(shape: list[int], out_dir: str, cfg: BenchConfig) -> BenchResult:
     os.makedirs(out_dir, exist_ok=True)
     options = m.CompressorOptions(
         num_threads=NUM_THREADS,
         input_directory=FEATURES_DIR,
         output_directory=out_dir,
         shape=shape,
-        cast_to_fp16=fp16,
-        permutations=permutations,
-        with_bitshuffle=bitshuffle,
-        allowed_codecs=codecs,
+        cast_to_fp16=cfg.fp16,
+        permutations=cfg.permutations,
+        with_bitshuffle=cfg.bitshuffle,
+        allowed_codecs=cfg.codecs,
         tolerance_for_worse_codec=0.01,
     )
     t0 = time.perf_counter()
     m.Compressor(options).start()
     t1 = time.perf_counter()
 
-    outs = [os.path.join(out_dir, f) for f in os.listdir(out_dir)
-            if f.endswith(".compressed")]
+    outs = [os.path.join(out_dir, f) for f in os.listdir(out_dir) if f.endswith(".compressed")]
     assert outs, f"No compressed outputs found in {out_dir}"
-    total_bytes = sum(os.path.getsize(p) for p in outs)
-    return total_bytes, len(outs), (t1 - t0)
+    comp_bytes = sum(os.path.getsize(p) for p in outs)
 
+    # Decompression timing (single pass, one Decompressor instance)
+    decomp = m.Decompressor(shape)
+    t2 = time.perf_counter()
+    for p in outs:
+        _ = decomp.decompress(p)
+    t3 = time.perf_counter()
 
-def test_benchmark_compression_ratios(tmp_path, capsys=None):
+    return BenchResult(cfg=cfg,
+                       compressed_bytes=comp_bytes,
+                       n_out=len(outs),
+                       comp_secs=(t1 - t0),
+                       decomp_secs=(t3 - t2))
+
+@pytest.mark.order(-1)
+def test_benchmark_compression_and_decode(tmp_path, capsys=None):
     ensure_features_prepared()
 
     raw_files = _gather_raw_feature_files()
@@ -294,64 +329,75 @@ def test_benchmark_compression_ratios(tmp_path, capsys=None):
     raw_total = sum(os.path.getsize(p) for p in raw_files)
 
     shape = [HEIGHT, WIDTH, D_OUT]
-
-    permutations = [
-        [0, 1, 2],
-        [0, 2, 1],
-
-        [1, 0, 2],
-        [1, 2, 0],
-
-        [2, 0, 1],
-        [2, 1, 0]
+    perms_all = [
+        [0, 1, 2], [0, 2, 1],
+        [1, 0, 2], [1, 2, 0],
+        [2, 0, 1], [2, 1, 0],
     ]
 
     configs = [
-        # name, fp16, bitshuffle, codecs
-        ("fp32_zstd7", False, False, [m.Codec.ZSTD_LEVEL_7]),
-        ("fp16_zstd7", True, False, [m.Codec.ZSTD_LEVEL_7]),
-
-        ("fp32_bshuf_zstd7", True, True, [m.Codec.ZSTD_LEVEL_7]),
-        ("fp16_bshuf_zstd7", True, True, [m.Codec.ZSTD_LEVEL_7]),
-
-        ("fp16_bshuf_zstd(3, 7, 22)", True, True, [m.Codec.ZSTD_LEVEL_3, m.Codec.ZSTD_LEVEL_7, m.Codec.ZSTD_LEVEL_22]),
-        ("fp16_bshuf_zstd22", True, True, [m.Codec.ZSTD_LEVEL_22]),
+        BenchConfig("fp32_zstd7",              fp16=False, bitshuffle=False, codecs=[m.Codec.ZSTD_LEVEL_7],              permutations=perms_all),
+        BenchConfig("fp16_zstd7",              fp16=True,  bitshuffle=False, codecs=[m.Codec.ZSTD_LEVEL_7],              permutations=perms_all),
+        BenchConfig("fp32_bshuf_zstd7",        fp16=False, bitshuffle=True,  codecs=[m.Codec.ZSTD_LEVEL_7],              permutations=perms_all),
+        BenchConfig("fp16_bshuf_zstd7",        fp16=True,  bitshuffle=True,  codecs=[m.Codec.ZSTD_LEVEL_7],              permutations=perms_all),
+        BenchConfig("fp16_bshuf_zstd(3,7,22)", fp16=True,  bitshuffle=True,  codecs=[m.Codec.ZSTD_LEVEL_3, m.Codec.ZSTD_LEVEL_7, m.Codec.ZSTD_LEVEL_22], permutations=perms_all),
+        BenchConfig("fp16_bshuf_zstd22",       fp16=True,  bitshuffle=True,  codecs=[m.Codec.ZSTD_LEVEL_22],             permutations=perms_all),
     ]
 
-    rows = []
-    for name, fp16, bshuf, codecs in configs:
-        out_dir = tmp_path / f"bench_{name}"
-        comp_bytes, n_out, secs = _run_single_compression(
-            shape, str(out_dir),
-            fp16=fp16, bitshuffle=bshuf, codecs=codecs, permutations=permutations
-        )
-        # sanity: same number of outputs as inputs
-        assert n_out == len(raw_files), f"Mismatch: {n_out=} vs {len(raw_files)=}"
-        ratio = comp_bytes / max(1, raw_total)
-        rows.append((name, fp16, bshuf, [c.name for c in codecs] if codecs else ["RAW"],
-                     comp_bytes, ratio, secs))
+    results: list[BenchResult] = []
+    for cfg in configs:
+        out_dir = tmp_path / f"bench_{cfg.name}"
+        res = _run_compress(shape, str(out_dir), cfg)
+        assert res.n_out == len(raw_files), f"Mismatch: {res.n_out=} vs {len(raw_files)=}"
+        results.append(res)
 
-    def _humansize(n):
-        for unit in ["B","KB","MB","GB"]:
-            if n < 1024.0:
-                return f"{n:6.2f} {unit}"
-            n /= 1024.0
-        return f"{n:6.2f} TB"
+    # Derive metrics
+    n_elems = HEIGHT * WIDTH * D_OUT
+    table_rows = []
+    for r in results:
+        ratio = r.compressed_bytes / max(1, raw_total)
+        # Throughputs
+        comp_MBps_in  = (raw_total / (1024*1024)) / r.comp_secs
+        comp_MBps_out = (r.compressed_bytes / (1024*1024)) / r.comp_secs
+        out_dtype_bytes = 2 if r.cfg.fp16 else 4
+        decomp_in_MBps  = (r.compressed_bytes / (1024*1024)) / r.decomp_secs
+        decomp_out_MBps = ((r.n_out * n_elems * out_dtype_bytes) / (1024*1024)) / r.decomp_secs
 
-    # pretty print
-    header = f"{'config':26} {'fp16':>5} {'bshuf':>5} {'codecs':22} {'compressed':>12} {'ratio':>7} {'time':>8}"
+        table_rows.append({
+            "name": r.cfg.name,
+            "fp16": r.cfg.fp16,
+            "bshuf": r.cfg.bitshuffle,
+            "codecs": ",".join([c.name for c in r.cfg.codecs]) if r.cfg.codecs else "RAW",
+            "compressed": r.compressed_bytes,
+            "ratio": ratio,
+            "comp_s": r.comp_secs,
+            "c_in_MBps": comp_MBps_in,
+            "c_out_MBps": comp_MBps_out,
+            "dec_s": r.decomp_secs,
+            "d_in_MBps": decomp_in_MBps,
+            "d_out_MBps": decomp_out_MBps,
+        })
+
+    # Pretty print
+    header = (
+        f"{'config':26} {'fp16':>5} {'bshuf':>5} {'codecs':22} "
+        f"{'compressed':>12} {'ratio':>7}  "
+        f"{'comp(s)':>7} {'c_in MB/s':>10} {'c_out MB/s':>11}  "
+        f"{'dec(s)':>7} {'d_in MB/s':>10} {'d_out MB/s':>11}"
+    )
     print(header)
     print("-" * len(header))
-    for name, fp16, bshuf, codec_names, cbytes, ratio, secs in rows:
-        print(f"{name:26} {str(fp16):>5} {str(bshuf):>5} {','.join(codec_names):22} "
-              f"{_humansize(cbytes):>12} {ratio:7.3f} {secs:8.3f}s")
-    print(f"{'raw total:':26} {'':>5} {'':>5} {'':22} {_humansize(raw_total):>12} {1.000:7.3f} {'':>8}")
+    for row in table_rows:
+        print(
+            f"{row['name']:26} {str(row['fp16']):>5} {str(row['bshuf']):>5} {row['codecs']:22} "
+            f"{_humansize(row['compressed']):>12} {row['ratio']:7.3f}  "
+            f"{row['comp_s']:7.3f} {row['c_in_MBps']:10.2f} {row['c_out_MBps']:11.2f}  "
+            f"{row['dec_s']:7.3f} {row['d_in_MBps']:10.2f} {row['d_out_MBps']:11.2f}"
+        )
+    print(f"{'raw total:':26} {'':>5} {'':>5} {'':22} {_humansize(raw_total):>12} {1.000:7.3f}")
 
-    # Optional soft assertion: at least one config should beat raw
-    assert any(r < 1.0 for *_, r, __ in rows), "No configuration achieved compression < 1.0x of raw .npy"
+    assert any(row["ratio"] < 1.0 for row in table_rows), "No configuration achieved compression < 1.0x of raw .npy"
 
-    # If you want the table in pytest output, ensure -s or use capsys to echo:
     if capsys is not None:
         captured = capsys.readouterr()
-        # Re-emit to pytest's captured log so it shows in reports
         print(captured.out)
