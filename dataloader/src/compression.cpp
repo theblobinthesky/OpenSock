@@ -273,13 +273,12 @@ size_t getMaxSizeRequiredByCodec(const std::vector<int> &shape) {
 }
 
 Compressor::Compressor(CompressorOptions _options) : options(std::move(_options)),
-                                                     threadPool([this] { this->threadMain(); },
-                                                                options.numThreads),
                                                      bufferSize(
                                                          alignUp(getMaxSizeRequiredByCodec(options.shape), 16)
                                                          + alignUp(sizeof(CompressorSettings), 16)),
                                                      arenaSize(options.numThreads * 3 * bufferSize),
-                                                     allocator(new uint8_t[arenaSize], arenaSize) {
+                                                     allocator(new uint8_t[arenaSize], arenaSize),
+                                                     threadPool([this] { this->threadMain(); }, options.numThreads) {
     for (const auto dim: options.shape) {
         if (dim <= 0) {
             throw std::runtime_error("The dimension of a shape cannot be negative.");

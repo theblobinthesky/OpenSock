@@ -130,7 +130,6 @@ private:
                        size_t &dataSizeOut) const;
 
     CompressorOptions options;
-    ThreadPool threadPool;
     size_t bufferSize; // TODO: This is a little laxxx....
     size_t arenaSize;
     BumpAllocator<uint8_t *> allocator;
@@ -142,6 +141,9 @@ private:
     std::mutex workMutex;
     std::condition_variable workNotify;
     std::atomic_uint32_t shutdownCounter;
+
+    // The thread pool must be last, so it's destroyed first before all other members.
+    ThreadPool threadPool;
 
 public:
     void threadMain();

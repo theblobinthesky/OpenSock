@@ -11,10 +11,10 @@
 #define null nullptr
 
 #ifdef ENABLE_DEBUG_PRINT
-#define LOG_DEBUG(...) spdlog::debug(__VA_ARGS__)
-#define LOG_INFO(...) spdlog::info(__VA_ARGS__)
-#define LOG_WARNING(...) spdlog::warning(__VA_ARGS__)
-#define LOG_ERROR(...) spdlog::error(__VA_ARGS__)
+#define LOG_DEBUG(...)   spdlog::log(spdlog::source_loc{__FILE__, __LINE__, SPDLOG_FUNCTION}, spdlog::level::debug, __VA_ARGS__)
+#define LOG_INFO(...)    spdlog::log(spdlog::source_loc{__FILE__, __LINE__, SPDLOG_FUNCTION}, spdlog::level::info, __VA_ARGS__)
+#define LOG_WARNING(...) spdlog::log(spdlog::source_loc{__FILE__, __LINE__, SPDLOG_FUNCTION}, spdlog::level::warn, __VA_ARGS__)
+#define LOG_ERROR(...)   spdlog::log(spdlog::source_loc{__FILE__, __LINE__, SPDLOG_FUNCTION}, spdlog::level::err, __VA_ARGS__)
 #else
 #define LOG_DEBUG(...)
 #define LOG_INFO(...)
@@ -166,10 +166,15 @@ public:
     std::atomic_bool disabled;
 };
 
+using NonblockingThreadMain = std::function<void()>;
+
+using BlockingThreadMain = std::function<void(size_t, const std::atomic_uint32_t &)>;
+
 class ThreadPool {
 public:
-    explicit ThreadPool(const std::function<void()> &_threadMain,
-                        size_t _threadCount);
+    explicit ThreadPool(BlockingThreadMain _threadMain, size_t _threadCount);
+
+    explicit ThreadPool(const NonblockingThreadMain &_threadMain, size_t _threadCount);
 
     void start();
 
@@ -184,12 +189,11 @@ public:
     ~ThreadPool() noexcept;
 
 private:
-    std::function<void()> threadMain;
-    size_t threadCount;
+    BlockingThreadMain threadMain;
+    std::atomic_uint32_t desiredThreadCount;
     std::vector<std::thread> threads;
-    std::barrier<> shutdownBarrier;
 
-    void extendedThreadMain();
+    void extendedThreadMain(size_t threadIdx) const;
 };
 
 template<typename T>

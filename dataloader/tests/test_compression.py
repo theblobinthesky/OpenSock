@@ -15,7 +15,7 @@ FEATURES_DIR = os.path.join("temp", "features")
 
 HEIGHT, WIDTH = 300, 300
 D_OUT = 32
-NUM_THREADS = 4
+NUM_THREADS = 16
 
 DINO_REPO = "facebookresearch/dinov2"
 DINO_MODEL = "dinov2_vitb14_reg"
@@ -59,10 +59,7 @@ def imread_rgb_jpg(path):
 
 def _load_dino_or_skip():
     torch = pytest.importorskip("torch", reason="PyTorch required.")
-    # try:
     model = torch.hub.load(DINO_REPO, DINO_MODEL)
-    # except Exception as e:
-    #     pytest.skip(f"Could not load {DINO_REPO}:{DINO_MODEL} ({e}).")
     dev = "cuda" if torch.cuda.is_available() else "cpu"
     model.eval().to(dev)
     return model, dev
@@ -117,7 +114,7 @@ def compute_and_save_features_jpgs(image_paths, features_dir=FEATURES_DIR):
     return saved
 
 
-def ensure_features_prepared(limit: int=64):
+def ensure_features_prepared(limit: int=32):
     if not os.path.isdir(FEATURES_DIR) or not any(f.endswith(".npy") for f in os.listdir(FEATURES_DIR)):
         root = ensure_jpg_dataset()
         jpgs = list_some_jpgs(root, subfolder="daisy", limit=limit)

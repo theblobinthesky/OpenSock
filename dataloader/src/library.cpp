@@ -10,13 +10,14 @@ namespace py = pybind11;
 PYBIND11_MODULE(_core, m) {
 #if defined(ENABLE_DEBUG_PRINT)
     spdlog::set_level(spdlog::level::trace);
+    spdlog::set_pattern("[%Y-%m-%d %H:%M:%S.%e] %^[%l]%$ [%s:%# %!] %v");
 #else
     spdlog::set_level(spdlog::level::off);
 #endif
 
-
     m.doc() = R"pbdoc(
-        Native Dataloader compatible with jax.
+        Native Dataloader that outputs tensors in the DLPack format.
+        Compatible with all major deep learning frameworks, including jax, tensorflow and pytorch.
         -----------------------
 
         .. currentmodule:: native_dataloader

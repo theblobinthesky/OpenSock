@@ -52,8 +52,10 @@ private:
     std::mutex prefetchCacheMutex;
     size_t outputBatchMemorySize;
     ResourceClient resourceClient;
-    ThreadPool threadPool;
     std::atomic_bool shutdown;
+
+    // The thread pool must be last, so it's destroyed first before all other members.
+    ThreadPool threadPool;
 
 public:
     void threadMain();
