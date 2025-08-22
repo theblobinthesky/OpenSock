@@ -1,5 +1,6 @@
 from __future__ import annotations
 import nox
+import glob
 
 nox.options.sessions = ["lint", "tests"]
 
@@ -26,7 +27,7 @@ def dev(session: nox.Session) -> None:
         "pip",
         "install",
         "-e.",
-       "-Ccmake.define.CMAKE_EXPORT_COMPILE_COMMANDS=1",
+       "-Ccmake.define.CMAKE_EXPORT_COMPILE_COMMANDS=1", # for clang-tidy
        "-Ccmake.define.CMAKE_EXPORT_LINK_COMMANDS=1",
         "-Ccmake.define.CMAKE_VERBOSE_MAKEFILE=on",
         "-Ccmake.define.CMAKE_BUILD_TYPE=Debug",
@@ -39,8 +40,23 @@ def release(session: nox.Session) -> None:
         "pip",
         "install",
         "-e.",
-        "-Ccmake.define.CMAKE_EXPORT_COMPILE_COMMANDS=1",
+        "-Ccmake.define.CMAKE_EXPORT_COMPILE_COMMANDS=1", # for clang-tidy
         "-Ccmake.define.CMAKE_EXPORT_LINK_COMMANDS=1",
         "-Ccmake.define.CMAKE_BUILD_TYPE=Release",
         "-Cbuild-dir=build",
+    )
+
+@nox.session(venv_backend="none")
+def clang_tidy(session: nox.Session) -> None:
+    build_dir = "build"
+    sources = glob.glob("src/**/*.cpp", recursive=True)
+
+    if not sources:
+        session.error("No C++ Source found in src folder.")
+
+    session.run(
+        "clang-tidy",
+        "-p", build_dir,
+        *sources,
+        *session.posargs
     )

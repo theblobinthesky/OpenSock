@@ -88,7 +88,7 @@ public:
 };
 
 
-// TODO: As i migrate to multi-gpu training, i will have to account for numa nodes on server cpus.
+// TODO: When i migrate to multi-gpu training, i will have to account for numa nodes on server cpus.
 // TODO: Not an issue just yet, though.
 class CudaHostMemoryInterface final : public HostMemoryInterface {
 public:
@@ -134,11 +134,20 @@ private:
 
     PREVENT_COPY_OR_MOVE(ResourcePool)
 
+    void threadMain(size_t threadIdx, const std::atomic_uint32_t &desiredThreadCount);
+
+    // Everything related to memory.
     static SharedPtr<ResourcePool> instance;
     CudaHostMemoryInterface hostMemoryIf;
     CudaGpuMemoryInterface gpuMemoryIf;
     MirroredAllocator allocator;
     cudaStream_t stream;
+
+    // Everything related to threading.
+    std::atomic_bool shutdown;
+
+    // The thread pool must be last, so it's destroyed first before all other members.
+    ThreadPool threadPool;
 };
 
 class ResourceClient {

@@ -65,69 +65,6 @@ DataLoader::~DataLoader() {
     prefetchCacheNotify.notify_all();
 }
 
-void DataLoader::threadMain() {
-    while (!shutdown) {
-        prefetchSemaphore.acquire();
-        if (shutdown) break;
-
-        const auto [startingOffset, genIdx, batchPaths] = batchedDataset.getNextInFlightBatch();
-        const size_t barrierIdx = lastBarrierIdx++ % prefetchSize;
-        const std::vector<Head> &heads = batchedDataset.getDataset().getHeads();
-
-        // For each head, load all batch items into one contigous cpu array.
-        auto allocations = BumpAllocator(Allocation{}, 0);
-        if (!resourceClient.allocate(allocations)) {
-            MirroredAllocator &allocator = *ResourcePool::getInstance()->getAllocator();
-            while (!allocations.getArena()) {
-                std::unique_lock lock(allocator.memoryMutex);
-                allocator.memoryNotify.wait(lock, [this, &allocations] {
-                    return shutdown || resourceClient.allocate(allocations);
-                });
-            }
-        }
-
-
-        // Make sure to not touch the allocation if the current resource client has lost access to the pool.
-        // Otherwise, you'd get null pointer exceptions.
-        std::vector<uint8_t *> gpuAllocations;
-        if (allocations.getArena()) {
-            for (size_t headIdx = 0; headIdx < heads.size(); headIdx++) {
-                const auto [host, gpu, size] = loadFiles(allocations, batchPaths, heads, headIdx);
-
-                // Start async upload to gpu memory as soon as possible.
-                resourceClient.copy(gpu, host, size);
-                gpuAllocations.push_back(gpu);
-            }
-        }
-
-        resourceClient.insertBarrier(barrierIdx);
-
-        // Make sure threads submit their batches in dataset order.
-        std::unique_lock lock(prefetchCacheMutex);
-        prefetchCacheNotify.wait(lock, [this, startingOffset, genIdx] {
-            // Make sure to leave the conditional variable when shutdown is already enabled.
-            return shutdown
-                   || batchedDataset.getGenIdx().load() != genIdx
-                   || startingOffset - static_cast<int>(batchSize) == batchedDataset.getLastWaitingBatch().load();
-        });
-        if (shutdown) break;
-
-        if (batchedDataset.getGenIdx().load() == genIdx) {
-            prefetchCache.push({
-                .datasetStartingOffset = startingOffset,
-                .barrierIdx = barrierIdx,
-                .gpuAllocations = gpuAllocations
-            });
-
-            batchedDataset.markBatchWaiting(startingOffset);
-        }
-
-        lock.unlock();
-
-        prefetchCacheNotify.notify_all();
-    }
-}
-
 // ReSharper disable once CppParameterMayBeConstPtrOrRef
 void deleter(DLManagedTensor *self) {
     ResourcePool::getInstance()->getAllocator()->free(static_cast<uint8_t *>(self->dl_tensor.data));

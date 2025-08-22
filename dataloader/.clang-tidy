@@ -1,0 +1,11 @@
+Checks: >
+  clang-analyzer-*,
+  bugprone-*,
+  misc-unused-*,
+  modernize-*,
+  performance-*,
+  readability-*,
+  -clang-analyzer-security.insecureAPI.strcpy
+WarningsAsErrors: ''
+HeaderFilterRegex: 'src/.*'
+FormatStyle: none
