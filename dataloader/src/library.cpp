@@ -8,6 +8,13 @@
 namespace py = pybind11;
 
 PYBIND11_MODULE(_core, m) {
+#if defined(ENABLE_DEBUG_PRINT)
+    spdlog::set_level(spdlog::level::trace);
+#else
+    spdlog::set_level(spdlog::level::off);
+#endif
+
+
     m.doc() = R"pbdoc(
         Native Dataloader compatible with jax.
         -----------------------

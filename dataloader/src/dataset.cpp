@@ -157,8 +157,8 @@ Dataset::Dataset(std::string _rootDir, std::vector<Head> _heads,
         bool erroneousEntry = false;
 
         if (!file.ends_with(h0.getExt())) {
-            debugLog(
-                "Got erroneous dataset with anchor path '%s' that does not end on '%s'!\n",
+            LOG_DEBUG(
+                "Got erroneous dataset with anchor path '{}' that does not end on '{}'!",
                 file.c_str(), h0.getExt().c_str());
             continue;
         }
@@ -172,7 +172,7 @@ Dataset::Dataset(std::string _rootDir, std::vector<Head> _heads,
             newFile = replaceAll(newFile, h0.getExt(), hS.getExt());
 
             if (!fs::exists(newFile)) {
-                debugLog("Could not find '%s'\n", newFile.c_str());
+                LOG_DEBUG("Could not find '{}'", newFile.c_str());
                 erroneousEntry = true;
                 break;
             }
@@ -181,8 +181,7 @@ Dataset::Dataset(std::string _rootDir, std::vector<Head> _heads,
         }
 
         if (erroneousEntry) {
-            debugLog("Got erroneous dataset with anchor path '%s'!\n",
-                     file.c_str());
+            LOG_DEBUG("Got erroneous dataset with anchor path '{}'!", file.c_str());
         } else {
             entries.push_back(std::move(paths));
         }
@@ -299,7 +298,7 @@ DatasetBatch BatchedDataset::getNextInFlightBatch() {
     }
 
     inFlightBatches.emplace(offset);
-    debugLog("getNextInFlightBatch: lastWaitingBatch=%d, offset=%d\n", lastWaitingBatch.load(), offset);
+    LOG_DEBUG("getNextInFlightBatch: lastWaitingBatch={}, offset={}", lastWaitingBatch.load(), offset);
     return {
         .startingOffset = offset,
         .genIdx = genIdx.load(),
@@ -313,13 +312,13 @@ std::vector<std::vector<std::string> > BatchedDataset::getNextBatch() {
 
 void BatchedDataset::markBatchWaiting(const int32_t batch) {
     std::unique_lock lock(mutex);
-    debugLog("markBatchWaiting: batch=%d\n", batch);
+    LOG_DEBUG("markBatchWaiting: batch={}", batch);
     lastWaitingBatch = batch;
 }
 
 void BatchedDataset::popWaitingBatch(const int32_t batch) {
     std::unique_lock lock(mutex);
-    debugLog("popWaitingBatch: batch=%d\n", batch);
+    LOG_DEBUG("popWaitingBatch: batch={}", batch);
     inFlightBatches.erase(batch);
 }
 
@@ -338,7 +337,7 @@ void BatchedDataset::forgetInFlightBatches() {
     }
 
     genIdx += 1;
-    debugLog("forgetInFlightBatches\n");
+    LOG_DEBUG("forgetInFlightBatches");
 }
 
 const Dataset &BatchedDataset::getDataset() const noexcept {

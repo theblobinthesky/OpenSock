@@ -157,7 +157,7 @@ py::dict DataLoader::getNextBatch() {
     lock.unlock();
     prefetchSemaphore.release();
 
-    debugLog("Loading from; startingOffset: %d, genIdx: %d\n", startingOffset, batchedDataset.getGenIdx().load());
+    LOG_DEBUG("Loading from; startingOffset: {}, genIdx: {}", startingOffset, batchedDataset.getGenIdx().load());
 
     py::dict pyBatch;
     const auto &heads = batchedDataset.getDataset().getHeads();
@@ -213,7 +213,7 @@ py::dict DataLoader::getNextBatch() {
     /*for (size_t i = 0; i < prefetchCache.size(); i++) {
         const auto &pair = prefetchCache[i];
         if (pair.barrierIdx == barrierIdx) {
-            debugLog("Idiot index ++ (%lu, %lu, idx %lu, size %lu) \n",
+            LOG_DEBUG("Idiot index ++ ({}, {}, idx {}, size {})",
                         pair.barrierIdx,
                         barrierIdx, i, prefetchCache.size() + 1);
         }

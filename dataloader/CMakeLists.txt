@@ -99,7 +99,7 @@ target_compile_definitions(_core PRIVATE $<$<CONFIG:Debug>: ENABLE_DEBUG_PRINT=1
 
 # Set logging level based on build type.
 target_compile_definitions(_core PRIVATE
-        $<$<CONFIG:Debug>: SPDLOG_ACTIVE_LEVEL=SPDLOG_LEVEL_DEBUG>
+        $<$<CONFIG:Debug>: SPDLOG_ACTIVE_LEVEL=SPDLOG_LEVEL_TRACE>
         $<$<CONFIG:Release>: SPDLOG_ACTIVE_LEVEL=SPDLOG_LEVEL_OFF>
 )
 

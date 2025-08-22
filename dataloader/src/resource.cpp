@@ -15,7 +15,7 @@ void MirroredAllocator::reserveAtLeast(const size_t newNumItems, const size_t ne
     std::unique_lock lock(allocateMutex); // TODO: Remove?
     newGenIdx += 1;
 
-    debugLog("reserveAtLeast\n");
+    LOG_DEBUG("reserveAtLeast");
     cudaStreamSynchronize(ResourcePool::getInstance()->getCudaStream());
     // TODO: This is ugly, but necessary atp bc. otherwise we might not be done async copying when we hand off to jax.
     // TODO: Find a better option than this, so we don't stall quite as much.
@@ -41,14 +41,14 @@ void MirroredAllocator::reserveAtLeast(const size_t newNumItems, const size_t ne
 
 bool MirroredAllocator::allocate(Allocation &alloc) {
     std::unique_lock lock(allocateMutex); // TODO: Remove?
-    debugLog("allocGpuData.size()==%lu\n", allocAndHandOffGpuData.size());
+    LOG_DEBUG("allocGpuData.size()=={}", allocAndHandOffGpuData.size());
     if (isDrainingOldGeneration()) {
         if (allocAndHandOffGpuData.empty()) {
-            debugLog("draining; case genIdx=newGenIdx\n");
+            LOG_DEBUG("draining; case genIdx=newGenIdx");
             genIdx += 1;
         } else {
             // Error: Tried to allocate while draining old generation of allocations.
-            debugLog("draining; case error %lu\n", allocAndHandOffGpuData.size());
+            LOG_DEBUG("draining; case error {}", allocAndHandOffGpuData.size());
 
             return false;
         }
@@ -75,7 +75,7 @@ bool MirroredAllocator::allocate(Allocation &alloc) {
 
 void MirroredAllocator::free(const uint8_t *gpuPtr) {
     std::unique_lock lock(allocateMutex); // TODO: Remove?
-    debugLog("deleter called\n");
+    LOG_DEBUG("deleter called");
     const auto gpuDataFound = allocAndHandOffGpuData.find(gpuPtr);
     if (gpuDataFound == allocAndHandOffGpuData.end()) {
         throw std::runtime_error("Tried to free space that was never allocated or already freed.");
@@ -186,7 +186,7 @@ ResourcePool::ResourcePool() : allocator(&hostMemoryIf, &gpuMemoryIf), stream(nu
 
 ResourcePool::~ResourcePool() {
     if (const auto err = cudaStreamDestroy(stream); err != cudaSuccess) {
-        debugLog("cudaStreamDestroy failed.\n");
+        LOG_DEBUG("cudaStreamDestroy failed.");
         std::terminate();
     }
 }
@@ -195,7 +195,7 @@ bool ResourcePool::acquire(const int clientId, const size_t numItems, const size
     const bool clientChanged = currentClientId != clientId;
 
     if (clientChanged) {
-        debugLog("resource pool acquired with clientId: %d\n", clientId);
+        LOG_DEBUG("resource pool acquired with clientId: {}", clientId);
         currentClientId = clientId;
         allocator.reserveAtLeast(numItems, itemSize);
     }

@@ -3,17 +3,23 @@
 #include <atomic>
 #include <barrier>
 #include <functional>
-#include <condition_variable>
 #include <csignal>
 #include <semaphore>
 #include <string>
+#include "spdlog/spdlog.h"
 
 #define null nullptr
 
 #ifdef ENABLE_DEBUG_PRINT
-#define debugLog(...) std::printf(__VA_ARGS__)
+#define LOG_DEBUG(...) spdlog::debug(__VA_ARGS__)
+#define LOG_INFO(...) spdlog::info(__VA_ARGS__)
+#define LOG_WARNING(...) spdlog::warning(__VA_ARGS__)
+#define LOG_ERROR(...) spdlog::error(__VA_ARGS__)
 #else
-#define debugLog(...)
+#define LOG_DEBUG(...)
+#define LOG_INFO(...)
+#define LOG_WARNING(...)
+#define LOG_ERROR(...)
 #endif
 
 #define PREVENT_MOVE(ClassName) \
