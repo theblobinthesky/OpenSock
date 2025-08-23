@@ -145,27 +145,6 @@ private:
     bool weakPtr;
 };
 
-class Semaphore {
-public:
-    explicit Semaphore(int initial);
-
-    PREVENT_COPY_OR_MOVE(Semaphore)
-
-    void acquire();
-
-    void release();
-
-    void releaseAll();
-
-    void disable();
-
-    // private:
-public:
-    std::counting_semaphore<> semaphore;
-    std::atomic_int numTokensUsed;
-    std::atomic_bool disabled;
-};
-
 using NonblockingThreadMain = std::function<void()>;
 
 using BlockingThreadMain = std::function<void(size_t, const std::atomic_uint32_t &)>;

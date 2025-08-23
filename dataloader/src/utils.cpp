@@ -3,32 +3,6 @@
 #include <barrier>
 #include <utility>
 
-Semaphore::Semaphore(const int initial)
-    : semaphore(initial), numTokensUsed(0), disabled(false) {
-}
-
-void Semaphore::acquire() {
-    if (!disabled) {
-        ++numTokensUsed;
-        semaphore.acquire();
-    }
-}
-
-void Semaphore::release() {
-    semaphore.release();
-    --numTokensUsed;
-}
-
-void Semaphore::releaseAll() {
-    semaphore.release(numTokensUsed);
-    numTokensUsed = 0;
-}
-
-void Semaphore::disable() {
-    disabled = true;
-    releaseAll();
-}
-
 ThreadPool::ThreadPool(BlockingThreadMain _threadMain, const size_t _threadCount)
     : threadMain(std::move(_threadMain)),
       desiredThreadCount(_threadCount) {

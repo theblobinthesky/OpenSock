@@ -1,9 +1,12 @@
 #ifndef RESOURCE_H
 #define RESOURCE_H
 #include "utils.h"
-#include <vector>
 #include <cuda_runtime.h>
+#include <vector>
+#include <condition_variable>
+#include <queue>
 #include <set>
+#include "dataloader.h"
 
 class ResourceClient;
 
@@ -25,33 +28,34 @@ struct Allocation {
     }
 };
 
-// The host memory can downsize to the target size, as the dataloader has full control over it.
-// It can never waste pinned memory, if the implementation chooses not to.
-class HostMemoryInterface {
+class HostAndGpuDeviceInterface {
 public:
-    virtual ~HostMemoryInterface() = default;
+    virtual ~HostAndGpuDeviceInterface() = default;
 
-    virtual uint8_t *changeSizeAndInvalidateMemory(size_t size) = 0;
+    // The host memory can downsize to the target size, as the dataloader has full control over it.
+    // It can never waste pinned memory, if the implementation chooses not to.
+    virtual uint8_t *hostMemoryChangeSizeAndInvalidateMemory(size_t size) = 0;
+
+    // The gpu memory never downsizes or invalidates memory, as the dataloader yields control to jax.
+    // It wastes some gpu memory some of the time, but compatability with jax is more important.
+    virtual uint8_t *gpuMemoryIncreasePoolSizeAndInvalidateMemory(size_t size) = 0;
 
     virtual void freeEverything() = 0;
-};
 
-// The gpu memory never downsizes or invalidates memory, as the dataloader yields control to jax.
-// It wastes some gpu memory some of the time, but compatability with jax is more important.
-class GpuMemoryInterface {
-public:
-    virtual ~GpuMemoryInterface() = default;
+    virtual uint64_t insertNextFenceIntoStream() = 0;
 
-    virtual uint8_t *increasePoolSizeAndInvalidateMemory(size_t size) = 0;
+    virtual void synchronizeFenceWithConsumerStream(uint64_t fence, uintptr_t consumerStream) = 0;
 
-    virtual void freeEverything() = 0;
+    virtual void synchronizeFenceWithHostDevice(uint64_t fence) = 0;
+
+    virtual void copyFromHostToGpuMemory(const uint8_t *host, uint8_t *gpu, const uint32_t size) = 0;
 };
 
 // Allow for AMD, TPU etc. support later down the line.
 
 class MirroredAllocator {
 public:
-    MirroredAllocator(HostMemoryInterface *hostIf, GpuMemoryInterface *gpuIf);
+    explicit MirroredAllocator(HostAndGpuDeviceInterface *device);
 
     ~MirroredAllocator();
 
@@ -66,8 +70,7 @@ public:
     [[nodiscard]] bool isDrainingOldGeneration() const;
 
 private:
-    HostMemoryInterface *hostIf;
-    GpuMemoryInterface *gpuIf;
+    HostAndGpuDeviceInterface *device;
 
     uint8_t *hostData;
     uint8_t *gpuData;
@@ -83,51 +86,65 @@ private:
     std::mutex allocateMutex;
 
 public:
-    std::mutex memoryMutex;
-    std::condition_variable memoryNotify;
+    std::atomic<uint64_t> memoryNotify;
 };
 
 
 // TODO: When i migrate to multi-gpu training, i will have to account for numa nodes on server cpus.
 // TODO: Not an issue just yet, though.
-class CudaHostMemoryInterface final : public HostMemoryInterface {
+
+// TODO: Maybe some of these methods need to be protected wrt. concurrent access.
+class CudaHostAndGpuDeviceInterface final : public HostAndGpuDeviceInterface {
 public:
-    uint8_t *changeSizeAndInvalidateMemory(size_t size) override;
+    CudaHostAndGpuDeviceInterface();
+
+    uint8_t *hostMemoryChangeSizeAndInvalidateMemory(size_t size) override;
+
+    uint8_t *gpuMemoryIncreasePoolSizeAndInvalidateMemory(size_t size) override;
 
     void freeEverything() override;
 
-private:
-    uint8_t *data = null;
-};
+    uint64_t insertNextFenceIntoStream() override;
 
-class CudaGpuMemoryInterface final : public GpuMemoryInterface {
-public:
-    CudaGpuMemoryInterface();
+    void synchronizeFenceWithConsumerStream(uint64_t fence, uintptr_t consumerStream) override;
 
-    uint8_t *increasePoolSizeAndInvalidateMemory(size_t size) override;
+    void synchronizeFenceWithHostDevice(uint64_t fence) override;
 
-    void freeEverything() override;
+    void copyFromHostToGpuMemory(const uint8_t *host, uint8_t *gpu, uint32_t size) override;
 
 private:
-    void setPoolReleaseThreshold(size_t bytes) const;
+    void setGpuMemoryPoolReleaseThreshold(size_t bytes) const;
 
     cudaMemPool_t pool = {};
-    uint8_t *data = null;
+    uint8_t *hostData = null;
+    uint8_t *gpuData = null;
+    cudaStream_t stream;
+
+    std::unordered_map<uint64_t, cudaEvent_t> fenceToEventMap;
+    std::atomic_uint64_t eventIndex;
+};
+
+struct PrefetchItem {
+    int32_t datasetStartingOffset;
+    std::vector<uint8_t *> gpuAllocations;
+    std::vector<uint64_t> fences;
+
+    bool operator<(const PrefetchItem &other) const;
 };
 
 class ResourcePool {
 public:
     static SharedPtr<ResourcePool> getInstance();
 
-    static std::atomic_int currentClientId;
+    static std::atomic_uint64_t acquiredClientId;
 
-    ~ResourcePool();
+    void acquire(uint64_t clientId, size_t numItems, size_t itemSize);
 
-    bool acquire(int clientId, size_t numItems, size_t itemSize);
+    void synchronizeConsumerStream(uint64_t fence, uintptr_t consumerStream);
+
+    void synchronizeHostDevice(uint64_t fence);
 
     [[nodiscard]] MirroredAllocator *getAllocator() noexcept;
-
-    [[nodiscard]] cudaStream_t getCudaStream() const noexcept;
 
 private:
     explicit ResourcePool();
@@ -138,13 +155,16 @@ private:
 
     // Everything related to memory.
     static SharedPtr<ResourcePool> instance;
-    CudaHostMemoryInterface hostMemoryIf;
-    CudaGpuMemoryInterface gpuMemoryIf;
+    CudaHostAndGpuDeviceInterface device;
     MirroredAllocator allocator;
-    cudaStream_t stream;
+
+    // Everything related to data sources.
+    DataLoader &dl;
 
     // Everything related to threading.
-    std::atomic_bool shutdown;
+    std::priority_queue<PrefetchItem> prefetchCache;
+    std::condition_variable prefetchCacheNotify;
+    std::mutex prefetchCacheMutex;
 
     // The thread pool must be last, so it's destroyed first before all other members.
     ThreadPool threadPool;
@@ -152,27 +172,21 @@ private:
 
 class ResourceClient {
 public:
-    explicit ResourceClient(int clientId, size_t numBarriers);
+    explicit ResourceClient(uint64_t clientId, size_t numItems, size_t itemSize);
 
-    ~ResourceClient();
+    void acquire();
 
-    bool acquire(size_t numItems, size_t itemSize);
-
-    // TODO: Maybe make the Allocation a bump allocator by default. So no conversion is necessary?
+    // TODO: Remove.
     [[nodiscard]] bool allocate(BumpAllocator<Allocation> &subAllocator);
-
-    void copy(uint8_t *gpuBuffer, const uint8_t *buffer, uint32_t size);
-
-    void insertBarrier(size_t barrierIdx);
-
-    void sync(size_t barrierIdx);
 
     [[nodiscard]] int getClientId() const;
 
 private:
-    int clientId;
+    uint64_t clientId;
+    size_t numItems;
+    size_t itemSize;
+
     SharedPtr<ResourcePool> pool;
-    std::vector<cudaEvent_t> barriers;
     std::mutex mutex;
 };
 

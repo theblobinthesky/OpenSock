@@ -2,54 +2,50 @@
 #define DATALOADER_H
 #include "dataset.h"
 #include "resource.h"
-#include <vector>
-#include <condition_variable>
 #include <atomic>
-#include <queue>
+#include <dlpack/dlpack.h>
 #include <pybind11/pybind11.h>
 
-#define CHS 3
+// TODO: Register this in library.
+class DLWrapper {
+public:
+    DLWrapper(uint64_t fence, int deviceId, DLManagedTensor *dlManagedTensor);
 
-struct PrefetchItem {
-    int32_t datasetStartingOffset;
-    size_t barrierIdx;
-    std::vector<uint8_t *> gpuAllocations;
+    pybind11::capsule __dlpack__(const pybind11::object &consumerStreamObject) const;
 
-    bool operator<(const PrefetchItem& other) const;
+    std::pair<int, int> __dlpack_device__() const;
+
+private:
+    uint64_t fence;
+    int deviceId;
+    DLManagedTensor *dlManagedTensor;
 };
 
 class DataLoader {
 public:
     DataLoader(
-        Dataset& _dataset,
+        Dataset &_dataset,
         int _batchSize,
         int _numThreads,
         int _prefetchSize
     );
 
-    DataLoader(const DataLoader &dl) = delete;
+    DataLoader(const DataLoader &) = delete;
 
-    DataLoader(DataLoader &&dl) = delete;
+    DataLoader(DataLoader &&) = delete;
 
     ~DataLoader();
 
     pybind11::dict getNextBatch();
 
-    [[nodiscard]] size_t getNumberOfBatches() const;
-
-private:
-    static std::atomic_int nextId;
-    int id;
+    // private: TODO
+    static std::atomic_uint64_t nextId;
+    uint64_t id;
     BatchedDataset batchedDataset;
     const size_t batchSize;
     const size_t numThreads;
     const size_t prefetchSize;
-    size_t numberOfBatches;
-    Semaphore prefetchSemaphore;
-    std::priority_queue<PrefetchItem> prefetchCache;
-    std::condition_variable prefetchCacheNotify;
-    std::atomic_int lastBarrierIdx;
-    std::mutex prefetchCacheMutex;
+
     size_t outputBatchMemorySize;
     ResourceClient resourceClient;
 };

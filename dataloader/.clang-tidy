@@ -3,9 +3,10 @@ Checks: >
   bugprone-*,
   misc-unused-*,
   modernize-*,
+  -modernize-use-trailing-return-type,
   performance-*,
   readability-*,
-  -clang-analyzer-security.insecureAPI.strcpy
+  -readability-math-missing-parentheses
 WarningsAsErrors: ''
 HeaderFilterRegex: 'src/.*'
 FormatStyle: none

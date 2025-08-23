@@ -103,8 +103,8 @@ ImageData readJpegFile(const std::string &path) {
 }
 
 void resizeImage(const ImageData &image, unsigned char *outputBuffer,
-                 size_t outputWidth,
-                 size_t outputHeight) {
+                 const size_t outputWidth,
+                 const size_t outputHeight) {
     stbir_resize_uint8_srgb(image.data.data(), image.width, image.height,
                             image.width * 3, outputBuffer,
                             static_cast<int>(outputWidth),
@@ -116,43 +116,31 @@ void resizeImage(const ImageData &image, unsigned char *outputBuffer,
 #define IMAGE_HEIGHT(subDir) static_cast<size_t>(subDir.getShape()[0])
 #define IMAGE_WIDTH(subDir) static_cast<size_t>(subDir.getShape()[1])
 
-struct BatchAllocation {
-    size_t shapeSize;
-    size_t batchBufferSize;
-    Allocation batchAllocation;
-
-    union {
-        uint8_t *uint8;
-        float *float32;
-    } batchBuffer;
-};
-
-BatchAllocation getBatchAllocation(const Head &head,
-                                   BumpAllocator<Allocation> &allocations,
-                                   const size_t batchSize,
-                                   const size_t itemSize) {
+CpuAllocation getBatchAllocation(const Head &head,
+                                 BumpAllocator<uint8_t *> &cpuAllocator,
+                                 const size_t batchSize,
+                                 const size_t itemSize) {
     const auto shapeSize = head.getShapeSize();
     const auto batchBufferSize = batchSize * shapeSize * itemSize;
-    const auto batchAllocation = allocations.allocate(batchBufferSize);
+    const auto batchBuffer = cpuAllocator.allocate(batchBufferSize);
 
     return {
         .shapeSize = shapeSize,
         .batchBufferSize = batchBufferSize,
-        .batchAllocation = batchAllocation,
-        .batchBuffer = {batchAllocation.host}
+        .batchBuffer = {batchBuffer}
     };
 }
 
-Allocation loadJpgFiles(BumpAllocator<Allocation> &allocations,
-                        const std::vector<std::vector<std::string> > &batchPaths,
-                        const std::vector<Head> &heads, const size_t headIdx) {
+CpuAllocation loadJpgFiles(BumpAllocator<uint8_t *> &cpuAllocator,
+                           const std::vector<std::vector<std::string> > &batchPaths,
+                           const std::vector<Head> &heads, const size_t headIdx) {
     const Head &head = heads[headIdx];
-    auto [itemSize, batchBufferSize, batchAllocation, batchBuffer]
-            = getBatchAllocation(head, allocations, batchPaths.size(), 1);
+    const auto batchAllocation = getBatchAllocation(head, cpuAllocator, batchPaths.size(), 1);
+    const auto [shapeSize, batchBufferSize, batchBuffer] = batchAllocation;
 
     for (size_t j = 0; j < batchPaths.size(); j++) {
         ImageData imgData = readJpegFile(batchPaths[j][headIdx]);
-        resizeImage(imgData, batchBuffer.uint8 + j * itemSize,
+        resizeImage(imgData, batchBuffer.uint8 + j * shapeSize,
                     IMAGE_WIDTH(head), IMAGE_HEIGHT(head));
     }
 
@@ -231,12 +219,12 @@ static ImageData readPngFile(const std::string &path) {
     return img;
 }
 
-Allocation loadPngFiles(BumpAllocator<Allocation> &allocations,
-                        const std::vector<std::vector<std::string> > &batchPaths,
-                        const std::vector<Head> &heads, const size_t headIdx) {
+CpuAllocation loadPngFiles(BumpAllocator<uint8_t *> &cpuAllocator,
+                           const std::vector<std::vector<std::string> > &batchPaths,
+                           const std::vector<Head> &heads, const size_t headIdx) {
     const Head &head = heads[headIdx];
-    auto [shapeSize, batchBufferSize, batchAllocation, batchBuffer]
-            = getBatchAllocation(head, allocations, batchPaths.size(), 1);
+    const auto batchAllocation = getBatchAllocation(head, cpuAllocator, batchPaths.size(), 1);
+    const auto [shapeSize, batchBufferSize, batchBuffer] = batchAllocation;
 
     const int outW = static_cast<int>(IMAGE_WIDTH(head));
     const int outH = static_cast<int>(IMAGE_HEIGHT(head));
@@ -255,7 +243,7 @@ Allocation loadPngFiles(BumpAllocator<Allocation> &allocations,
 }
 
 static void resizeImageFloatRGB(const float *input, int inW, int inH,
-                                       float *output, int outW, int outH) {
+                                float *output, int outW, int outH) {
     // Linear (no gamma) resize for float data
     stbir_resize_float_linear(
         input, inW, inH, inW * 3 * static_cast<int>(sizeof(float)),
@@ -288,24 +276,24 @@ static void readExrRGBInterleaved(const std::string &path,
 
     fb.insert("R", Slice(FLOAT,
                          base - xOffset - yOffset + 0 * sizeof(float),
-                         xStride, yStride, 1, 1, 0.0f));
+                         xStride, yStride, 1, 1, 0.0F));
     fb.insert("G", Slice(FLOAT,
                          base - xOffset - yOffset + 1 * sizeof(float),
-                         xStride, yStride, 1, 1, 0.0f));
+                         xStride, yStride, 1, 1, 0.0F));
     fb.insert("B", Slice(FLOAT,
                          base - xOffset - yOffset + 2 * sizeof(float),
-                         xStride, yStride, 1, 1, 0.0f));
+                         xStride, yStride, 1, 1, 0.0F));
 
     file.setFrameBuffer(fb);
     file.readPixels(dw.min.y, dw.max.y);
 }
 
-Allocation loadExrFiles(BumpAllocator<Allocation> &allocations,
-                        const std::vector<std::vector<std::string> > &batchPaths,
-                        const std::vector<Head> &heads, const size_t headIdx) {
+CpuAllocation loadExrFiles(BumpAllocator<uint8_t *> &cpuAllocator,
+                           const std::vector<std::vector<std::string> > &batchPaths,
+                           const std::vector<Head> &heads, const size_t headIdx) {
     const Head &head = heads[headIdx];
-    auto [shapeSize, batchBufferSize, batchAllocation, batchBuffer]
-            = getBatchAllocation(head, allocations, batchPaths.size(), 4);
+    const auto batchAllocation = getBatchAllocation(head, cpuAllocator, batchPaths.size(), 4);
+    const auto [shapeSize, batchBufferSize, batchBuffer] = batchAllocation;
 
     const int outW = static_cast<int>(IMAGE_WIDTH(head));
     const int outH = static_cast<int>(IMAGE_HEIGHT(head));
@@ -313,7 +301,8 @@ Allocation loadExrFiles(BumpAllocator<Allocation> &allocations,
     for (size_t j = 0; j < batchPaths.size(); ++j) {
         const std::string &path = batchPaths[j][headIdx];
 
-        int inW, inH;
+        int inW;
+        int inH;
         std::vector<float> rgb;
         readExrRGBInterleaved(path, rgb, inW, inH);
 
@@ -331,12 +320,12 @@ Allocation loadExrFiles(BumpAllocator<Allocation> &allocations,
     return batchAllocation;
 }
 
-Allocation loadNpyFiles(BumpAllocator<Allocation> &allocations,
-                        const std::vector<std::vector<std::string> > &batchPaths,
-                        const std::vector<Head> &heads, const size_t headIdx) {
+CpuAllocation loadNpyFiles(BumpAllocator<uint8_t *> &cpuAllocator,
+                           const std::vector<std::vector<std::string> > &batchPaths,
+                           const std::vector<Head> &heads, const size_t headIdx) {
     const Head &head = heads[headIdx];
-    auto [itemSize, batchBufferSize, batchAllocation, batchBuffer]
-            = getBatchAllocation(head, allocations, batchPaths.size(), 4);
+    const auto batchAllocation = getBatchAllocation(head, cpuAllocator, batchPaths.size(), 4);
+    const auto [shapeSize, batchBufferSize, batchBuffer] = batchAllocation;
 
     for (size_t j = 0; j < batchPaths.size(); j++) {
         // Load the NPY file from the path
@@ -361,35 +350,42 @@ Allocation loadNpyFiles(BumpAllocator<Allocation> &allocations,
         for (const unsigned long d: arr.shape) {
             npy_num_elements *= d;
         }
-        if (npy_num_elements != itemSize) {
+        if (npy_num_elements != shapeSize) {
             throw std::runtime_error(
                 "NPY file " + batchPaths[j][headIdx] +
                 " has mismatched size. Expected " +
-                std::to_string(itemSize) + ", got " +
+                std::to_string(shapeSize) + ", got " +
                 std::to_string(npy_num_elements));
         }
         // Copy the float data into the batch buffer
         const auto *npy_data = arr.data<float>();
-        std::memcpy(batchBuffer.float32 + j * itemSize, npy_data, itemSize * sizeof(float));
+        std::memcpy(batchBuffer.float32 + j * shapeSize, npy_data, shapeSize * sizeof(float));
     }
 
     return batchAllocation;
 }
 
-Allocation loadFiles(BumpAllocator<Allocation> &allocations,
-                     const std::vector<std::vector<std::string> > &batchPaths,
-                     const std::vector<Head> &heads, const size_t headIdx) {
+CpuAllocation loadCompressedFiles(BumpAllocator<uint8_t *> &cpuAllocator,
+                                  const std::vector<std::vector<std::string> > &batchPaths,
+                                  const std::vector<Head> &heads, const size_t headIdx) {
+    throw std::runtime_error("loadCompressedFiles is not implemented yet.");
+    return {};
+}
+
+CpuAllocation loadFilesFromHeadIntoContigousBatch(BumpAllocator<uint8_t *> &cpuAllocator,
+                                                  const std::vector<std::vector<std::string> > &batchPaths,
+                                                  const std::vector<Head> &heads, const size_t headIdx) {
     switch (const Head &head = heads[headIdx]; head.getFilesType()) {
         case FileType::JPG:
-            return loadJpgFiles(allocations, batchPaths, heads, headIdx);
+            return loadJpgFiles(cpuAllocator, batchPaths, heads, headIdx);
         case FileType::PNG:
-            return loadPngFiles(allocations, batchPaths, heads, headIdx);
+            return loadPngFiles(cpuAllocator, batchPaths, heads, headIdx);
         case FileType::EXR:
-            return loadExrFiles(allocations, batchPaths, heads, headIdx);
+            return loadExrFiles(cpuAllocator, batchPaths, heads, headIdx);
         case FileType::NPY:
-            return loadNpyFiles(allocations, batchPaths, heads, headIdx);
-        //        case FileType::COMPRESSED:
-        //            return loadCompressedFiles(allocations, batchPaths, heads, headIdx);
+            return loadNpyFiles(cpuAllocator, batchPaths, heads, headIdx);
+        case FileType::COMPRESSED:
+            return loadCompressedFiles(cpuAllocator, batchPaths, heads, headIdx);
         default:
             throw std::runtime_error("Cannot load an unsupported file type.");
     }

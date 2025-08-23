@@ -351,3 +351,7 @@ const std::atomic_int32_t &BatchedDataset::getLastWaitingBatch() const {
 const std::atomic_uint32_t &BatchedDataset::getGenIdx() const {
     return genIdx;
 }
+
+size_t BatchedDataset::getNumberOfBatches() const {
+    return (dataset.getEntries().size() + batchSize - 1) / batchSize;
+}

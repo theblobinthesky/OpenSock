@@ -112,6 +112,8 @@ public:
 
     [[nodiscard]] const std::atomic_uint32_t &getGenIdx() const;
 
+    [[nodiscard]] size_t getNumberOfBatches() const;
+
 private:
     Dataset dataset;
     size_t batchSize;

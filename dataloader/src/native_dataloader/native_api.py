@@ -3,6 +3,7 @@ from typing import Callable, List, Tuple
 from . import _core as m
 import jax, jax.numpy as jnp
 
+
 class FileType(Enum):
     JPG = m.FileType.JPG
     PNG = m.FileType.PNG
@@ -10,9 +11,11 @@ class FileType(Enum):
     NPY = m.FileType.NPY
     COMPRESSED = m.FileType.COMPRESSED
 
+
 class ItemFormat(Enum):
     FLOAT = m.ItemFormat.FLOAT
     UINT = m.ItemFormat.UINT
+
 
 class Head:
     def __init__(self, file_type: FileType, dict_name: str,
@@ -80,9 +83,13 @@ class Dataset:
                      sub_dirs: List[str],
                      create_dataset_function: Callable,
                      post_process_fn: Callable[[dict[str, jnp.ndarray]], dict[str, jnp.ndarray]] = None,
-                     is_virtual_dataset: bool=False) -> 'Dataset':
+                     is_virtual_dataset: bool = False) -> 'Dataset':
+        """
+        Construct a Dataset from subdirectories.
+        The heads should be supplied in the order they will be used in.
+        """
         if post_process_fn is None:
-            post_process_fn = lambda x: x        
+            post_process_fn = lambda x: x
 
         native = m.Dataset(root_dir, [h._native for h in heads],
                            sub_dirs, create_dataset_function, is_virtual_dataset)
@@ -92,7 +99,10 @@ class Dataset:
     def from_entries(cls, root_dir: str, heads: List[Head],
                      entries: List[List[str]],
                      post_process_fn: Callable[[dict[str, jnp.ndarray]], dict[str, jnp.ndarray]] = None) -> 'Dataset':
-        """Construct a Dataset from entries. Entries may or may not be preceeded by the root directory."""
+        """
+        Construct a Dataset from entries. Entries may or may not be preceeded by the root directory.
+        The heads should be supplied in the order they will be used in.
+        """
         native = m.Dataset(root_dir, [h._native for h in heads], entries)
         return cls(native, post_process_fn)
 
@@ -101,7 +111,8 @@ class Dataset:
                                     ) -> Tuple['Dataset', 'Dataset', 'Dataset']:
         """Split the dataset into training, validation, and test subsets."""
         train, valid, test = self._native.splitTrainValidationTest(train_percentage, valid_percentage)
-        return Dataset(train, self.post_process_fn), Dataset(valid, self.post_process_fn), Dataset(test, self.post_process_fn)
+        return Dataset(train, self.post_process_fn), Dataset(valid, self.post_process_fn), Dataset(test,
+                                                                                                   self.post_process_fn)
 
     @property
     def root_dir(self) -> str:
@@ -117,7 +128,7 @@ class Dataset:
     def entries(self) -> List[List[str]]:
         """Return the dataset entries."""
         return self._native.getEntries()
-    
+
     def __len__(self) -> int:
         return len(self._native.getEntries())
 
@@ -129,19 +140,6 @@ class BatchedDataset:
     def get_next_batch(self) -> List[List[str]]:
         """Return the next batch of file entries."""
         return self._native.getNextBatch()
-
-
-class DLManagedTensorWrapper:
-    def __init__(self, capsule):
-        self._capsule = capsule
-
-    def __dlpack__(self, stream=None):
-        return self._capsule
-
-    def __dlpack_device__(self):
-        # Return (device_type, device_id); here CUDA=2 and GPU id=0.
-        kDLCUDA = 2
-        return (kDLCUDA, 0)
 
 
 class JaxSingleton:
@@ -190,7 +188,7 @@ class DataLoader:
         """Return next batch as a dict of jax arrays."""
 
         def from_dlpack(x):
-            return jax.dlpack.from_dlpack(DLManagedTensorWrapper(x), copy=False)
+            return jax.dlpack.from_dlpack(x, copy=False)
 
         batch = self._native.getNextBatch()
         batch = {key: from_dlpack(x) for key, x in batch.items()}
@@ -209,6 +207,7 @@ class Codec(Enum):
     ZSTD_LEVEL_7 = m.Codec.ZSTD_LEVEL_7
     ZSTD_LEVEL_22 = m.Codec.ZSTD_LEVEL_22
 
+
 class CompressorOptions:
     def __init__(self,
                  num_threads: int,
@@ -222,17 +221,6 @@ class CompressorOptions:
                  tolerance_for_worse_codec: float):
         """
         Options for configuring the Compressor.
-
-        Args:
-            num_threads: Number of threads to use.
-            input_directory: Directory containing input data.
-            output_directory: Directory to write compressed output.
-            shape: Shape of the data to be compressed.
-            cast_to_fp16: Whether to cast data to FP16.
-            permutations: List of permutations to apply.
-            with_bitshuffle: Enable bitshuffle filter.
-            allowed_codecs: List of allowed compression codecs.
-            tolerance_for_worse_codec: Error tolerance for codec fallback.
         """
         self._native = m.CompressorOptions(
             num_threads,
@@ -256,7 +244,10 @@ class Compressor:
         """Begin the compression process."""
         return self._native.start()
 
+
 import numpy as np
+
+
 # TODO: Use jax??? Idk. Maybe not, since this is just for testing.
 class Decompressor:
     def __init__(self, shape: np.ndarray):

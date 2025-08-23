@@ -68,13 +68,21 @@ PYBIND11_MODULE(_core, m) {
 
     py::class_<BatchedDataset>(m, "BatchedDataset")
             .def(py::init<const Dataset &, size_t>())
-            .def("getNextBatch", &BatchedDataset::getNextBatch);
+            .def("getNextBatch", &BatchedDataset::getNextBatch)
+            .def("__len__", &BatchedDataset::getNumberOfBatches);
+
+    py::class_<DLWrapper>(m, "DLWrapper")
+            .def(py::init<uint64_t, int, DLManagedTensor *>())
+            .def("__dlpack__", &DLWrapper::__dlpack__)
+            .def("__dlpack_device__", &DLWrapper::__dlpack_device__);
 
     // TODO Comment(getNextBatch): Important convention is that memory of the last batch gets invalid when you call getNextBatch!
     py::class_<DataLoader>(m, "DataLoader")
             .def(py::init<Dataset &, int, int, int>())
             .def("getNextBatch", &DataLoader::getNextBatch)
-            .def("__len__", &DataLoader::getNumberOfBatches);
+            .def("__len__", [](const DataLoader &self) -> int {
+                return self.batchedDataset.getNumberOfBatches();
+            });
 
     py::enum_<Codec>(m, "Codec")
             .value("ZSTD_LEVEL_3", Codec::ZSTD_LEVEL_3)
