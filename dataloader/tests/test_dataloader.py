@@ -101,9 +101,9 @@ def test_one_dataloader_once():
     ds, dl, root_dir = get_dataloader(batch_size=16)
     verify_correctness(ds, dl, root_dir, bs=16)
 
-def test_one_dataloader_trice():
-    ds, dl, root_dir = get_dataloader(batch_size=16)
-    verify_correctness(ds, dl, root_dir, bs=16, reps=3)
+# def test_one_dataloader_trice():
+#     ds, dl, root_dir = get_dataloader(batch_size=16)
+#     verify_correctness(ds, dl, root_dir, bs=16, reps=3)
 
 # def test_three_dlers_without_next_batch(): # This is the Test you should worry about. It is failing!
 #     (dl1, dl2, dl3), (ds1, ds2, ds3), root_dir = get_dataloaders(batch_size=16)

@@ -32,8 +32,7 @@ DataLoader::DataLoader(
     batchSize(_batchSize),
     numThreads(_numThreads),
     prefetchSize(_prefetchSize),
-    outputBatchMemorySize(getOutputBatchMemorySize(batchedDataset, batchSize)),
-    resourceClient(id, prefetchSize, outputBatchMemorySize) {
+    outputBatchMemorySize(getOutputBatchMemorySize(batchedDataset, batchSize)) {
     if (batchSize <= 0 || _numThreads <= 0 || _prefetchSize <= 0) {
         throw std::runtime_error(
             "Batch size, the number of threads and the prefetch size need to be strictly positive.");
@@ -43,23 +42,16 @@ DataLoader::DataLoader(
         throw std::runtime_error(
             "Prefetch size must be larger or equal than the number of threads.");
     }
-
-    resourceClient.acquire();
-
-    threadPool.start();
-}
-
-DataLoader::~DataLoader() {
-    prefetchCacheNotify.notify_all();
 }
 
 DLWrapper::DLWrapper(const uint64_t fence,
+                     const int deviceType,
                      const int deviceId,
                      DLManagedTensor *dlManagedTensor)
-    : fence(fence), deviceId(deviceId), dlManagedTensor(dlManagedTensor) {
+    : fence(fence), deviceType(deviceType), deviceId(deviceId), dlManagedTensor(dlManagedTensor) {
 }
 
-pybind11::capsule DLWrapper::__dlpack__(const pybind11::object &consumerStreamObject) const {
+pybind11::capsule DLWrapper::getDLpackCapsule(const pybind11::object &consumerStreamObject) const {
     const auto resourcePool = ResourcePool::getInstance();
 
     if (consumerStreamObject.is_none()) {
@@ -72,8 +64,8 @@ pybind11::capsule DLWrapper::__dlpack__(const pybind11::object &consumerStreamOb
     return pybind11::capsule(dlManagedTensor, "dltensor");
 }
 
-std::pair<int, int> DLWrapper::__dlpack_device__() const {
-    return {kDLCUDA, deviceId};
+std::pair<int, int> DLWrapper::getDLpackDevice() const {
+    return {deviceType, deviceId};
 }
 
 
@@ -88,33 +80,29 @@ void deleter(DLManagedTensor *self) {
 }
 
 py::dict DataLoader::getNextBatch() {
-    resourceClient.acquire(prefetchSize, outputBatchMemorySize);
+    const auto [datasetStartingOffset, gpuAllocations, fences]
+            = ResourcePool::getInstance()->acquireAndGetNextBatch(this);
 
-    std::unique_lock lock(prefetchCacheMutex);
-    prefetchCacheNotify.wait(lock, [this] { return !prefetchCache.empty(); });
-
-    const auto [startingOffset, gpuAllocations, fences] = prefetchCache.top();
-    prefetchCache.pop();
-    batchedDataset.popWaitingBatch(startingOffset);
-
-    lock.unlock();
-
-    LOG_DEBUG("Loading from; startingOffset: {}, genIdx: {}", startingOffset, batchedDataset.getGenIdx().load());
+    LOG_DEBUG("Loading from; datasetStartingOffset: {}, genIdx: {}",
+              datasetStartingOffset, ResourcePool::getInstance()->getGenIdx());
 
     py::dict pyBatch;
     const auto &heads = batchedDataset.getDataset().getHeads();
     for (size_t i = 0; i < heads.size(); i++) {
         const Head &head = heads[i];
         uint8_t *gpuAllocation = gpuAllocations[i];
-        uint64_t fence = fences[i];
+        const uint64_t fence = fences[i];
         ResourcePool::getInstance()->getAllocator()->handOff(gpuAllocation);
 
-        const std::vector<int> &shape = head.getShape();
+        const std::vector<uint32_t> &shape = head.getShape();
         const int ndim = static_cast<int>(shape.size()) + 1;
 
         auto *const shapeArr = new int64_t[ndim]{};
         shapeArr[0] = static_cast<int64_t>(batchSize);
-        std::memcpy(shapeArr + 1, shape.data(), shape.size() * sizeof(size_t));
+        for (size_t s = 0; s < shape.size(); s++) {
+            shapeArr[s + 1] = shape[s];
+        }
+        std::memcpy(shapeArr + 1, shape.data(), shape.size() * sizeof(uint32_t));
 
         uint8_t itemCode;
         switch (head.getItemFormat()) {
@@ -142,18 +130,19 @@ py::dict DataLoader::getNextBatch() {
                     .lanes = 1
                 },
                 .shape = shapeArr,
-                .strides = null,
+                .strides = nullptr,
                 .byte_offset = 0
             },
-            .manager_ctx = null,
+            .manager_ctx = nullptr,
             .deleter = &deleter
         };
 
-        DLWrapper *wrapper = new DLWrapper(fence, deviceType, deviceId, dlManagedTensor);
+        // ReSharper disable once CppDFAMemoryLeak
+        void *wrapper = new DLWrapper(fence, deviceType, deviceId, dlManagedTensor);
         dlManagedTensor->manager_ctx = wrapper;
 
-        ResourcePool::getInstance().acquire(); // These link ***.
-        pyBatch[head.getDictName().c_str()] = py::capsule(wrapper, "dlwrapper");
+        ResourcePool::getInstance().acquire(); // TODO: Make this stuff more robust. I don't like it. These link ***.
+        pyBatch[head.getDictName().c_str()] = py::cast(wrapper, py::return_value_policy::reference);
     }
 
     return pyBatch;

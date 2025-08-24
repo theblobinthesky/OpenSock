@@ -13,7 +13,7 @@ namespace fs = std::filesystem;
 Head::Head(
     const FileType _filesType,
     std::string _dictName,
-    std::vector<int> _shape
+    std::vector<uint32_t> _shape
 ) : directoryType(DirectoryType::UNPACKED_IN_FILES),
     filesType(_filesType),
     dictName(std::move(_dictName)), shape(std::move(_shape)) {
@@ -64,7 +64,7 @@ std::string Head::getDictName() const {
     return dictName;
 }
 
-const std::vector<int> &Head::getShape() const {
+const std::vector<uint32_t> &Head::getShape() const {
     return shape;
 }
 
@@ -301,7 +301,6 @@ DatasetBatch BatchedDataset::getNextInFlightBatch() {
     LOG_DEBUG("getNextInFlightBatch: lastWaitingBatch={}, offset={}", lastWaitingBatch.load(), offset);
     return {
         .startingOffset = offset,
-        .genIdx = genIdx.load(),
         .batchPaths = std::move(batchPaths)
     };
 }
@@ -325,9 +324,7 @@ void BatchedDataset::popWaitingBatch(const int32_t batch) {
 void BatchedDataset::forgetInFlightBatches() {
     std::unique_lock lock(mutex);
 
-    // TODO: This isn't actually right, because the dataset wraps around.
-    // TODO: Need to account for wrapping. min just assumes no wrapping.
-    const int firstInFlightBatch = 0; // TODO: Uncomment *std::ranges::min_element(inFlightBatches);
+    const int firstInFlightBatch = *std::ranges::min_element(inFlightBatches);
     currInFlightBatch = firstInFlightBatch;
     lastWaitingBatch = firstInFlightBatch - static_cast<int32_t>(batchSize);
     inFlightBatches.clear();
@@ -336,7 +333,6 @@ void BatchedDataset::forgetInFlightBatches() {
         throw std::runtime_error("Offset cannot be negative.");
     }
 
-    genIdx += 1;
     LOG_DEBUG("forgetInFlightBatches");
 }
 
@@ -346,10 +342,6 @@ const Dataset &BatchedDataset::getDataset() const noexcept {
 
 const std::atomic_int32_t &BatchedDataset::getLastWaitingBatch() const {
     return lastWaitingBatch;
-}
-
-const std::atomic_uint32_t &BatchedDataset::getGenIdx() const {
-    return genIdx;
 }
 
 size_t BatchedDataset::getNumberOfBatches() const {

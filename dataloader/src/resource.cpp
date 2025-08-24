@@ -14,12 +14,11 @@ MirroredAllocator::~MirroredAllocator() {
 
 void MirroredAllocator::reserveAtLeast(const size_t newNumItems, const size_t newItemSize) {
     std::unique_lock lock(allocateMutex); // TODO: Remove?
-    newGenIdx += 1;
 
-    LOG_DEBUG("reserveAtLeast");
-    cudaStreamSynchronize(ResourcePool::getInstance()->getCudaStream());
-    // TODO: This is ugly, but necessary atp bc. otherwise we might not be done async copying when we hand off to jax.
-    // TODO: Find a better option than this, so we don't stall quite as much.
+    LOG_DEBUG("reserveAtLeast newNumItems={}, newItemSize={}", newNumItems, newItemSize);
+    // TODO: I don't think this is necessary anymore. cudaStreamSynchronize(ResourcePool::getInstance()->getCudaStream());
+    // TODO: OLD EXPLANATION: This is ugly, but necessary atp bc. otherwise we might not be done async copying when we hand off to jax.
+    // TODO: OLD EXPLANATION: Find a better option than this, so we don't stall quite as much.
     if (const size_t requiredSize = newNumItems * newItemSize; requiredSize > numItems * itemSize) {
         hostData = device->hostMemoryChangeSizeAndInvalidateMemory(requiredSize);
         gpuData = device->gpuMemoryIncreasePoolSizeAndInvalidateMemory(requiredSize);
@@ -36,24 +35,10 @@ void MirroredAllocator::reserveAtLeast(const size_t newNumItems, const size_t ne
             .size = itemSize
         });
     }
-
-    // TODO: Maybe allocate lazily, so we don't slow down program startup.
 }
 
 bool MirroredAllocator::allocate(Allocation &alloc) {
     std::unique_lock lock(allocateMutex); // TODO: Remove?
-    LOG_DEBUG("allocGpuData.size()=={}", allocAndHandOffGpuData.size());
-    if (isDrainingOldGeneration()) {
-        if (allocAndHandOffGpuData.empty()) {
-            LOG_DEBUG("draining; case genIdx=newGenIdx");
-            genIdx += 1;
-        } else {
-            // Error: Tried to allocate while draining old generation of allocations.
-            LOG_DEBUG("draining; case error {}", allocAndHandOffGpuData.size());
-
-            return false;
-        }
-    }
 
     if (freeList.empty()) {
         // Error: Tried to allocate in an empty pool.
@@ -91,6 +76,10 @@ void MirroredAllocator::free(const uint8_t *gpuPtr) {
         .size = itemSize
     });
 
+    if (isDrained()) {
+        drainCv.notify_all();
+    }
+
     memoryNotify.fetch_add(1);
     memoryNotify.notify_all();
 }
@@ -100,8 +89,16 @@ void MirroredAllocator::handOff(const uint8_t *gpuPtr) {
     allocAndHandOffGpuData.emplace(gpuPtr);
 }
 
-bool MirroredAllocator::isDrainingOldGeneration() const {
-    return newGenIdx != genIdx;
+std::mutex &MirroredAllocator::getDrainMutex() {
+    return drainMutex;
+}
+
+std::condition_variable &MirroredAllocator::getDrainCv() {
+    return drainCv;
+}
+
+bool MirroredAllocator::isDrained() const {
+    return allocAndHandOffGpuData.empty();
 }
 
 CudaHostAndGpuDeviceInterface::CudaHostAndGpuDeviceInterface() {
@@ -111,8 +108,7 @@ CudaHostAndGpuDeviceInterface::CudaHostAndGpuDeviceInterface() {
 
     setGpuMemoryPoolReleaseThreshold(1);
 
-    if (const cudaError_t err = cudaStreamCreate(&stream);
-        err != cudaSuccess) {
+    if (const cudaError_t err = cudaStreamCreate(&stream); err != cudaSuccess) {
         throw std::runtime_error("cudaStreamCreate failed.");
     }
 }
@@ -130,9 +126,10 @@ uint8_t *CudaHostAndGpuDeviceInterface::hostMemoryChangeSizeAndInvalidateMemory(
 }
 
 uint8_t *CudaHostAndGpuDeviceInterface::gpuMemoryIncreasePoolSizeAndInvalidateMemory(const size_t size) {
+    LOG_DEBUG("Increasing gpu memory pool to {}", size);
     setGpuMemoryPoolReleaseThreshold(size);
 
-    if (gpuData != null) {
+    if (gpuData != nullptr) {
         if (const auto err = cudaFreeAsync(gpuData, stream); err != cudaSuccess) {
             throw std::runtime_error("cudaFreeAsync warm-up free failed");
         }
@@ -146,7 +143,7 @@ uint8_t *CudaHostAndGpuDeviceInterface::gpuMemoryIncreasePoolSizeAndInvalidateMe
 }
 
 void CudaHostAndGpuDeviceInterface::freeEverything() {
-    if (hostData != null) {
+    if (hostData != nullptr) {
         if (const cudaError_t err = cudaFreeHost(hostData); err != cudaSuccess) {
             throw std::runtime_error("cudaFreeHost failed to free data.");
         }
@@ -183,8 +180,8 @@ void CudaHostAndGpuDeviceInterface::synchronizeFenceWithConsumerStream(const uin
         throw std::runtime_error("Fence is invalid.");
     }
 
-    const auto consumer = reinterpret_cast<cudaStream_t>(consumerStream);
-    const cudaEvent_t event = found->second;
+    auto consumer = reinterpret_cast<cudaStream_t>(consumerStream);
+    cudaEvent_t event = found->second;
     if (cudaStreamWaitEvent(consumer, event) != cudaSuccess) {
         throw std::runtime_error("cudaStreamWaitEvent failed.");
     }
@@ -192,7 +189,7 @@ void CudaHostAndGpuDeviceInterface::synchronizeFenceWithConsumerStream(const uin
     fenceToEventMap.erase(found);
     if (cudaEventDestroy(event) != cudaSuccess) {
         throw std::runtime_error("cudaEventDestroy failed.");
-    } // TODO: this is illegal as we need to sync to the event multiple times. can only delete in the very end...
+    }
 }
 
 void CudaHostAndGpuDeviceInterface::synchronizeFenceWithHostDevice(const uint64_t fence) {
@@ -209,7 +206,7 @@ void CudaHostAndGpuDeviceInterface::synchronizeFenceWithHostDevice(const uint64_
     fenceToEventMap.erase(found);
     if (cudaEventDestroy(event) != cudaSuccess) {
         throw std::runtime_error("cudaEventDestroy failed.");
-    } // TODO: this is illegal as we need to sync to the event multiple times. can only delete in the very end...
+    }
 }
 
 void CudaHostAndGpuDeviceInterface::copyFromHostToGpuMemory(const uint8_t *host, uint8_t *gpu, const uint32_t size) {
@@ -227,7 +224,6 @@ void CudaHostAndGpuDeviceInterface::setGpuMemoryPoolReleaseThreshold(size_t byte
 
 
 SharedPtr<ResourcePool> ResourcePool::instance;
-std::atomic_uint64_t ResourcePool::acquiredClientId = std::atomic_uint64_t(-1);
 
 SharedPtr<ResourcePool> ResourcePool::getInstance() {
     if (!instance) {
@@ -241,12 +237,16 @@ MirroredAllocator *ResourcePool::getAllocator() noexcept {
     return &allocator;
 }
 
+uint64_t ResourcePool::getGenIdx() const noexcept {
+    return genIdx.load();
+}
+
 bool PrefetchItem::operator<(const PrefetchItem &other) const {
     // Make sure to sort the priority queue such that the smallest elements have priority.
     return datasetStartingOffset > other.datasetStartingOffset;
 }
 
-ResourcePool::ResourcePool() : allocator(&device),
+ResourcePool::ResourcePool() : allocator(&device), dl(nullptr),
                                threadPool(
                                    [this](const size_t threadIdx, const std::atomic_uint32_t &desiredThreadCount) {
                                        this->threadMain(threadIdx, desiredThreadCount);
@@ -254,31 +254,38 @@ ResourcePool::ResourcePool() : allocator(&device),
 }
 
 ResourcePool::~ResourcePool() {
+    threadPool.resize(0);
+    prefetchCacheNotify.notify_all();
 }
 
 void ResourcePool::threadMain(const size_t threadIdx, const std::atomic_uint32_t &desiredThreadCount) {
 #define IS_SHUTDOWN_REQUIRED() !(threadIdx < desiredThreadCount.load())
-#define DO_SHUTDOWN_IF_NECESSARY() if (IS_SHUTDOWN_REQUIRED()) { break; }
+#define IS_GENCHANGE_REQUIRED() (rememberedGenIdx != genIdx.load())
+#define IS_SHUTDOWN_OR_GENCHANGE_REQUIRED() (IS_SHUTDOWN_REQUIRED() || IS_GENCHANGE_REQUIRED())
 
-    const auto temporaryArena = std::make_unique<uint8_t *>(new uint8_t[dl.outputBatchMemorySize]);
-    auto temporaryAllocator = BumpAllocator(*temporaryArena, dl.outputBatchMemorySize);
+#define DO_SHUTDOWN_IF_NECESSARY() \
+    if (IS_SHUTDOWN_REQUIRED()) { return; }
 
-    uint64_t rememberedClientId = acquiredClientId;
+#define DO_SHUTDOWN_OR_GENCHANGE_IF_NECESSARY() \
+    if (IS_SHUTDOWN_REQUIRED()) { return; } \
+    if (IS_GENCHANGE_REQUIRED()) { break; }
 
-    while (IS_SHUTDOWN_REQUIRED()) {
-        const auto [startingOffset, genIdx, batchPaths] = dl.batchedDataset.getNextInFlightBatch();
-        // TODO: const size_t barrierIdx = lastBarrierIdx++ % dl.prefetchSize;
-        const std::vector<Head> &heads = dl.batchedDataset.getDataset().getHeads();
+    const auto temporaryArena = std::make_unique<uint8_t[]>(dl->outputBatchMemorySize);
+    auto temporaryAllocator = BumpAllocator(temporaryArena.get(), dl->outputBatchMemorySize);
 
-        // Make sure threads submit their batches in dataset order.
-        std::unique_lock lock(prefetchCacheMutex);
-        prefetchCacheNotify.wait(lock, [this, startingOffset, genIdx, threadIdx, &desiredThreadCount] {
-            // Make sure to leave the conditional variable when shutdown is already enabled.
-            return IS_SHUTDOWN_REQUIRED()
-                   || dl.batchedDataset.getGenIdx().load() != genIdx
-                   || startingOffset - static_cast<int>(dl.batchSize) == dl.batchedDataset.getLastWaitingBatch().load();
-        });
-        DO_SHUTDOWN_IF_NECESSARY()
+    uint64_t rememberedGenIdx = genIdx.load();
+
+    while (!IS_SHUTDOWN_REQUIRED()) {
+        if (IS_GENCHANGE_REQUIRED()) {
+            genChangeAssemble->count_down();
+            rememberedGenIdx = genIdx.load();
+            genChangeSendOff->wait();
+            continue;
+        }
+
+
+        const auto [startingOffset, batchPaths] = dl->batchedDataset.getNextInFlightBatch();
+        const std::vector<Head> &heads = dl->batchedDataset.getDataset().getHeads();
 
 
         // For each head, load all batch items into one contigous cpu array.
@@ -289,7 +296,8 @@ void ResourcePool::threadMain(const size_t threadIdx, const std::atomic_uint32_t
                 loadFilesFromHeadIntoContigousBatch(temporaryAllocator, batchPaths, heads, headIdx)
             );
         }
-        DO_SHUTDOWN_IF_NECESSARY()
+        DO_SHUTDOWN_OR_GENCHANGE_IF_NECESSARY()
+
 
         // At this point, the thread has loaded the batch into cpu ram.
         // As soon as pinned memory is available, we start copying to the gpu.
@@ -297,27 +305,24 @@ void ResourcePool::threadMain(const size_t threadIdx, const std::atomic_uint32_t
         // much longer than host->gpu copy.
 
 
-        // Grab a host,gpu memory pair.
+        // Grab a (host,gpu) memory pair.
         auto allocations = BumpAllocator(Allocation{}, 0);
-        if (!dl.resourceClient.allocate(allocations)) {
-            // TODO: I think this if can be deleted too.
-            while (!IS_SHUTDOWN_REQUIRED() && !allocations.getArena()) {
-                // TODO: Is allocations.getArena() necessary? I think the break makes this redundant.
-                const uint64_t old = allocator.memoryNotify.load();
+        while (!IS_SHUTDOWN_OR_GENCHANGE_REQUIRED()) {
+            const uint64_t old = allocator.memoryNotify.load();
 
-                // TODO: I don't think we're handling acquired correctly here, as this would just infinity loop?
-                if (dl.resourceClient.allocate(allocations)) {
-                    break;
-                }
-
-                allocator.memoryNotify.wait(old);
+            // TODO: I don't think we're handling acquired correctly here.
+            Allocation allocation;
+            const bool success = allocator.allocate(allocation);
+            allocations = BumpAllocator(allocation, allocation.size);
+            if (success) {
+                break;
             }
-        }
-        DO_SHUTDOWN_IF_NECESSARY()
 
-        // TODO: Make sure to not touch the allocation if the current resource client has lost access to the pool.
-        // TODO: Otherwise, you'd get null pointer exceptions.
-        std::memcpy(allocations.getArena().host, temporaryAllocator.getArena(), dl.outputBatchMemorySize);
+            allocator.memoryNotify.wait(old);
+        }
+        DO_SHUTDOWN_OR_GENCHANGE_IF_NECESSARY()
+
+        std::memcpy(allocations.getArena().host, temporaryAllocator.getArena(), dl->outputBatchMemorySize);
         std::vector<uint8_t *> gpuAllocations;
         std::vector<uint64_t> fences;
         if (allocations.getArena()) {
@@ -326,52 +331,84 @@ void ResourcePool::threadMain(const size_t threadIdx, const std::atomic_uint32_t
                 const auto &[host, gpu, _] = allocations.allocate(nonPinnedCpuAllocation.batchBufferSize);
 
                 // Start async upload to gpu memory as soon as possible.
-                // TODO: This also checked for inactive clients. Needs to be done manually, now.
                 // TODO: This also locked a mutex. Maybe this is still necessary?
                 device.copyFromHostToGpuMemory(host, gpu, nonPinnedCpuAllocation.batchBufferSize);
                 gpuAllocations.push_back(gpu);
-                // TODO: This also checked for inactive clients. Needs to be done manually, now.
                 // TODO: This needs to be synchronized by mutex?
                 fences.push_back(device.insertNextFenceIntoStream());
             }
         }
+        DO_SHUTDOWN_OR_GENCHANGE_IF_NECESSARY()
 
-        DO_SHUTDOWN_IF_NECESSARY()
 
+        // Make sure threads submit their batches in dataset order.
+        std::unique_lock lock(prefetchCacheMutex);
+        prefetchCacheNotify.wait(lock, [this, startingOffset, &rememberedGenIdx, threadIdx, &desiredThreadCount] {
+            // Make sure to leave the conditional variable when shutdown is already enabled.
+            return IS_SHUTDOWN_OR_GENCHANGE_REQUIRED() ||
+                   startingOffset - static_cast<int>(dl->batchSize)
+                   == dl->batchedDataset.getLastWaitingBatch().load();
+        });
+        dl->batchedDataset.markBatchWaiting(startingOffset);
 
-        if (dl.batchedDataset.getGenIdx().load() == genIdx) {
-            prefetchCache.push({
-                .datasetStartingOffset = startingOffset,
-                .gpuAllocations = gpuAllocations
-                .fences = fences,
-            });
-
-            dl.batchedDataset.markBatchWaiting(startingOffset);
-        }
-
-        lock.unlock();
-
-        prefetchCacheNotify.notify_all();
+        prefetchCache.push({
+            .datasetStartingOffset = startingOffset,
+            .gpuAllocations = gpuAllocations,
+            .fences = fences,
+        });
     }
 }
 
-void ResourcePool::acquire(const uint64_t clientId, const size_t numItems, const size_t itemSize) {
-    if (acquiredClientId != clientId) {
-        LOG_DEBUG("resource pool acquired with clientId: {}", clientId);
-        acquiredClientId = clientId;
-        allocator.reserveAtLeast(numItems, itemSize);
+PrefetchItem ResourcePool::acquireAndGetNextBatch(DataLoader *dataLoader) {
+    const size_t itemSize = dataLoader->outputBatchMemorySize;
 
+    if (dl == nullptr || dl->id != dataLoader->id) {
+        LOG_DEBUG("resource pool acquired with clientId: {}", dataLoader->id);
 
-        // TODO:
-        std::unique_lock lock(prefetchCacheMutex);
+        // Make sure, in time, all threads exit their generational loops
+        ++genIdx;
+        prefetchCacheNotify.notify_all();
 
-        dl.batchedDataset.forgetInFlightBatches();
-        while (!prefetchCache.empty()) {
-            prefetchCache.pop(); // Clear is not supported
+        // The protocol allows for a clean state transition:
+        // Wait for all threads to exit their generational loops.
+        // Only then can you safely reinitialize everything.
+        if (dl != nullptr) {
+            genChangeSendOff = std::make_unique<std::latch>(1);
+            genChangeAssemble = std::make_unique<std::latch>(dl->numThreads);
+            // Wait for all threads to stop working.
+            genChangeAssemble->wait();
+
+            // Wait for all memory to be returned from the dlpack consumer (i.e. jax, tf., pytorch).
+            {
+                std::unique_lock lock(allocator.getDrainMutex());
+                allocator.getDrainCv().wait(lock, [this] { return allocator.isDrained(); });
+            }
+
+            // Reset and reinitialize everything.
+            dl->batchedDataset.forgetInFlightBatches();
         }
 
-        prefetchCacheNotify.notify_all();
+        // Reset and reinitialize.
+        dl = dataLoader;
+        prefetchCache = std::priority_queue<PrefetchItem>();
+        allocator.reserveAtLeast(dataLoader->prefetchSize, itemSize);
+        threadPool.resize(dataLoader->numThreads);
+
+        // Allow the threads to continue exection.
+        genChangeSendOff->count_down();
     }
+
+    // Fetch the next batch.
+    std::unique_lock lock(prefetchCacheMutex);
+    prefetchCacheNotify.wait(lock, [this] { return !prefetchCache.empty(); });
+
+    const auto prefetchItem = prefetchCache.top();
+    prefetchCache.pop();
+    dl->batchedDataset.popWaitingBatch(prefetchItem.datasetStartingOffset);
+
+    lock.unlock();
+
+    return prefetchItem;
 }
 
 void ResourcePool::synchronizeConsumerStream(const uint64_t fence, const uintptr_t consumerStream) {
@@ -380,34 +417,4 @@ void ResourcePool::synchronizeConsumerStream(const uint64_t fence, const uintptr
 
 void ResourcePool::synchronizeHostDevice(const uint64_t fence) {
     device.synchronizeFenceWithHostDevice(fence);
-}
-
-ResourceClient::ResourceClient(const uint64_t clientId, const size_t numItems, const size_t itemSize)
-    : clientId(clientId), numItems(numItems), itemSize(itemSize),
-      pool(ResourcePool::getInstance()) {
-}
-
-void ResourceClient::acquire() {
-    std::unique_lock lock(mutex);
-    pool->acquire(clientId, numItems, itemSize);
-}
-
-bool ResourceClient::allocate(BumpAllocator<Allocation> &subAllocator) {
-    std::unique_lock lock(mutex);
-    if (ResourcePool::acquiredClientId.load() != clientId) {
-        // Do not allocate if the client has not acquired the pool.
-        subAllocator = BumpAllocator<Allocation>({}, 0);
-        return false;
-    }
-
-    Allocation alloc = {};
-    const bool success = pool->getAllocator()->allocate(alloc);
-    subAllocator = BumpAllocator(alloc, alloc.size);
-    return success;
-}
-
-#define RETURN_IF_INACTIVE() if (ResourcePool::acquiredClientId.load() != clientId) return
-
-int ResourceClient::getClientId() const {
-    return clientId;
 }

@@ -42,7 +42,7 @@ PYBIND11_MODULE(_core, m) {
             .export_values();
 
     py::class_<Head>(m, "Head")
-            .def(py::init<const FileType, std::string, std::vector<int> >())
+            .def(py::init<const FileType, std::string, std::vector<uint32_t> >())
             .def("getExt", &Head::getExt)
             .def("getDictName", &Head::getDictName)
             .def("getShape", &Head::getShape)
@@ -72,15 +72,14 @@ PYBIND11_MODULE(_core, m) {
             .def("__len__", &BatchedDataset::getNumberOfBatches);
 
     py::class_<DLWrapper>(m, "DLWrapper")
-            .def(py::init<uint64_t, int, DLManagedTensor *>())
-            .def("__dlpack__", &DLWrapper::__dlpack__)
-            .def("__dlpack_device__", &DLWrapper::__dlpack_device__);
+            .def("__dlpack__", &DLWrapper::getDLpackCapsule)
+            .def("__dlpack_device__", &DLWrapper::getDLpackDevice);
 
     // TODO Comment(getNextBatch): Important convention is that memory of the last batch gets invalid when you call getNextBatch!
     py::class_<DataLoader>(m, "DataLoader")
             .def(py::init<Dataset &, int, int, int>())
             .def("getNextBatch", &DataLoader::getNextBatch)
-            .def("__len__", [](const DataLoader &self) -> int {
+            .def("__len__", [](const DataLoader &self) -> size_t {
                 return self.batchedDataset.getNumberOfBatches();
             });
 
@@ -94,7 +93,7 @@ PYBIND11_MODULE(_core, m) {
             .def(py::init<const size_t,
                 std::string,
                 std::string,
-                std::vector<int>,
+                std::vector<uint32_t>,
                 const bool,
                 std::vector<std::vector<int> >,
                 const bool,
@@ -106,7 +105,7 @@ PYBIND11_MODULE(_core, m) {
             .def("start", &Compressor::start);
 
     py::class_<Decompressor>(m, "Decompressor")
-            .def(py::init<std::vector<int> >())
+            .def(py::init<std::vector<uint32_t> >())
             .def("decompress", [](const Decompressor &self, const std::string &path) -> py::array {
                 // ReSharper disable once CppDFAMemoryLeak
                 const auto data = new std::vector<uint8_t>();

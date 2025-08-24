@@ -8,8 +8,6 @@
 #include <string>
 #include "spdlog/spdlog.h"
 
-#define null nullptr
-
 #ifdef ENABLE_DEBUG_PRINT
 #define LOG_DEBUG(...)   spdlog::log(spdlog::source_loc{__FILE__, __LINE__, SPDLOG_FUNCTION}, spdlog::level::debug, __VA_ARGS__)
 #define LOG_INFO(...)    spdlog::log(spdlog::source_loc{__FILE__, __LINE__, SPDLOG_FUNCTION}, spdlog::level::info, __VA_ARGS__)
@@ -45,7 +43,7 @@ public:
         : refCounter(new int{weakPtr ? 0 : 1}),
           ptr(ptr),
           weakPtr(weakPtr) {
-        if (ptr == null) {
+        if (ptr == nullptr) {
             throw std::runtime_error("Shared pointer cannot handle a null pointer.");
         }
     }
@@ -70,8 +68,8 @@ public:
             ptr = other.ptr;
             weakPtr = other.weakPtr;
 
-            other.refCounter = null;
-            other.ptr = null;
+            other.refCounter = nullptr;
+            other.ptr = nullptr;
             other.weakPtr = false;
         }
 
@@ -82,13 +80,13 @@ public:
         : refCounter(other.refCounter),
           ptr(other.ptr),
           weakPtr(other.weakPtr) {
-        other.refCounter = null;
-        other.ptr = null;
+        other.refCounter = nullptr;
+        other.ptr = nullptr;
         other.weakPtr = false;
     }
 
     void acquire() const {
-        if (refCounter != null) {
+        if (refCounter != nullptr) {
             ++(*refCounter);
         }
     }
@@ -96,7 +94,7 @@ public:
     void release() {
         // Already freed memory cannot be freed twice.
         // Weak pointers are exempted from the reference counting mechanism.
-        if (refCounter == null || weakPtr) return;
+        if (refCounter == nullptr || weakPtr) return;
 
         --(*refCounter);
 
@@ -106,12 +104,12 @@ public:
             // TODO: Fix this!
         }
 
-        refCounter = null;
-        ptr = null;
+        refCounter = nullptr;
+        ptr = nullptr;
     }
 
     T *get() {
-        if (ptr == null) {
+        if (ptr == nullptr) {
             throw std::runtime_error("SharedPtr::get failed because ptr is null.");
         }
 
@@ -119,7 +117,7 @@ public:
     }
 
     T &operator*() const {
-        if (ptr == null) {
+        if (ptr == nullptr) {
             throw std::runtime_error("SharedPtr::operator* failed because ptr is null.");
         }
 
@@ -127,7 +125,7 @@ public:
     }
 
     T *operator->() const {
-        if (ptr == null) {
+        if (ptr == nullptr) {
             std::raise(SIGTRAP);
             // throw std::runtime_error("SharedPtr::operator-> failed because ptr is null.");
         }
@@ -136,7 +134,7 @@ public:
     }
 
     explicit operator bool() const {
-        return ptr != null;
+        return ptr != nullptr;
     }
 
 private:
@@ -155,7 +153,7 @@ public:
 
     explicit ThreadPool(const NonblockingThreadMain &_threadMain, size_t _threadCount);
 
-    void start();
+    void start(); // TODO: Maybe i don't actually end up using this.
 
     void resize(size_t newThreadCount);
 
@@ -202,7 +200,7 @@ private:
 };
 
 inline bool existsEnvVar(const std::string &name) {
-    return std::getenv(name.c_str()) != null;
+    return std::getenv(name.c_str()) != nullptr;
 }
 
 inline uint64_t alignUp(const uint64_t offset, const uint64_t alignTo) {

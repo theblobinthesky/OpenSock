@@ -87,18 +87,22 @@ void castToFP16(const float *data, const size_t size, uint16_t *out) {
     }
 }
 
-int getLength(const std::vector<int> &shape) {
-    int length = 1;
-    for (const int dim: shape) length *= dim;
+uint64_t getLength(const std::vector<uint32_t> &shape) {
+    uint64_t length = 1;
+    for (const uint32_t dim: shape) {
+        length *= dim;
+    }
 
     return length;
 }
 
-int getLength(const uint32_t shape[MAX_SHAPE_SIZE], const size_t shapeSize) {
+uint64_t getLength(const uint32_t shape[MAX_SHAPE_SIZE], const size_t shapeSize) {
     uint64_t length = 1;
-    for (size_t i = 0; i < shapeSize; i++) length *= shape[i];
+    for (size_t i = 0; i < shapeSize; i++) {
+        length *= shape[i];
+    }
 
-    return static_cast<int>(length);
+    return length;
 }
 
 template<typename T>
@@ -135,7 +139,7 @@ void applyShapePermutationInternal(const uint32_t shape[MAX_SHAPE_SIZE], const u
         remapCache[i] = newStrides[inversePermutation[i]];
     }
 
-    const size_t length = getLength(shape, shapeSize);
+    const uint64_t length = getLength(shape, shapeSize);
     for (size_t i = 0; i < length; i++) {
         size_t newIdx = 0;
         for (size_t s = 0; s < shapeSize; s++) {
@@ -184,8 +188,7 @@ void applyBitshuffle(const uint8_t *dataIn, uint8_t *dataOut, const size_t numIt
     }
 }
 
-void revertBitshuffle(const uint8_t *dataIn, const size_t dataInSize, uint8_t *dataOut, const size_t numItems,
-                      const size_t itemSize) {
+void revertBitshuffle(const uint8_t *dataIn, uint8_t *dataOut, const size_t numItems, const size_t itemSize) {
     if (const auto ret = bshuf_bitunshuffle(dataIn, dataOut, numItems, itemSize, 0); ret < 0) {
         throw std::runtime_error(std::format("Bitunshuffle failed with code {}.", ret));
     }
@@ -267,8 +270,8 @@ void applyAllShortOfCodec(uint8_t *dataIn,
     }
 }
 
-size_t getMaxSizeRequiredByCodec(const std::vector<int> &shape) {
-    const size_t size = getLength(shape) * sizeof(float); // TODO: only weak upper bound potentially
+size_t getMaxSizeRequiredByCodec(const std::vector<uint32_t> &shape) {
+    const uint64_t size = getLength(shape) * sizeof(float); // TODO: only weak upper bound potentially
     return ZSTD_compressBound(size);
 }
 
@@ -336,7 +339,7 @@ Compressor::~Compressor() {
     delete[] allocator.getArena();
 }
 
-void Compressor::compressArray(const std::vector<int> &shape,
+void Compressor::compressArray(const std::vector<uint32_t> &shape,
                                uint8_t *dataIn,
                                uint8_t *dataScratch,
                                uint8_t *dataScratch2,
@@ -355,7 +358,7 @@ void Compressor::compressArray(const std::vector<int> &shape,
     }
 
     // Now search for the most appropriate compression:
-    const int size = getLength(shape) * (options.castToFP16 ? 2 : 4);
+    const uint64_t size = getLength(shape) * (options.castToFP16 ? 2 : 4);
 
     // Find the best permutation.
     uint8_t *bitshuffle_out, *bitshuffle_scratch;
@@ -466,11 +469,12 @@ void Compressor::threadMain() {
     workNotify.notify_all();
 }
 
-Decompressor::Decompressor(std::vector<int> _shape) : shape(std::move(_shape)), bufferSize(
-                                                          alignUp(getMaxSizeRequiredByCodec(shape), 16)
-                                                          + alignUp(sizeof(CompressorSettings), 16)),
-                                                      arenaSize(2 * bufferSize),
-                                                      allocator(new uint8_t[arenaSize], arenaSize) {
+Decompressor::Decompressor(std::vector<uint32_t> _shape)
+    : shape(std::move(_shape)), bufferSize(
+          alignUp(getMaxSizeRequiredByCodec(shape), 16)
+          + alignUp(sizeof(CompressorSettings), 16)),
+      arenaSize(2 * bufferSize),
+      allocator(new uint8_t[arenaSize], arenaSize) {
     for (const int dim: shape) {
         if (dim <= 0) {
             throw std::runtime_error("Shape is invalid.");
@@ -497,7 +501,7 @@ void Decompressor::decompress(const std::string &path,
     }
 
     for (size_t i = 0; i < shape.size(); i++) {
-        if (static_cast<int>(settings.shape[i]) != shape[i]) {
+        if (settings.shape[i] != shape[i]) {
             throw std::runtime_error("Encountered file with shape that does not match the decompressor shape.");
         }
     }
@@ -541,7 +545,7 @@ void Decompressor::decompressArray(uint8_t *dataIn, uint8_t *dataScratch,
     // Revert bitshuffle.
     uint8_t *bitshuffle_out, *bitshuffle_scratch;
     if (settings.flags & static_cast<uint64_t>(CompressorFlags::BITSHUFFLE)) {
-        revertBitshuffle(codec_out, codec_out_size, codec_scratch, settings.getShapeLength(), settings.getItemSize());
+        revertBitshuffle(codec_out, codec_scratch, settings.getShapeLength(), settings.getItemSize());
         bitshuffle_out = codec_scratch;
         bitshuffle_scratch = codec_out;
     } else {

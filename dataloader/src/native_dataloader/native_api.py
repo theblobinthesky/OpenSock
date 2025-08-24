@@ -2,6 +2,7 @@ from enum import Enum
 from typing import Callable, List, Tuple
 from . import _core as m
 import jax, jax.numpy as jnp
+import numpy as np
 
 
 class FileType(Enum):
@@ -245,10 +246,6 @@ class Compressor:
         return self._native.start()
 
 
-import numpy as np
-
-
-# TODO: Use jax??? Idk. Maybe not, since this is just for testing.
 class Decompressor:
     def __init__(self, shape: np.ndarray):
         """Wrapper around the native Decompressor."""

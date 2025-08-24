@@ -26,13 +26,13 @@ enum class ItemFormat {
 
 class Head {
 public:
-    Head(FileType _filesType, std::string _dictName, std::vector<int> _shape);
+    Head(FileType _filesType, std::string _dictName, std::vector<uint32_t> _shape);
 
     [[nodiscard]] std::string getExt() const;
 
     [[nodiscard]] std::string getDictName() const;
 
-    [[nodiscard]] const std::vector<int> &getShape() const;
+    [[nodiscard]] const std::vector<uint32_t> &getShape() const;
 
     [[nodiscard]] size_t getShapeSize() const;
 
@@ -46,7 +46,7 @@ private:
     DirectoryType directoryType;
     FileType filesType;
     std::string dictName;
-    std::vector<int> shape;
+    std::vector<uint32_t> shape;
 };
 
 #define IMAGE_HEIGHT(subDir) static_cast<size_t>(subDir.getShape()[0])
@@ -54,11 +54,10 @@ private:
 
 struct DatasetBatch {
     int32_t startingOffset;
-    uint32_t genIdx;
     std::vector<std::vector<std::string> > batchPaths;
 };
 
-// The dataset is threadsafe by-default and tracks in-flight batches.
+// TODO (acktschually necessary or true [lol]?): The dataset is threadsafe by-default and tracks in-flight batches.
 class Dataset {
 public:
     Dataset(std::string _rootDir, std::vector<Head> _heads,
@@ -110,8 +109,6 @@ public:
 
     [[nodiscard]] const std::atomic_int32_t &getLastWaitingBatch() const;
 
-    [[nodiscard]] const std::atomic_uint32_t &getGenIdx() const;
-
     [[nodiscard]] size_t getNumberOfBatches() const;
 
 private:
@@ -121,7 +118,6 @@ private:
     std::unordered_set<int32_t> inFlightBatches;
     std::atomic_int32_t currInFlightBatch;
     std::atomic_int32_t lastWaitingBatch;
-    std::atomic_uint32_t genIdx;
 };
 
 #endif //DATASET_H

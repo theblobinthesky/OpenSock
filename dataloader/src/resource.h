@@ -4,11 +4,10 @@
 #include <cuda_runtime.h>
 #include <vector>
 #include <condition_variable>
+#include <latch>
 #include <queue>
 #include <set>
 #include "dataloader.h"
-
-class ResourceClient;
 
 struct Allocation {
     uint8_t *host;
@@ -24,10 +23,11 @@ struct Allocation {
     }
 
     explicit operator bool() const {
-        return host != null;
+        return host != nullptr;
     }
 };
 
+// Allow for AMD, TPU etc. support later down the line.
 class HostAndGpuDeviceInterface {
 public:
     virtual ~HostAndGpuDeviceInterface() = default;
@@ -51,8 +51,6 @@ public:
     virtual void copyFromHostToGpuMemory(const uint8_t *host, uint8_t *gpu, const uint32_t size) = 0;
 };
 
-// Allow for AMD, TPU etc. support later down the line.
-
 class MirroredAllocator {
 public:
     explicit MirroredAllocator(HostAndGpuDeviceInterface *device);
@@ -67,7 +65,11 @@ public:
 
     void handOff(const uint8_t *gpuPtr);
 
-    [[nodiscard]] bool isDrainingOldGeneration() const;
+    [[nodiscard]] std::mutex &getDrainMutex();
+
+    [[nodiscard]] std::condition_variable &getDrainCv();
+
+    [[nodiscard]] bool isDrained() const;
 
 private:
     HostAndGpuDeviceInterface *device;
@@ -81,9 +83,10 @@ private:
     std::set<const uint8_t *> allocAndHandOffGpuData;
     std::vector<Allocation> freeList;
 
-    std::atomic_int32_t genIdx = 0;
-    std::atomic_int32_t newGenIdx = 0;
     std::mutex allocateMutex;
+
+    std::mutex drainMutex;
+    std::condition_variable drainCv;
 
 public:
     std::atomic<uint64_t> memoryNotify;
@@ -116,9 +119,9 @@ private:
     void setGpuMemoryPoolReleaseThreshold(size_t bytes) const;
 
     cudaMemPool_t pool = {};
-    uint8_t *hostData = null;
-    uint8_t *gpuData = null;
-    cudaStream_t stream;
+    uint8_t *hostData = nullptr;
+    uint8_t *gpuData = nullptr;
+    cudaStream_t stream = {};
 
     std::unordered_map<uint64_t, cudaEvent_t> fenceToEventMap;
     std::atomic_uint64_t eventIndex;
@@ -132,13 +135,13 @@ struct PrefetchItem {
     bool operator<(const PrefetchItem &other) const;
 };
 
+class DataLoader;
+
 class ResourcePool {
 public:
     static SharedPtr<ResourcePool> getInstance();
 
-    static std::atomic_uint64_t acquiredClientId;
-
-    void acquire(uint64_t clientId, size_t numItems, size_t itemSize);
+    PrefetchItem acquireAndGetNextBatch(DataLoader *dataLoader);
 
     void synchronizeConsumerStream(uint64_t fence, uintptr_t consumerStream);
 
@@ -146,8 +149,12 @@ public:
 
     [[nodiscard]] MirroredAllocator *getAllocator() noexcept;
 
+    [[nodiscard]] uint64_t getGenIdx() const noexcept;
+
 private:
     explicit ResourcePool();
+
+    ~ResourcePool();
 
     PREVENT_COPY_OR_MOVE(ResourcePool)
 
@@ -159,35 +166,18 @@ private:
     MirroredAllocator allocator;
 
     // Everything related to data sources.
-    DataLoader &dl;
+    DataLoader *dl;
+    std::atomic_uint64_t genIdx;
 
     // Everything related to threading.
+    std::unique_ptr<std::latch> genChangeAssemble;
+    std::unique_ptr<std::latch> genChangeSendOff;
     std::priority_queue<PrefetchItem> prefetchCache;
     std::condition_variable prefetchCacheNotify;
     std::mutex prefetchCacheMutex;
 
     // The thread pool must be last, so it's destroyed first before all other members.
     ThreadPool threadPool;
-};
-
-class ResourceClient {
-public:
-    explicit ResourceClient(uint64_t clientId, size_t numItems, size_t itemSize);
-
-    void acquire();
-
-    // TODO: Remove.
-    [[nodiscard]] bool allocate(BumpAllocator<Allocation> &subAllocator);
-
-    [[nodiscard]] int getClientId() const;
-
-private:
-    uint64_t clientId;
-    size_t numItems;
-    size_t itemSize;
-
-    SharedPtr<ResourcePool> pool;
-    std::mutex mutex;
 };
 
 #endif //RESOURCE_H

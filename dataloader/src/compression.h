@@ -24,7 +24,7 @@ public:
     CompressorOptions(const size_t numThreads,
                       std::string inputDirectory, // TODO: Migrate to dataset later.
                       std::string outputDirectory, // TODO: Migrate to dataset later.
-                      std::vector<int> shape,
+                      std::vector<uint32_t> shape,
                       const bool castToFP16,
                       std::vector<std::vector<int> > permutations,
                       const bool withBitshuffle,
@@ -44,7 +44,7 @@ public:
     size_t numThreads;
     std::string inputDirectory; // TODO: Migrate to dataset later.
     std::string outputDirectory; // TODO: Migrate to dataset later.
-    std::vector<int> shape;
+    std::vector<uint32_t> shape;
     bool castToFP16;
     std::vector<std::vector<int> > permutations;
     bool withBitshuffle;
@@ -71,7 +71,7 @@ struct CompressorSettings {
 
     uint32_t compressedSize;
 
-    void setShape(const std::vector<int> &newShape) {
+    void setShape(const std::vector<uint32_t> &newShape) {
         shapeSize = newShape.size();
         for (size_t i = 0; i < shapeSize; i++) {
             shape[i] = newShape[i];
@@ -121,7 +121,7 @@ public:
     void start();
 
 private:
-    void compressArray(const std::vector<int> &shape,
+    void compressArray(const std::vector<uint32_t> &shape,
                        uint8_t *dataIn,
                        uint8_t *dataScratch,
                        uint8_t *dataScratch2,
@@ -151,7 +151,7 @@ public:
 
 class Decompressor {
 public:
-    explicit Decompressor(std::vector<int> _shape);
+    explicit Decompressor(std::vector<uint32_t> _shape);
 
     PREVENT_COPY_OR_MOVE(Decompressor)
 
@@ -165,7 +165,7 @@ private:
                                 uint8_t *&dataOut,
                                 size_t &dataSizeOut);
 
-    std::vector<int> shape;
+    std::vector<uint32_t> shape;
     size_t bufferSize;
     size_t arenaSize;
     BumpAllocator<uint8_t *> allocator;
