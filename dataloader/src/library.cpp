@@ -73,7 +73,7 @@ PYBIND11_MODULE(_core, m) {
             .def("__len__", &BatchedDataset::getNumberOfBatches);
 
     py::class_<DLWrapper>(m, "DLWrapper")
-            .def("__dlpack__", &DLWrapper::getDLpackCapsule)
+            .def("__dlpack__", &DLWrapper::getDLpackCapsule, py::arg("stream") = py::none())
             .def("__dlpack_device__", &DLWrapper::getDLpackDevice);
 
     // TODO Comment(getNextBatch): Important convention is that memory of the last batch gets invalid when you call getNextBatch!
@@ -137,6 +137,7 @@ PYBIND11_MODULE(_core, m) {
     try {
         const py::module_ atexit = py::module_::import("atexit");
         atexit.attr("register")(py::cpp_function([]() {
+            LOG_DEBUG("atexit has been called");
             ResourcePool::get().shutdown();
         }));
     } catch (const std::exception &e) {

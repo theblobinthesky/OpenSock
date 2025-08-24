@@ -36,11 +36,16 @@ using NonblockingThreadMain = std::function<void()>;
 
 using BlockingThreadMain = std::function<void(size_t, const std::atomic_uint32_t &)>;
 
+// Called by the pool when resizing down, so blocked workers can be woken up.
+using WakeupForPoolResize = std::function<void()>;
+
 class ThreadPool {
 public:
-    explicit ThreadPool(BlockingThreadMain _threadMain, size_t _threadCount);
+    explicit ThreadPool(BlockingThreadMain _threadMain, size_t _threadCount,
+                        WakeupForPoolResize _wakeupForPoolResize = {});
 
-    explicit ThreadPool(const NonblockingThreadMain &_threadMain, size_t _threadCount);
+    explicit ThreadPool(const NonblockingThreadMain &_threadMain, size_t _threadCount,
+                        WakeupForPoolResize _wakeupForPoolResize = {});
 
     void start(); // TODO: Maybe i don't actually end up using this.
 
@@ -58,6 +63,7 @@ private:
     BlockingThreadMain threadMain;
     std::atomic_uint32_t desiredThreadCount;
     std::vector<std::thread> threads;
+    WakeupForPoolResize wakeupForPoolResize;
 
     void extendedThreadMain(size_t threadIdx) const;
 };

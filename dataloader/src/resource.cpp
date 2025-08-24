@@ -179,8 +179,7 @@ void CudaHostAndGpuDeviceInterface::freeEverything() {
 
     if (stream) {
         if (const auto err = cudaStreamDestroy(stream); err != cudaSuccess) {
-            LOG_ERROR("cudaStreamDestroy failed.");
-            std::terminate();
+            LOG_WARNING("cudaStreamDestroy failed.");
         }
         stream = {};
     }
@@ -276,7 +275,16 @@ ResourcePool::ResourcePool() : allocator(&device), dl(nullptr),
                                threadPool(
                                    [this](const size_t threadIdx, const std::atomic_uint32_t &desiredThreadCount) {
                                        this->threadMain(threadIdx, desiredThreadCount);
-                                   }, 0) {
+                                   },
+                                   0,
+                                   // Wake up any threads waiting on our condvars/atomics during pool resize.
+                                   [this]() {
+                                       // Wake threads waiting on prefetch order / cache availability.
+                                       prefetchCacheNotify.notify_all();
+                                       // Wake threads waiting on allocator memory availability.
+                                       allocator.memoryNotify.fetch_add(1);
+                                       allocator.memoryNotify.notify_all();
+                                   }) {
 }
 
 ResourcePool::~ResourcePool() {
@@ -311,6 +319,8 @@ void ResourcePool::threadMain(const size_t threadIdx, const std::atomic_uint32_t
 #define DO_SHUTDOWN_OR_GENCHANGE_IF_NECESSARY() \
     if (IS_SHUTDOWN_REQUIRED()) { return; } \
     if (IS_GENCHANGE_REQUIRED()) { break; }
+
+    LOG_DEBUG("thread {} started", threadIdx);
 
     const auto temporaryArena = std::make_unique<uint8_t[]>(dl->outputBatchMemorySize);
     auto temporaryAllocator = BumpAllocator(temporaryArena.get(), dl->outputBatchMemorySize);
@@ -352,8 +362,7 @@ void ResourcePool::threadMain(const size_t threadIdx, const std::atomic_uint32_t
         while (!IS_SHUTDOWN_OR_GENCHANGE_REQUIRED()) {
             const uint64_t old = allocator.memoryNotify.load();
 
-            // TODO: I don't think we're handling acquired correctly here.
-            Allocation allocation;
+            Allocation allocation{};
             const bool success = allocator.allocate(allocation);
             allocations = BumpAllocator(allocation, allocation.size);
             if (success) {
@@ -398,7 +407,10 @@ void ResourcePool::threadMain(const size_t threadIdx, const std::atomic_uint32_t
             .gpuAllocations = gpuAllocations,
             .fences = fences,
         });
+        prefetchCacheNotify.notify_all();
     }
+
+    LOG_DEBUG("thread {} shutting down", threadIdx);
 }
 
 PrefetchItem ResourcePool::acquireAndGetNextBatch(DataLoader *dataLoader) {
@@ -414,8 +426,8 @@ PrefetchItem ResourcePool::acquireAndGetNextBatch(DataLoader *dataLoader) {
         // The protocol allows for a clean state transition:
         // Wait for all threads to exit their generational loops.
         // Only then can you safely reinitialize everything.
+        genChangeSendOff = std::make_unique<std::latch>(1);
         if (dl != nullptr) {
-            genChangeSendOff = std::make_unique<std::latch>(1);
             genChangeAssemble = std::make_unique<std::latch>(dl->numThreads);
             // Wait for all threads to stop working.
             genChangeAssemble->wait();

@@ -91,8 +91,6 @@ def verify_correctness(ds, dl, root_dir, bs, reps=1):
                 axs[0][0].imshow(batch['img'][i])
                 axs[0][1].imshow(pil_img)
                 plt.show()
-            else:
-                print(f"matching on {batch_idx=}, {i=}")
 
             assert np.all(err < 10 / 255.0), f"Error too high for image {path}"
 
@@ -101,11 +99,11 @@ def test_one_dataloader_once():
     ds, dl, root_dir = get_dataloader(batch_size=16)
     verify_correctness(ds, dl, root_dir, bs=16)
 
-# def test_one_dataloader_trice():
-#     ds, dl, root_dir = get_dataloader(batch_size=16)
-#     verify_correctness(ds, dl, root_dir, bs=16, reps=3)
+def test_one_dataloader_trice():
+    ds, dl, root_dir = get_dataloader(batch_size=16)
+    verify_correctness(ds, dl, root_dir, bs=16, reps=3)
 
-# def test_three_dlers_without_next_batch(): # This is the Test you should worry about. It is failing!
+# def test_three_dlers_without_next_batch():
 #     (dl1, dl2, dl3), (ds1, ds2, ds3), root_dir = get_dataloaders(batch_size=16)
 #     print(f"{ds1.entries[0]=}")
 #     verify_correctness(ds1, dl1, root_dir, bs=16)

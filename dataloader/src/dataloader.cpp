@@ -99,9 +99,8 @@ py::dict DataLoader::getNextBatch() {
         auto *const shapeArr = new int64_t[ndim]{};
         shapeArr[0] = static_cast<int64_t>(batchSize);
         for (size_t s = 0; s < shape.size(); s++) {
-            shapeArr[s + 1] = shape[s];
+            shapeArr[s + 1] = static_cast<int64_t>(shape[s]);
         }
-        std::memcpy(shapeArr + 1, shape.data(), shape.size() * sizeof(uint32_t));
 
         uint8_t itemCode;
         switch (head.getItemFormat()) {
@@ -137,7 +136,7 @@ py::dict DataLoader::getNextBatch() {
         };
 
         // ReSharper disable once CppDFAMemoryLeak
-        void *wrapper = new DLWrapper(fence, deviceType, deviceId, dlManagedTensor);
+        auto *wrapper = new DLWrapper(fence, deviceType, deviceId, dlManagedTensor);
         dlManagedTensor->manager_ctx = wrapper;
 
         // Lifetime is explicit; no refcount acquire needed.

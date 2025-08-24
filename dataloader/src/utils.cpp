@@ -3,14 +3,18 @@
 #include <barrier>
 #include <utility>
 
-ThreadPool::ThreadPool(BlockingThreadMain _threadMain, const size_t _threadCount)
+ThreadPool::ThreadPool(BlockingThreadMain _threadMain, const size_t _threadCount,
+                       WakeupForPoolResize _wakeupForPoolResize)
     : threadMain(std::move(_threadMain)),
-      desiredThreadCount(_threadCount) {
+      desiredThreadCount(_threadCount),
+      wakeupForPoolResize(std::move(_wakeupForPoolResize)) {
 }
 
-ThreadPool::ThreadPool(const NonblockingThreadMain &_threadMain, const size_t _threadCount)
+ThreadPool::ThreadPool(const NonblockingThreadMain &_threadMain, const size_t _threadCount,
+                       WakeupForPoolResize _wakeupForPoolResize)
     : threadMain([_threadMain](size_t, const std::atomic_uint32_t &) { _threadMain(); }),
-      desiredThreadCount(_threadCount) {
+      desiredThreadCount(_threadCount),
+      wakeupForPoolResize(std::move(_wakeupForPoolResize)) {
 }
 
 void ThreadPool::start() {
@@ -25,6 +29,12 @@ void ThreadPool::resize(const size_t newThreadCount) {
     const size_t oldThreadCount = desiredThreadCount.load();
     desiredThreadCount = newThreadCount;
 
+    // If we are downsizing, wake up any threads potentially blocked on
+    // external condition variables/atomics so they can observe shutdown.
+    if (wakeupForPoolResize && newThreadCount < oldThreadCount) {
+        wakeupForPoolResize();
+    }
+
     // Downsize, if necessary.
     for (size_t i = newThreadCount; i < oldThreadCount; i++) {
         if (auto &thread = threads[i]; thread.joinable()) {
@@ -32,10 +42,12 @@ void ThreadPool::resize(const size_t newThreadCount) {
         }
     }
 
-    threads.resize(newThreadCount);
+    if (newThreadCount < oldThreadCount) {
+        threads.resize(newThreadCount);
+    }
 
     // Upsize, if necessary.
-    for (size_t i = desiredThreadCount; i < newThreadCount; i++) {
+    for (size_t i = oldThreadCount; i < newThreadCount; i++) {
         threads.emplace_back(&ThreadPool::extendedThreadMain, this, i);
     }
 
