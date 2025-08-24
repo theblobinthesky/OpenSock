@@ -52,13 +52,13 @@ DLWrapper::DLWrapper(const uint64_t fence,
 }
 
 pybind11::capsule DLWrapper::getDLpackCapsule(const pybind11::object &consumerStreamObject) const {
-    const auto resourcePool = ResourcePool::getInstance();
+    auto &resourcePool = ResourcePool::get();
 
     if (consumerStreamObject.is_none()) {
-        resourcePool->synchronizeHostDevice(fence);
+        resourcePool.synchronizeHostDevice(fence);
     } else {
         const auto consumerStream = static_cast<uintptr_t>(py::int_(consumerStreamObject));
-        resourcePool->synchronizeConsumerStream(fence, consumerStream);
+        resourcePool.synchronizeConsumerStream(fence, consumerStream);
     }
 
     return pybind11::capsule(dlManagedTensor, "dltensor");
@@ -71,8 +71,7 @@ std::pair<int, int> DLWrapper::getDLpackDevice() const {
 
 // ReSharper disable once CppParameterMayBeConstPtrOrRef
 void deleter(DLManagedTensor *self) {
-    ResourcePool::getInstance().release(); // These link ***.
-    ResourcePool::getInstance()->getAllocator()->free(static_cast<uint8_t *>(self->dl_tensor.data));
+    ResourcePool::get().getAllocator()->free(static_cast<uint8_t *>(self->dl_tensor.data));
     delete[] self->dl_tensor.shape;
     delete[] self->dl_tensor.strides;
     delete static_cast<DLWrapper *>(self->manager_ctx);
@@ -81,10 +80,10 @@ void deleter(DLManagedTensor *self) {
 
 py::dict DataLoader::getNextBatch() {
     const auto [datasetStartingOffset, gpuAllocations, fences]
-            = ResourcePool::getInstance()->acquireAndGetNextBatch(this);
+            = ResourcePool::get().acquireAndGetNextBatch(this);
 
     LOG_DEBUG("Loading from; datasetStartingOffset: {}, genIdx: {}",
-              datasetStartingOffset, ResourcePool::getInstance()->getGenIdx());
+              datasetStartingOffset, ResourcePool::get().getGenIdx());
 
     py::dict pyBatch;
     const auto &heads = batchedDataset.getDataset().getHeads();
@@ -92,7 +91,7 @@ py::dict DataLoader::getNextBatch() {
         const Head &head = heads[i];
         uint8_t *gpuAllocation = gpuAllocations[i];
         const uint64_t fence = fences[i];
-        ResourcePool::getInstance()->getAllocator()->handOff(gpuAllocation);
+        ResourcePool::get().getAllocator()->handOff(gpuAllocation);
 
         const std::vector<uint32_t> &shape = head.getShape();
         const int ndim = static_cast<int>(shape.size()) + 1;
@@ -141,7 +140,7 @@ py::dict DataLoader::getNextBatch() {
         void *wrapper = new DLWrapper(fence, deviceType, deviceId, dlManagedTensor);
         dlManagedTensor->manager_ctx = wrapper;
 
-        ResourcePool::getInstance().acquire(); // TODO: Make this stuff more robust. I don't like it. These link ***.
+        // Lifetime is explicit; no refcount acquire needed.
         pyBatch[head.getDictName().c_str()] = py::cast(wrapper, py::return_value_policy::reference);
     }
 

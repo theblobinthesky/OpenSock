@@ -253,3 +253,13 @@ class Decompressor:
 
     def decompress(self, path: str) -> np.ndarray:
         return self._native.decompress(path)
+
+
+def shutdown_resource_pool() -> None:
+    """Shut down the global resource pool and free GPU/host memory.
+
+    Stops internal threads, waits for in-flight buffers to be returned,
+    and releases associated CUDA resources. Safe to call multiple times.
+    The resource pool is also shut down automatically at interpreter exit.
+    """
+    m.shutdown_resource_pool()

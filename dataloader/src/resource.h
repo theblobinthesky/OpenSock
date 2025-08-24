@@ -57,6 +57,8 @@ public:
 
     ~MirroredAllocator();
 
+    void reset();
+
     void reserveAtLeast(size_t newNumItems, size_t newItemSize);
 
     bool allocate(Allocation &alloc);
@@ -139,7 +141,11 @@ class DataLoader;
 
 class ResourcePool {
 public:
-    static SharedPtr<ResourcePool> getInstance();
+    // Explicitly-managed singleton. Lives for process lifetime unless shutdown() is called.
+    static ResourcePool &get();
+
+    // Explicit shutdown to release threads and device memory.
+    void shutdown();
 
     PrefetchItem acquireAndGetNextBatch(DataLoader *dataLoader);
 
@@ -161,7 +167,6 @@ private:
     void threadMain(size_t threadIdx, const std::atomic_uint32_t &desiredThreadCount);
 
     // Everything related to memory.
-    static SharedPtr<ResourcePool> instance;
     CudaHostAndGpuDeviceInterface device;
     MirroredAllocator allocator;
 

@@ -3,7 +3,6 @@
 #include <atomic>
 #include <barrier>
 #include <functional>
-#include <csignal>
 #include <semaphore>
 #include <string>
 #include "spdlog/spdlog.h"
@@ -32,116 +31,6 @@
     PREVENT_MOVE(ClassName) \
     PREVENT_COPY(ClassName)
 
-
-template<typename T>
-class SharedPtr {
-public:
-    SharedPtr() : refCounter(nullptr), ptr(nullptr), weakPtr(false) {
-    }
-
-    explicit SharedPtr(T *ptr, const bool weakPtr = false)
-        : refCounter(new int{weakPtr ? 0 : 1}),
-          ptr(ptr),
-          weakPtr(weakPtr) {
-        if (ptr == nullptr) {
-            throw std::runtime_error("Shared pointer cannot handle a null pointer.");
-        }
-    }
-
-    ~SharedPtr() {
-        release();
-    }
-
-    SharedPtr &operator=(const SharedPtr &other) = delete;
-
-    SharedPtr(const SharedPtr &other) : refCounter(other.refCounter), ptr(other.ptr), weakPtr(false) {
-        acquire();
-    }
-
-    SharedPtr &operator=(SharedPtr &&other) noexcept {
-        if (this != &other) {
-            // This instance might have held an old pointer.
-            // Make sure to not leave it dangling.
-            release();
-
-            refCounter = other.refCounter;
-            ptr = other.ptr;
-            weakPtr = other.weakPtr;
-
-            other.refCounter = nullptr;
-            other.ptr = nullptr;
-            other.weakPtr = false;
-        }
-
-        return *this;
-    }
-
-    SharedPtr(SharedPtr &&other) noexcept
-        : refCounter(other.refCounter),
-          ptr(other.ptr),
-          weakPtr(other.weakPtr) {
-        other.refCounter = nullptr;
-        other.ptr = nullptr;
-        other.weakPtr = false;
-    }
-
-    void acquire() const {
-        if (refCounter != nullptr) {
-            ++(*refCounter);
-        }
-    }
-
-    void release() {
-        // Already freed memory cannot be freed twice.
-        // Weak pointers are exempted from the reference counting mechanism.
-        if (refCounter == nullptr || weakPtr) return;
-
-        --(*refCounter);
-
-        if (*refCounter == 0) {
-            // delete refCounter;
-            // delete ptr;
-            // TODO: Fix this!
-        }
-
-        refCounter = nullptr;
-        ptr = nullptr;
-    }
-
-    T *get() {
-        if (ptr == nullptr) {
-            throw std::runtime_error("SharedPtr::get failed because ptr is null.");
-        }
-
-        return ptr;
-    }
-
-    T &operator*() const {
-        if (ptr == nullptr) {
-            throw std::runtime_error("SharedPtr::operator* failed because ptr is null.");
-        }
-
-        return *ptr;
-    }
-
-    T *operator->() const {
-        if (ptr == nullptr) {
-            std::raise(SIGTRAP);
-            // throw std::runtime_error("SharedPtr::operator-> failed because ptr is null.");
-        }
-
-        return ptr;
-    }
-
-    explicit operator bool() const {
-        return ptr != nullptr;
-    }
-
-private:
-    int *refCounter;
-    T *ptr;
-    bool weakPtr;
-};
 
 using NonblockingThreadMain = std::function<void()>;
 

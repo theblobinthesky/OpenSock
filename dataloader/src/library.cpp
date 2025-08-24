@@ -1,6 +1,7 @@
 #include "dataset.h"
 #include "dataloader.h"
 #include "compression.h"
+#include "resource.h"
 #include <pybind11/numpy.h>
 
 #define STRINGIFY(x) #x
@@ -128,6 +129,20 @@ PYBIND11_MODULE(_core, m) {
                 });
                 return {dtype, shape, data->data(), capsule};
             });
+
+    // Expose explicit shutdown for the global resource pool.
+    m.def("shutdown_resource_pool", [] { ResourcePool::get().shutdown(); });
+
+    // Ensure automatic shutdown on interpreter exit.
+    try {
+        const py::module_ atexit = py::module_::import("atexit");
+        atexit.attr("register")(py::cpp_function([]() {
+            ResourcePool::get().shutdown();
+        }));
+    } catch (const std::exception &e) {
+        // Swallow errors to avoid import-time failures if atexit is unavailable.
+        LOG_WARNING("Failed to register atexit shutdown: {}", e.what());
+    }
 
 #ifdef VERSION_INFO
     m.attr("__version__") = MACRO_STRINGIFY(VERSION_INFO);

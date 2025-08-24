@@ -12,11 +12,24 @@ MirroredAllocator::~MirroredAllocator() {
     device->freeEverything();
 }
 
+void MirroredAllocator::reset() {
+    // Free device/host resources first.
+    device->freeEverything();
+    // Then clear allocator bookkeeping.
+    std::unique_lock lock(allocateMutex);
+    allocAndHandOffGpuData.clear();
+    freeList.clear();
+    numItems = 0;
+    itemSize = 0;
+    hostData = nullptr;
+    gpuData = nullptr;
+}
+
 void MirroredAllocator::reserveAtLeast(const size_t newNumItems, const size_t newItemSize) {
     std::unique_lock lock(allocateMutex); // TODO: Remove?
 
     LOG_DEBUG("reserveAtLeast newNumItems={}, newItemSize={}", newNumItems, newItemSize);
-    // TODO: I don't think this is necessary anymore. cudaStreamSynchronize(ResourcePool::getInstance()->getCudaStream());
+    // TODO: I don't think this is necessary anymore. cudaStreamSynchronize(ResourcePool::get().getCudaStream());
     // TODO: OLD EXPLANATION: This is ugly, but necessary atp bc. otherwise we might not be done async copying when we hand off to jax.
     // TODO: OLD EXPLANATION: Find a better option than this, so we don't stall quite as much.
     if (const size_t requiredSize = newNumItems * newItemSize; requiredSize > numItems * itemSize) {
@@ -114,7 +127,13 @@ CudaHostAndGpuDeviceInterface::CudaHostAndGpuDeviceInterface() {
 }
 
 uint8_t *CudaHostAndGpuDeviceInterface::hostMemoryChangeSizeAndInvalidateMemory(const size_t size) {
-    cudaStreamSynchronize(stream);
+    if (!stream) {
+        if (const cudaError_t err = cudaStreamCreate(&stream); err != cudaSuccess) {
+            throw std::runtime_error("cudaStreamCreate failed.");
+        }
+    } else {
+        cudaStreamSynchronize(stream);
+    }
 
     freeEverything();
 
@@ -128,6 +147,12 @@ uint8_t *CudaHostAndGpuDeviceInterface::hostMemoryChangeSizeAndInvalidateMemory(
 uint8_t *CudaHostAndGpuDeviceInterface::gpuMemoryIncreasePoolSizeAndInvalidateMemory(const size_t size) {
     LOG_DEBUG("Increasing gpu memory pool to {}", size);
     setGpuMemoryPoolReleaseThreshold(size);
+
+    if (!stream) {
+        if (const cudaError_t err = cudaStreamCreate(&stream); err != cudaSuccess) {
+            throw std::runtime_error("cudaStreamCreate failed.");
+        }
+    }
 
     if (gpuData != nullptr) {
         if (const auto err = cudaFreeAsync(gpuData, stream); err != cudaSuccess) {
@@ -152,10 +177,16 @@ void CudaHostAndGpuDeviceInterface::freeEverything() {
     // The gpu memory is handled by a cuda memory pool.
     // Beyond destroying the stream, no additional cleanup is required.
 
-    if (const auto err = cudaStreamDestroy(stream); err != cudaSuccess) {
-        LOG_ERROR("cudaStreamDestroy failed.");
-        std::terminate();
+    if (stream) {
+        if (const auto err = cudaStreamDestroy(stream); err != cudaSuccess) {
+            LOG_ERROR("cudaStreamDestroy failed.");
+            std::terminate();
+        }
+        stream = {};
     }
+
+    hostData = nullptr;
+    gpuData = nullptr;
 }
 
 uint64_t CudaHostAndGpuDeviceInterface::insertNextFenceIntoStream() {
@@ -222,15 +253,10 @@ void CudaHostAndGpuDeviceInterface::setGpuMemoryPoolReleaseThreshold(size_t byte
     }
 }
 
-
-SharedPtr<ResourcePool> ResourcePool::instance;
-
-SharedPtr<ResourcePool> ResourcePool::getInstance() {
-    if (!instance) {
-        instance = SharedPtr(new ResourcePool(), true);
-    }
-
-    return {instance};
+ResourcePool &ResourcePool::get() {
+    // Intentional leak to avoid implicit destruction order issues; use shutdown() to free resources explicitly.
+    static auto *instance = new ResourcePool();
+    return *instance;
 }
 
 MirroredAllocator *ResourcePool::getAllocator() noexcept {
@@ -256,6 +282,22 @@ ResourcePool::ResourcePool() : allocator(&device), dl(nullptr),
 ResourcePool::~ResourcePool() {
     threadPool.resize(0);
     prefetchCacheNotify.notify_all();
+}
+
+void ResourcePool::shutdown() {
+    // Stop threads and wake any waiters.
+    threadPool.resize(0);
+    prefetchCacheNotify.notify_all();
+
+    // Wait for allocator to drain if there is a current dataloader.
+    if (dl != nullptr) {
+        std::unique_lock lock(allocator.getDrainMutex());
+        allocator.getDrainCv().wait(lock, [this] { return allocator.isDrained(); });
+    }
+
+    // Best-effort cleanup of state.
+    prefetchCache = std::priority_queue<PrefetchItem>();
+    allocator.reset();
 }
 
 void ResourcePool::threadMain(const size_t threadIdx, const std::atomic_uint32_t &desiredThreadCount) {
