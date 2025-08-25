@@ -325,6 +325,7 @@ void BatchedDataset::forgetInFlightBatches() {
     std::unique_lock lock(mutex);
 
     const int firstInFlightBatch = *std::ranges::min_element(inFlightBatches);
+    LOG_DEBUG("firstInFlightBatch: {}", firstInFlightBatch);
     currInFlightBatch = firstInFlightBatch;
     lastWaitingBatch = firstInFlightBatch - static_cast<int32_t>(batchSize);
     inFlightBatches.clear();

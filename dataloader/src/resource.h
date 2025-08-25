@@ -147,7 +147,7 @@ public:
     // Explicit shutdown to release threads and device memory.
     void shutdown();
 
-    PrefetchItem acquireAndGetNextBatch(DataLoader *dataLoader);
+    PrefetchItem acquireAndGetNextBatch(const std::shared_ptr<DataLoader> &dataLoader);
 
     void synchronizeConsumerStream(uint64_t fence, uintptr_t consumerStream);
 
@@ -164,6 +164,8 @@ private:
 
     PREVENT_COPY_OR_MOVE(ResourcePool)
 
+    void wakeupAllThreads();
+
     void threadMain(size_t threadIdx, const std::atomic_uint32_t &desiredThreadCount);
 
     // Everything related to memory.
@@ -171,7 +173,7 @@ private:
     MirroredAllocator allocator;
 
     // Everything related to data sources.
-    DataLoader *dl;
+    std::shared_ptr<DataLoader> dl;
     std::atomic_uint64_t genIdx;
 
     // Everything related to threading.

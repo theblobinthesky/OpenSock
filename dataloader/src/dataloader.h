@@ -23,7 +23,7 @@ private:
     DLManagedTensor *dlManagedTensor;
 };
 
-class DataLoader {
+class DataLoader : public std::enable_shared_from_this<DataLoader> {
 public:
     DataLoader(
         Dataset &_dataset,

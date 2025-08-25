@@ -42,6 +42,8 @@ DataLoader::DataLoader(
         throw std::runtime_error(
             "Prefetch size must be larger or equal than the number of threads.");
     }
+
+    LOG_INFO("DataLoader with id={} initialized.", id);
 }
 
 DLWrapper::DLWrapper(const uint64_t fence,
@@ -80,7 +82,7 @@ void deleter(DLManagedTensor *self) {
 
 py::dict DataLoader::getNextBatch() {
     const auto [datasetStartingOffset, gpuAllocations, fences]
-            = ResourcePool::get().acquireAndGetNextBatch(this);
+            = ResourcePool::get().acquireAndGetNextBatch(shared_from_this());
 
     LOG_DEBUG("Loading from; datasetStartingOffset: {}, genIdx: {}",
               datasetStartingOffset, ResourcePool::get().getGenIdx());

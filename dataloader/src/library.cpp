@@ -77,7 +77,7 @@ PYBIND11_MODULE(_core, m) {
             .def("__dlpack_device__", &DLWrapper::getDLpackDevice);
 
     // TODO Comment(getNextBatch): Important convention is that memory of the last batch gets invalid when you call getNextBatch!
-    py::class_<DataLoader>(m, "DataLoader")
+    py::class_<DataLoader, std::shared_ptr<DataLoader> >(m, "DataLoader")
             .def(py::init<Dataset &, int, int, int>())
             .def("getNextBatch", &DataLoader::getNextBatch)
             .def("__len__", [](const DataLoader &self) -> size_t {

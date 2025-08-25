@@ -277,14 +277,7 @@ ResourcePool::ResourcePool() : allocator(&device), dl(nullptr),
                                        this->threadMain(threadIdx, desiredThreadCount);
                                    },
                                    0,
-                                   // Wake up any threads waiting on our condvars/atomics during pool resize.
-                                   [this]() {
-                                       // Wake threads waiting on prefetch order / cache availability.
-                                       prefetchCacheNotify.notify_all();
-                                       // Wake threads waiting on allocator memory availability.
-                                       allocator.memoryNotify.fetch_add(1);
-                                       allocator.memoryNotify.notify_all();
-                                   }) {
+                                   [this]() { wakeupAllThreads(); }) {
 }
 
 ResourcePool::~ResourcePool() {
@@ -308,6 +301,15 @@ void ResourcePool::shutdown() {
     allocator.reset();
 }
 
+// Wake up any threads waiting on our condvars/atomics during pool resize.
+void ResourcePool::wakeupAllThreads() {
+    // Wake threads waiting on prefetch order / cache availability.
+    prefetchCacheNotify.notify_all();
+    // Wake threads waiting on allocator memory availability.
+    allocator.memoryNotify.fetch_add(1);
+    allocator.memoryNotify.notify_all();
+}
+
 void ResourcePool::threadMain(const size_t threadIdx, const std::atomic_uint32_t &desiredThreadCount) {
 #define IS_SHUTDOWN_REQUIRED() !(threadIdx < desiredThreadCount.load())
 #define IS_GENCHANGE_REQUIRED() (rememberedGenIdx != genIdx.load())
@@ -318,7 +320,7 @@ void ResourcePool::threadMain(const size_t threadIdx, const std::atomic_uint32_t
 
 #define DO_SHUTDOWN_OR_GENCHANGE_IF_NECESSARY() \
     if (IS_SHUTDOWN_REQUIRED()) { return; } \
-    if (IS_GENCHANGE_REQUIRED()) { break; }
+    if (IS_GENCHANGE_REQUIRED()) { continue; }
 
     LOG_DEBUG("thread {} started", threadIdx);
 
@@ -410,18 +412,19 @@ void ResourcePool::threadMain(const size_t threadIdx, const std::atomic_uint32_t
         prefetchCacheNotify.notify_all();
     }
 
-    LOG_DEBUG("thread {} shutting down", threadIdx);
+    LOG_DEBUG("thread {} shutting down; desiredThreadCount={}", threadIdx, desiredThreadCount.load());
 }
 
-PrefetchItem ResourcePool::acquireAndGetNextBatch(DataLoader *dataLoader) {
-    const size_t itemSize = dataLoader->outputBatchMemorySize;
+PrefetchItem ResourcePool::acquireAndGetNextBatch(const std::shared_ptr<DataLoader> &dataLoader) {
+    if (!dataLoader) {
+        throw std::runtime_error("DataLoader for the next batch cannot be null.");
+    }
 
     if (dl == nullptr || dl->id != dataLoader->id) {
         LOG_DEBUG("resource pool acquired with clientId: {}", dataLoader->id);
 
         // Make sure, in time, all threads exit their generational loops
         ++genIdx;
-        prefetchCacheNotify.notify_all();
 
         // The protocol allows for a clean state transition:
         // Wait for all threads to exit their generational loops.
@@ -430,13 +433,20 @@ PrefetchItem ResourcePool::acquireAndGetNextBatch(DataLoader *dataLoader) {
         if (dl != nullptr) {
             genChangeAssemble = std::make_unique<std::latch>(dl->numThreads);
             // Wait for all threads to stop working.
+            LOG_TRACE("got to genchange;");
+            wakeupAllThreads();
             genChangeAssemble->wait();
+
+            LOG_TRACE("got to drainage;");
 
             // Wait for all memory to be returned from the dlpack consumer (i.e. jax, tf., pytorch).
             {
                 std::unique_lock lock(allocator.getDrainMutex());
                 allocator.getDrainCv().wait(lock, [this] { return allocator.isDrained(); });
             }
+
+
+            LOG_TRACE("got beyond drainage;");
 
             // Reset and reinitialize everything.
             dl->batchedDataset.forgetInFlightBatches();
@@ -445,7 +455,7 @@ PrefetchItem ResourcePool::acquireAndGetNextBatch(DataLoader *dataLoader) {
         // Reset and reinitialize.
         dl = dataLoader;
         prefetchCache = std::priority_queue<PrefetchItem>();
-        allocator.reserveAtLeast(dataLoader->prefetchSize, itemSize);
+        allocator.reserveAtLeast(dataLoader->prefetchSize, dataLoader->outputBatchMemorySize);
         threadPool.resize(dataLoader->numThreads);
 
         // Allow the threads to continue exection.
@@ -458,6 +468,7 @@ PrefetchItem ResourcePool::acquireAndGetNextBatch(DataLoader *dataLoader) {
 
     const auto prefetchItem = prefetchCache.top();
     prefetchCache.pop();
+    LOG_DEBUG("acquireAndGetNextBatch datasetStartingOffset={}", prefetchItem.datasetStartingOffset);
     dl->batchedDataset.popWaitingBatch(prefetchItem.datasetStartingOffset);
 
     lock.unlock();

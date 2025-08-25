@@ -70,29 +70,31 @@ def test_get_length():
 
 
 def verify_correctness(ds, dl, root_dir, bs, reps=1):
-    once_entries = [[f"{root_dir}{sub_path}" for sub_path in item] for item in ds.entries]
-    entries = []
-    for i in range(reps):
-        entries.extend(once_entries)
+    # Continuous wrapping across all batches and repetitions (no reset between reps)
+    total_batches = len(dl) * reps
+    paths = [f"{root_dir}{item[0]}" for item in ds.entries]
+    start = 0
 
-    for batch_idx in range(len(dl) * reps):
+    for global_batch_idx in range(total_batches):
         batch = dl.get_next_batch()
-        for i, batch_paths in enumerate(entries[batch_idx * bs:bs + batch_idx * bs]):
-            path = batch_paths[0]
-            pil_img = Image.open(path).convert("RGB")
-            pil_img = np.array(pil_img.resize((WIDTH, HEIGHT)), np.float32)
-            pil_img = pil_img / 255.0
+        imgs = batch['img']
 
-            err = np.mean(np.abs(batch['img'][i] - pil_img))
+        for i in range(bs):
+            path = paths[start % len(ds)]
+            pil_img = Image.open(path).convert("RGB")
+            pil_img = np.array(pil_img.resize((WIDTH, HEIGHT)), np.float32) / 255.0
+
+            err = np.mean(np.abs(imgs[i] - pil_img))
             if not np.all(err < 10 / 255.0):
-                print(f"not matching on {batch_idx=}, {i=}")
+                print(f"not matching on {global_batch_idx=}, {i=}")
                 import matplotlib.pyplot as plt
                 _, axs = plt.subplots(2, 2)
-                axs[0][0].imshow(batch['img'][i])
+                axs[0][0].imshow(imgs[i])
                 axs[0][1].imshow(pil_img)
                 plt.show()
 
             assert np.all(err < 10 / 255.0), f"Error too high for image {path}"
+            start += 1
 
 
 def test_one_dataloader_once():
