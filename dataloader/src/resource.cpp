@@ -15,7 +15,7 @@ void MirroredAllocator::reset() {
     // Free device/host resources first.
     device->freeEverything();
     // Then clear allocator bookkeeping.
-    std::unique_lock lock(allocateMutex);
+    std::unique_lock lock(mutex);
     allocAndHandOffGpuData.clear();
     freeList.clear();
     numItems = 0;
@@ -25,7 +25,7 @@ void MirroredAllocator::reset() {
 }
 
 void MirroredAllocator::reserveAtLeast(const size_t newNumItems, const size_t newItemSize) {
-    std::unique_lock lock(allocateMutex); // TODO: Remove?
+    std::unique_lock lock(mutex);
 
     LOG_DEBUG("reserveAtLeast newNumItems={}, newItemSize={}", newNumItems, newItemSize);
     // TODO: I don't think this is necessary anymore. cudaStreamSynchronize(ResourcePool::get().getCudaStream());
@@ -50,7 +50,7 @@ void MirroredAllocator::reserveAtLeast(const size_t newNumItems, const size_t ne
 }
 
 bool MirroredAllocator::allocate(Allocation &alloc) {
-    std::unique_lock lock(allocateMutex); // TODO: Remove?
+    std::unique_lock lock(mutex);
 
     if (freeList.empty()) {
         // Error: Tried to allocate in an empty pool.
@@ -72,7 +72,7 @@ bool MirroredAllocator::allocate(Allocation &alloc) {
 }
 
 void MirroredAllocator::free(const uint8_t *gpuPtr) {
-    std::unique_lock lock(allocateMutex); // TODO: Remove?
+    std::unique_lock lock(mutex);
     LOG_DEBUG("deleter called");
     const auto gpuDataFound = allocAndHandOffGpuData.find(gpuPtr);
     if (gpuDataFound == allocAndHandOffGpuData.end()) {
@@ -97,12 +97,12 @@ void MirroredAllocator::free(const uint8_t *gpuPtr) {
 }
 
 void MirroredAllocator::handOff(const uint8_t *gpuPtr) {
-    std::unique_lock lock(allocateMutex); // TODO: Remove?
+    std::unique_lock lock(mutex);
     allocAndHandOffGpuData.emplace(gpuPtr);
 }
 
-std::mutex &MirroredAllocator::getDrainMutex() {
-    return drainMutex;
+std::mutex &MirroredAllocator::getMutex() {
+    return mutex;
 }
 
 std::condition_variable &MirroredAllocator::getDrainCv() {
@@ -277,7 +277,11 @@ ResourcePool::ResourcePool() : allocator(&device), dl(nullptr),
                                        this->threadMain(threadIdx, desiredThreadCount);
                                    },
                                    0,
-                                   [this]() { wakeupAllThreads(); }) {
+                                   [this] {
+                                       // Allow the threads to continue exection.
+                                       genChangeSendOff->count_down();
+                                   },
+                                   [this] { wakeupAllThreads(); }) {
 }
 
 ResourcePool::~ResourcePool() {
@@ -288,11 +292,10 @@ ResourcePool::~ResourcePool() {
 void ResourcePool::shutdown() {
     // Stop threads and wake any waiters.
     threadPool.resize(0);
-    prefetchCacheNotify.notify_all();
 
     // Wait for allocator to drain if there is a current dataloader.
     if (dl != nullptr) {
-        std::unique_lock lock(allocator.getDrainMutex());
+        std::unique_lock lock(allocator.getMutex());
         allocator.getDrainCv().wait(lock, [this] { return allocator.isDrained(); });
     }
 
@@ -305,9 +308,12 @@ void ResourcePool::shutdown() {
 void ResourcePool::wakeupAllThreads() {
     // Wake threads waiting on prefetch order / cache availability.
     prefetchCacheNotify.notify_all();
+
     // Wake threads waiting on allocator memory availability.
     allocator.memoryNotify.fetch_add(1);
     allocator.memoryNotify.notify_all();
+
+    // genChangeSendOff->count_down();
 }
 
 void ResourcePool::threadMain(const size_t threadIdx, const std::atomic_uint32_t &desiredThreadCount) {
@@ -333,7 +339,9 @@ void ResourcePool::threadMain(const size_t threadIdx, const std::atomic_uint32_t
         if (IS_GENCHANGE_REQUIRED()) {
             genChangeAssemble->count_down();
             rememberedGenIdx = genIdx.load();
+            LOG_TRACE("thread {} waiting for sendoff", threadIdx);
             genChangeSendOff->wait();
+            LOG_TRACE("thread {} done with sendoff", threadIdx);
             continue;
         }
 
@@ -450,7 +458,7 @@ PrefetchItem ResourcePool::acquireAndGetNextBatch(const std::shared_ptr<DataLoad
 
             // Wait for all memory to be returned from the dlpack consumer (i.e. jax, tf., pytorch).
             {
-                std::unique_lock lock(allocator.getDrainMutex());
+                std::unique_lock lock(allocator.getMutex());
                 allocator.getDrainCv().wait(lock, [this] { return allocator.isDrained(); });
             }
 
@@ -463,9 +471,6 @@ PrefetchItem ResourcePool::acquireAndGetNextBatch(const std::shared_ptr<DataLoad
         prefetchCache = std::priority_queue<PrefetchItem>();
         allocator.reserveAtLeast(dataLoader->prefetchSize, dataLoader->outputBatchMemorySize);
         threadPool.resize(dataLoader->numThreads);
-
-        // Allow the threads to continue exection.
-        genChangeSendOff->count_down();
     }
 
     // Fetch the next batch.

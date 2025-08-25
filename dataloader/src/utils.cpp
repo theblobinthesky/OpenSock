@@ -3,24 +3,22 @@
 #include <barrier>
 #include <utility>
 
-ThreadPool::ThreadPool(BlockingThreadMain _threadMain, const size_t _threadCount,
-                       WakeupForPoolResize _wakeupForPoolResize)
-    : threadMain(std::move(_threadMain)),
-      desiredThreadCount(_threadCount),
-      wakeupForPoolResize(std::move(_wakeupForPoolResize)) {
-}
-
 ThreadPool::ThreadPool(const NonblockingThreadMain &_threadMain, const size_t _threadCount,
-                       WakeupForPoolResize _wakeupForPoolResize)
+                       WakeupForPoolResize _wakeupForPoolDownsize,
+                       WakeupForPoolResize _wakeupForPoolShutdown)
     : threadMain([_threadMain](size_t, const std::atomic_uint32_t &) { _threadMain(); }),
       desiredThreadCount(_threadCount),
-      wakeupForPoolResize(std::move(_wakeupForPoolResize)) {
+      wakeupForPoolDownsize(std::move(_wakeupForPoolDownsize)),
+      wakeupForPoolShutdown(std::move(_wakeupForPoolShutdown)) {
 }
 
-void ThreadPool::start() {
-    for (size_t i = 0; i < desiredThreadCount; i++) {
-        threads.emplace_back(&ThreadPool::extendedThreadMain, this, i);
-    }
+ThreadPool::ThreadPool(BlockingThreadMain _threadMain, const size_t _threadCount,
+                       WakeupForPoolResize _wakeupForPoolDownsize,
+                       WakeupForPoolResize _wakeupForPoolShutdown)
+    : threadMain(std::move(_threadMain)),
+      desiredThreadCount(_threadCount),
+      wakeupForPoolDownsize(std::move(_wakeupForPoolDownsize)),
+      wakeupForPoolShutdown(std::move(_wakeupForPoolShutdown)) {
 }
 
 void ThreadPool::resize(const size_t newThreadCount) {
@@ -31,8 +29,11 @@ void ThreadPool::resize(const size_t newThreadCount) {
 
     // If we are downsizing, wake up any threads potentially blocked on
     // external condition variables/atomics so they can observe shutdown.
-    if (wakeupForPoolResize && newThreadCount < oldThreadCount) {
-        wakeupForPoolResize();
+    if (wakeupForPoolDownsize && newThreadCount > 0) {
+        wakeupForPoolDownsize();
+    }
+    if (wakeupForPoolShutdown && newThreadCount == 0) {
+        wakeupForPoolShutdown();
     }
 
     // Downsize, if necessary.

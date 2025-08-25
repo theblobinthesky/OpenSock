@@ -67,7 +67,7 @@ public:
 
     void handOff(const uint8_t *gpuPtr);
 
-    [[nodiscard]] std::mutex &getDrainMutex();
+    [[nodiscard]] std::mutex &getMutex();
 
     [[nodiscard]] std::condition_variable &getDrainCv();
 
@@ -85,9 +85,7 @@ private:
     std::set<const uint8_t *> allocAndHandOffGpuData;
     std::vector<Allocation> freeList;
 
-    std::mutex allocateMutex;
-
-    std::mutex drainMutex;
+    std::mutex mutex;
     std::condition_variable drainCv;
 
 public:

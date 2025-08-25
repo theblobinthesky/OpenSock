@@ -332,7 +332,7 @@ Compressor::Compressor(CompressorOptions _options) : options(std::move(_options)
 }
 
 void Compressor::start() {
-    threadPool.start();
+    threadPool.resize(options.numThreads);
 
     std::unique_lock lock(workMutex);
     workNotify.wait(lock, [this] {

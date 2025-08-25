@@ -43,13 +43,13 @@ using WakeupForPoolResize = std::function<void()>;
 
 class ThreadPool {
 public:
-    explicit ThreadPool(BlockingThreadMain _threadMain, size_t _threadCount,
-                        WakeupForPoolResize _wakeupForPoolResize = {});
-
     explicit ThreadPool(const NonblockingThreadMain &_threadMain, size_t _threadCount,
-                        WakeupForPoolResize _wakeupForPoolResize = {});
+                        WakeupForPoolResize _wakeupForPoolDownsize = {},
+                        WakeupForPoolResize _wakeupForPoolShutdown = {});
 
-    void start(); // TODO: Maybe i don't actually end up using this.
+    explicit ThreadPool(BlockingThreadMain _threadMain, size_t _threadCount,
+                        WakeupForPoolResize _wakeupForPoolDownsize = {},
+                        WakeupForPoolResize _wakeupForPoolShutdown = {});
 
     void resize(size_t newThreadCount);
 
@@ -65,7 +65,8 @@ private:
     BlockingThreadMain threadMain;
     std::atomic_uint32_t desiredThreadCount;
     std::vector<std::thread> threads;
-    WakeupForPoolResize wakeupForPoolResize;
+    WakeupForPoolResize wakeupForPoolDownsize;
+    WakeupForPoolResize wakeupForPoolShutdown;
 
     void extendedThreadMain(size_t threadIdx) const;
 };

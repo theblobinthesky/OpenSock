@@ -27,9 +27,9 @@ DL_CONFIGS = [
     # (NUM_THREADS, PREFETCH_SIZE)
     (16, 16),
     (16, 4),
-    # (8, 16),
-    # (8, 1),
-    # (8, 2)
+    (8, 16),
+    (8, 1),
+    (8, 2)
 ]
 
 # Pytest fixture to parameterize tests over thread/prefetch configurations.
@@ -229,26 +229,26 @@ def test_correctness_npy(tmp_path, dl_cfg):
     assert np.all(np.ones((16, 3, 3, 4)) == batch)
 
 
-# def test_end_to_end_perf(benchmark):
-#     bs = 16
-#     _, dl, _ = get_dataloader(batch_size=bs, num_threads=16, prefetch_size=16)
+def test_end_to_end_perf(benchmark):
+    bs = 16
+    _, dl, _ = get_dataloader(batch_size=bs, num_threads=24, prefetch_size=3)
 
-#     # Warmup a bit to fill prefetch and spin up threads
-#     for _ in range(min(2, len(dl))):
-#         _ = dl.get_next_batch()
+    # Warmup a bit to fill prefetch and spin up threads
+    for _ in range(min(2, len(dl))):
+        _ = dl.get_next_batch()
 
-#     num_batches = len(dl) * 16  # keep runtime reasonable
+    num_batches = len(dl) * 16  # keep runtime reasonable
 
-#     def fetch_loop():
-#         items = 0
-#         for _ in range(num_batches):
-#             batch = dl.get_next_batch()
-#             x = batch['img']
-#             # Touch shape/size to ensure the object is realized and then drop it
-#             items += int(x.size)
-#             del batch
-#         return items
+    def fetch_loop():
+        items = 0
+        for _ in range(num_batches):
+            batch = dl.get_next_batch()
+            x = batch['img']
+            # Touch shape/size to ensure the object is realized and then drop it
+            items += int(x.size)
+            del batch
+        return items
 
-#     total_items = benchmark(fetch_loop)
-#     # Sanity check to keep benchmark from being optimized away
-#     assert total_items > 0
+    total_items = benchmark(fetch_loop)
+    # Sanity check to keep benchmark from being optimized away
+    assert total_items > 0
