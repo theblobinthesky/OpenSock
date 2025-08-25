@@ -4,8 +4,7 @@
 #include "data.h"
 #include "dataset.h"
 
-MirroredAllocator::MirroredAllocator(HostAndGpuDeviceInterface *device)
-    : device(device) {
+MirroredAllocator::MirroredAllocator(HostAndGpuDeviceInterface *device) : device(device) {
 }
 
 MirroredAllocator::~MirroredAllocator() {
@@ -312,7 +311,7 @@ void ResourcePool::wakeupAllThreads() {
 }
 
 void ResourcePool::threadMain(const size_t threadIdx, const std::atomic_uint32_t &desiredThreadCount) {
-#define IS_SHUTDOWN_REQUIRED() !(threadIdx < desiredThreadCount.load())
+#define IS_SHUTDOWN_REQUIRED() (threadIdx >= desiredThreadCount.load())
 #define IS_GENCHANGE_REQUIRED() (rememberedGenIdx != genIdx.load())
 #define IS_SHUTDOWN_OR_GENCHANGE_REQUIRED() (IS_SHUTDOWN_REQUIRED() || IS_GENCHANGE_REQUIRED())
 
@@ -360,7 +359,19 @@ void ResourcePool::threadMain(const size_t threadIdx, const std::atomic_uint32_t
         // much longer than host->gpu copy.
 
 
+        // Make sure threads don't steal memory from high priority batches that need to be copied immediately.
+        std::unique_lock lock(prefetchCacheMutex);
+        prefetchCacheNotify.wait(lock, [this, startingOffset, &rememberedGenIdx, threadIdx, &desiredThreadCount] {
+            return IS_SHUTDOWN_OR_GENCHANGE_REQUIRED() ||
+                   startingOffset <= dl->batchedDataset.getLastWaitingBatch().load()
+                   + static_cast<int>(dl->batchSize * dl->prefetchSize);
+        });
+        lock.unlock();
+        DO_SHUTDOWN_OR_GENCHANGE_IF_NECESSARY()
+
+
         // Grab a (host,gpu) memory pair.
+        LOG_TRACE("thread {} waiting for memory", threadIdx);
         auto allocations = BumpAllocator(Allocation{}, 0);
         while (!IS_SHUTDOWN_OR_GENCHANGE_REQUIRED()) {
             const uint64_t old = allocator.memoryNotify.load();
@@ -376,30 +387,29 @@ void ResourcePool::threadMain(const size_t threadIdx, const std::atomic_uint32_t
         }
         DO_SHUTDOWN_OR_GENCHANGE_IF_NECESSARY()
 
+
+        LOG_TRACE("thread {} got memory", threadIdx);
         assert(allocations.getArena().host != nullptr);
         std::memcpy(allocations.getArena().host, temporaryAllocator.getArena(), dl->outputBatchMemorySize);
         std::vector<uint8_t *> gpuAllocations;
         std::vector<Fence> fences;
-        if (allocations.getArena()) {
-            for (size_t headIdx = 0; headIdx < heads.size(); headIdx++) {
-                const CpuAllocation &nonPinnedCpuAllocation = hostAllocations[headIdx];
-                const auto &[host, gpu, _] = allocations.allocate(nonPinnedCpuAllocation.batchBufferSize);
+        for (size_t headIdx = 0; headIdx < heads.size(); headIdx++) {
+            const CpuAllocation &nonPinnedCpuAllocation = hostAllocations[headIdx];
+            const auto &[host, gpu, _] = allocations.allocate(nonPinnedCpuAllocation.batchBufferSize);
 
-                // Start async upload to gpu memory as soon as possible.
-                // TODO: This also locked a mutex. Maybe this is still necessary?
-                device.copyFromHostToGpuMemory(host, gpu, nonPinnedCpuAllocation.batchBufferSize);
-                gpuAllocations.push_back(gpu);
-                // TODO: This needs to be synchronized by mutex?
-                fences.push_back(device.insertNextFenceIntoStream());
-            }
+            // Start async upload to gpu memory as soon as possible.
+            // TODO: This also locked a mutex. Maybe this is still necessary?
+            device.copyFromHostToGpuMemory(host, gpu, nonPinnedCpuAllocation.batchBufferSize);
+            gpuAllocations.push_back(gpu);
+            // TODO: This needs to be synchronized by mutex?
+            fences.push_back(device.insertNextFenceIntoStream());
         }
         DO_SHUTDOWN_OR_GENCHANGE_IF_NECESSARY()
 
 
         // Make sure threads submit their batches in dataset order.
-        std::unique_lock lock(prefetchCacheMutex);
-        prefetchCacheNotify.wait(lock, [this, startingOffset, &rememberedGenIdx, threadIdx, &desiredThreadCount] {
-            // Make sure to leave the conditional variable when shutdown is already enabled.
+        std::unique_lock lock2(prefetchCacheMutex);
+        prefetchCacheNotify.wait(lock2, [this, startingOffset, &rememberedGenIdx, threadIdx, &desiredThreadCount] {
             return IS_SHUTDOWN_OR_GENCHANGE_REQUIRED() ||
                    startingOffset - static_cast<int>(dl->batchSize)
                    == dl->batchedDataset.getLastWaitingBatch().load();
@@ -435,20 +445,14 @@ PrefetchItem ResourcePool::acquireAndGetNextBatch(const std::shared_ptr<DataLoad
         if (dl != nullptr) {
             genChangeAssemble = std::make_unique<std::latch>(dl->numThreads);
             // Wait for all threads to stop working.
-            LOG_TRACE("got to genchange;");
             wakeupAllThreads();
             genChangeAssemble->wait();
-
-            LOG_TRACE("got to drainage;");
 
             // Wait for all memory to be returned from the dlpack consumer (i.e. jax, tf., pytorch).
             {
                 std::unique_lock lock(allocator.getDrainMutex());
                 allocator.getDrainCv().wait(lock, [this] { return allocator.isDrained(); });
             }
-
-
-            LOG_TRACE("got beyond drainage;");
 
             // Reset and reinitialize everything.
             dl->batchedDataset.forgetInFlightBatches();

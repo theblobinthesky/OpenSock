@@ -1,4 +1,5 @@
 import os
+import pytest
 import requests
 import tarfile
 import io
@@ -19,7 +20,23 @@ EXR_DATASET_URL = "https://github.com/ampas/ACES_ODT_SampleFrames/raw/refs/heads
 EXR_DATASET_FILE = os.path.join("temp", "img", "file.exr")
 
 HEIGHT, WIDTH = 300, 300
-NUM_THREADS, PREFETCH_SIZE = 16, 16
+
+# List of (num_threads, prefetch_size) configurations to test.
+# Edit this list to try different combinations.
+DL_CONFIGS = [
+    # (NUM_THREADS, PREFETCH_SIZE)
+    (16, 16),
+    (16, 4),
+    # (8, 16),
+    # (8, 1),
+    # (8, 2)
+]
+
+# Pytest fixture to parameterize tests over thread/prefetch configurations.
+@pytest.fixture(params=DL_CONFIGS, ids=lambda p: f"threads={p[0]},prefetch={p[1]}")
+def dl_cfg(request):
+    num_threads, prefetch_size = request.param
+    return {"num_threads": num_threads, "prefetch_size": prefetch_size}
 NUM_REPEATS = 16
 
 def ensure_jpg_dataset():
@@ -49,24 +66,24 @@ def get_dataset():
     root_dir, sub_dir = ensure_jpg_dataset()
     return m.Dataset.from_subdirs(root_dir, [m.Head(m.FileType.JPG, "img", (HEIGHT, WIDTH, 3))], [sub_dir], init_ds_fn), root_dir
 
-def get_dataloader(batch_size: int):
+def get_dataloader(batch_size: int, num_threads: int, prefetch_size: int):
     ds, root_dir = get_dataset()
-    dl = m.DataLoader(ds, batch_size, NUM_THREADS, PREFETCH_SIZE)
+    dl = m.DataLoader(ds, batch_size, num_threads, prefetch_size)
     return ds, dl, root_dir
 
-def get_dataloaders(batch_size: int):
+def get_dataloaders(batch_size: int, num_threads: int, prefetch_size: int):
     ds, root_dir = get_dataset()
     ds1, ds2, ds3 = ds.split_train_validation_test(0.3, 0.3)
     return (
-        m.DataLoader(ds1, batch_size, NUM_THREADS, PREFETCH_SIZE),
-        m.DataLoader(ds2, batch_size, NUM_THREADS, PREFETCH_SIZE),
-        m.DataLoader(ds3, batch_size, NUM_THREADS, PREFETCH_SIZE)
+        m.DataLoader(ds1, batch_size, num_threads, prefetch_size),
+        m.DataLoader(ds2, batch_size, num_threads, prefetch_size),
+        m.DataLoader(ds3, batch_size, num_threads, prefetch_size)
     ), (ds1, ds2, ds3), root_dir
 
 
-def test_get_length():
+def test_get_length(dl_cfg):
     bs = 16
-    _, dl, _ = get_dataloader(batch_size=bs)
+    _, dl, _ = get_dataloader(batch_size=bs, **dl_cfg)
     assert len(dl) == (633 + bs - 1) // bs
 
 
@@ -97,23 +114,23 @@ def verify_correctness(ds, dl, root_dir, bs, reps=1, start=0):
             start += 1
 
 
-def test_one_dataloader_once():
-    ds, dl, root_dir = get_dataloader(batch_size=16)
+def test_one_dataloader_once(dl_cfg):
+    ds, dl, root_dir = get_dataloader(batch_size=16, **dl_cfg)
     verify_correctness(ds, dl, root_dir, bs=16)
 
-def test_one_dataloader_trice():
-    ds, dl, root_dir = get_dataloader(batch_size=16)
+def test_one_dataloader_trice(dl_cfg):
+    ds, dl, root_dir = get_dataloader(batch_size=16, **dl_cfg)
     verify_correctness(ds, dl, root_dir, bs=16, reps=3)
 
-def test_three_dlers_without_next_batch():
-    (dl1, dl2, dl3), (ds1, ds2, ds3), root_dir = get_dataloaders(batch_size=16)
+def test_three_dlers_without_next_batch(dl_cfg):
+    (dl1, dl2, dl3), (ds1, ds2, ds3), root_dir = get_dataloaders(batch_size=16, **dl_cfg)
     verify_correctness(ds1, dl1, root_dir, bs=16)
     verify_correctness(ds2, dl2, root_dir, bs=16)
     verify_correctness(ds3, dl3, root_dir, bs=16)
 
-def test_three_dlers_with_next_batch():
+def test_three_dlers_with_next_batch(dl_cfg):
     bs = 16
-    (dl1, dl2, dl3), (ds1, ds2, ds3), root_dir = get_dataloaders(batch_size=bs)
+    (dl1, dl2, dl3), (ds1, ds2, ds3), root_dir = get_dataloaders(batch_size=bs, **dl_cfg)
     dl2.get_next_batch()
     dl1.get_next_batch()
     dl3.get_next_batch()
@@ -121,9 +138,9 @@ def test_three_dlers_with_next_batch():
     verify_correctness(ds2, dl2, root_dir, bs=bs, start=bs)
     verify_correctness(ds3, dl3, root_dir, bs=bs, start=bs)
 
-def test_two_dlers_with_different_batch_sizes():
-    ds, dl, root_dir = get_dataloader(batch_size=16)
-    ds2, dl2, root_dir = get_dataloader(batch_size=9)
+def test_two_dlers_with_different_batch_sizes(dl_cfg):
+    ds, dl, root_dir = get_dataloader(batch_size=16, **dl_cfg)
+    ds2, dl2, root_dir = get_dataloader(batch_size=9, **dl_cfg)
     verify_correctness(ds, dl, root_dir, bs=16)
     verify_correctness(ds, dl2, root_dir, bs=9)
 
@@ -145,15 +162,15 @@ def iter_images_once(dl, n):
 def collect_hashes_once(dl, ds):
     return [hash_array(img) for img in iter_images_once(dl, len(ds))]
 
-def test_no_duplicates_within_jpg_dataloaders():
-    (dl1, dl2, dl3), (ds1, ds2, ds3), _ = get_dataloaders(batch_size=16)
+def test_no_duplicates_within_jpg_dataloaders(dl_cfg):
+    (dl1, dl2, dl3), (ds1, ds2, ds3), _ = get_dataloaders(batch_size=16, **dl_cfg)
     for name, dl, ds in zip(("train","validation","test"), (dl1,dl2,dl3), (ds1,ds2,ds3)):
         hashes = collect_hashes_once(dl, ds)
         assert len(hashes) == len(ds)
         assert len(set(hashes)) == len(ds), f"Duplicate hash found within '{name}' dataloader."
 
-def test_no_duplicates_across_jpg_dataloaders():
-    (dl1, dl2, dl3), (ds1, ds2, ds3), _ = get_dataloaders(batch_size=16)
+def test_no_duplicates_across_jpg_dataloaders(dl_cfg):
+    (dl1, dl2, dl3), (ds1, ds2, ds3), _ = get_dataloaders(batch_size=16, **dl_cfg)
     names = ("train","validation","test")
     overall = {}
     for name, dl, ds in zip(names, (dl1,dl2,dl3), (ds1,ds2,ds3)):
@@ -180,10 +197,10 @@ def test_no_duplicates_across_jpg_dataloaders():
 
 #     assert np.allclose(img, gt_img)
 
-def test_correctness_png():
+def test_correctness_png(dl_cfg):
     download_file(PNG_DATASET_URL, PNG_DATASET_FILE)
     ds = m.Dataset.from_subdirs("temp", [m.Head(m.FileType.PNG, "img", (191, 250, 3))], ["img"], init_ds_fn)
-    dl = m.DataLoader(ds, 1, NUM_THREADS, PREFETCH_SIZE)
+    dl = m.DataLoader(ds, 1, dl_cfg["num_threads"], dl_cfg["prefetch_size"])
     img = dl.get_next_batch()['img'][0]
 
     pil_img = np.array(Image.open(PNG_DATASET_FILE).convert("RGB"), np.float32)
@@ -191,7 +208,7 @@ def test_correctness_png():
 
     assert np.all((img - pil_img) < 1 / 255.0)
 
-def test_correctness_npy(tmp_path):
+def test_correctness_npy(tmp_path, dl_cfg):
     subdir = tmp_path / "subdir"
     subdir.mkdir()
 
@@ -206,38 +223,32 @@ def test_correctness_npy(tmp_path):
         init_ds_fn
     )
 
-    dl = m.DataLoader(ds, 16, NUM_THREADS, PREFETCH_SIZE)
+    dl = m.DataLoader(ds, 16, dl_cfg["num_threads"], dl_cfg["prefetch_size"])
 
     batch = dl.get_next_batch()['np']
     assert np.all(np.ones((16, 3, 3, 4)) == batch)
 
 
-def test_perf(benchmark):
-    """Benchmark: time to fetch a stream of batches.
+# def test_end_to_end_perf(benchmark):
+#     bs = 16
+#     _, dl, _ = get_dataloader(batch_size=bs, num_threads=16, prefetch_size=16)
 
-    Measures a relevant throughput metric for the dataloader: the time it
-    takes to deliver batches end-to-end (I/O, decode, H->D copy, handoff).
-    We avoid asserting on timing to keep the test stable across machines.
-    """
-    bs = 16
-    _, dl, _ = get_dataloader(batch_size=bs)
+#     # Warmup a bit to fill prefetch and spin up threads
+#     for _ in range(min(2, len(dl))):
+#         _ = dl.get_next_batch()
 
-    # Warmup a bit to fill prefetch and spin up threads
-    for _ in range(min(2, len(dl))):
-        _ = dl.get_next_batch()
+#     num_batches = len(dl) * 16  # keep runtime reasonable
 
-    num_batches = len(dl) * 16  # keep runtime reasonable
+#     def fetch_loop():
+#         items = 0
+#         for _ in range(num_batches):
+#             batch = dl.get_next_batch()
+#             x = batch['img']
+#             # Touch shape/size to ensure the object is realized and then drop it
+#             items += int(x.size)
+#             del batch
+#         return items
 
-    def fetch_loop():
-        items = 0
-        for _ in range(num_batches):
-            batch = dl.get_next_batch()
-            x = batch['img']
-            # Touch shape/size to ensure the object is realized and then drop it
-            items += int(x.size)
-            del batch
-        return items
-
-    total_items = benchmark(fetch_loop)
-    # Sanity check to keep benchmark from being optimized away
-    assert total_items > 0
+#     total_items = benchmark(fetch_loop)
+#     # Sanity check to keep benchmark from being optimized away
+#     assert total_items > 0

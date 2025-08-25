@@ -38,11 +38,6 @@ DataLoader::DataLoader(
             "Batch size, the number of threads and the prefetch size need to be strictly positive.");
     }
 
-    if (_prefetchSize < _numThreads) {
-        throw std::runtime_error(
-            "Prefetch size must be larger or equal than the number of threads.");
-    }
-
     LOG_INFO("DataLoader with id={} initialized.", id);
 }
 

@@ -13,13 +13,14 @@ Meh.. Damn.
 
 TODO (important improvements for production use):
 - Write tests for different prefetch size, thread size configurations
-- Fix all sensible clang-tidy warnings
 - Add support for compressed files in the dataloader
 - Cleanup jpg data loader
 - Write high-perf test suite
 - Deal with parallel dataloaders (as that doesn't really make much sense)
+- Replace existing build system with something much faster and easier to debug
 
 Fixed:
+- Fix all sensible clang-tidy warnings
 
 
 Test results for the compressor:
