@@ -2,6 +2,7 @@ import os
 import requests
 import tarfile
 import io
+import hashlib
 import native_dataloader as m
 import numpy as np
 from PIL import Image
@@ -69,11 +70,10 @@ def test_get_length():
     assert len(dl) == (633 + bs - 1) // bs
 
 
-def verify_correctness(ds, dl, root_dir, bs, reps=1):
+def verify_correctness(ds, dl, root_dir, bs, reps=1, start=0):
     # Continuous wrapping across all batches and repetitions (no reset between reps)
     total_batches = len(dl) * reps
     paths = [f"{root_dir}{item[0]}" for item in ds.entries]
-    start = 0
 
     for global_batch_idx in range(total_batches):
         batch = dl.get_next_batch()
@@ -105,155 +105,69 @@ def test_one_dataloader_trice():
     ds, dl, root_dir = get_dataloader(batch_size=16)
     verify_correctness(ds, dl, root_dir, bs=16, reps=3)
 
-# def test_three_dlers_without_next_batch():
-#     (dl1, dl2, dl3), (ds1, ds2, ds3), root_dir = get_dataloaders(batch_size=16)
-#     print(f"{ds1.entries[0]=}")
-#     verify_correctness(ds1, dl1, root_dir, bs=16)
-#     verify_correctness(ds2, dl2, root_dir, bs=16)
-#     verify_correctness(ds3, dl3, root_dir, bs=16)
+def test_three_dlers_without_next_batch():
+    (dl1, dl2, dl3), (ds1, ds2, ds3), root_dir = get_dataloaders(batch_size=16)
+    verify_correctness(ds1, dl1, root_dir, bs=16)
+    verify_correctness(ds2, dl2, root_dir, bs=16)
+    verify_correctness(ds3, dl3, root_dir, bs=16)
 
-# def test_three_dlers_with_next_batch():
-#     (dl1, dl2, dl3), (ds1, ds2, ds3), root_dir = get_dataloaders(batch_size=16)
-#     dl2.get_next_batch()
-#     dl1.get_next_batch()
-#     dl3.get_next_batch()
-#     verify_correctness(ds1, dl1, root_dir, bs=16)
-#     verify_correctness(ds2, dl2, root_dir, bs=16)
-#     verify_correctness(ds3, dl3, root_dir, bs=16)
+def test_three_dlers_with_next_batch():
+    bs = 16
+    (dl1, dl2, dl3), (ds1, ds2, ds3), root_dir = get_dataloaders(batch_size=bs)
+    dl2.get_next_batch()
+    dl1.get_next_batch()
+    dl3.get_next_batch()
+    verify_correctness(ds1, dl1, root_dir, bs=bs, start=bs)
+    verify_correctness(ds2, dl2, root_dir, bs=bs, start=bs)
+    verify_correctness(ds3, dl3, root_dir, bs=bs, start=bs)
 
-# def test_two_dlers_with_different_batch_sizes():
-#     ds, dl, root_dir = get_dataloader(batch_size=16)
-#     ds2, dl2, root_dir = get_dataloader(batch_size=9)
-#     verify_correctness(ds, dl, root_dir, bs=16)
-#     verify_correctness(ds, dl2, root_dir, bs=9)
+def test_two_dlers_with_different_batch_sizes():
+    ds, dl, root_dir = get_dataloader(batch_size=16)
+    ds2, dl2, root_dir = get_dataloader(batch_size=9)
+    verify_correctness(ds, dl, root_dir, bs=16)
+    verify_correctness(ds, dl2, root_dir, bs=9)
 
-# def hash_array(arr):
-#     arr_np = np.asarray(arr)
-#     return hashlib.md5(arr_np.tobytes()).hexdigest()
+def hash_array(tensor_like) -> str:
+    arr = np.ascontiguousarray(np.asarray(tensor_like))
+    meta = f"{arr.dtype}|{arr.shape}|".encode()
+    return hashlib.sha256(meta + arr.tobytes()).hexdigest()
 
-# def test_no_duplicates_within_jpg_dataloaders():
-#     for i in range(NUM_REPEATS):
-#         dl1, dl2, dl3 = get_dataloaders(batch_size=16)
-#         dataloaders = {"dl1": dl1, "dl2": dl2, "dl3": dl3}
-        
-#         for key, dl in dataloaders.items():
-#             seen_hashes = set()
-#             for _ in range(len(dl)):
-#                 batch = dl.get_next_batch()
-#                 h = hash_array(batch['img'])
-#                 assert h not in seen_hashes, f"Duplicate found within {key}"
-#                 seen_hashes.add(h)
+def iter_images_once(dl, n):
+    yielded = 0
+    for _ in range(len(dl)):
+        batch = dl.get_next_batch()
+        for img in batch['img']:
+            if yielded >= n:
+                return
+            yield img
+            yielded += 1
 
-# def test_no_duplicates_across_jpg_dataloaders():
-#     dl1, dl2, dl3 = get_dataloaders(batch_size=16)
-#     dataloaders = {"dl1": dl1, "dl2": dl2, "dl3": dl3}
-    
-#     overall_hashes = {}
-#     for key, dl in dataloaders.items():
-#         for _ in range(len(dl)):
-#             batch = dl.get_next_batch()
-#             for image in batch['img']:
-#                 h = hash_array(image)
-#                 assert h not in overall_hashes, f"Duplicate found between {overall_hashes[h]} and {key}"
-#                 overall_hashes[h] = key
+def collect_hashes_once(dl, ds):
+    return [hash_array(img) for img in iter_images_once(dl, len(ds))]
 
-# def test_visualize_batches_in_rows():
-#     import matplotlib.pyplot as plt
-#     import numpy as np
+def test_no_duplicates_within_jpg_dataloaders():
+    (dl1, dl2, dl3), (ds1, ds2, ds3), _ = get_dataloaders(batch_size=16)
+    for name, dl, ds in zip(("train","validation","test"), (dl1,dl2,dl3), (ds1,ds2,ds3)):
+        hashes = collect_hashes_once(dl, ds)
+        assert len(hashes) == len(ds)
+        assert len(set(hashes)) == len(ds), f"Duplicate hash found within '{name}' dataloader."
 
-#     (dl1, dl2, dl3), _, _ = get_dataloaders(batch_size=16)
-#     dataloaders = {"dl1": dl1, "dl2": dl2, "dl3": dl3}
-
-#     for name, dl in dataloaders.items():
-#         batch_list = []
-#         for batch_index in range(len(dl)):
-#             batch = dl.get_next_batch()
-#             images = batch['img']
-#             titles = [f"{batch_index}:{img_index}" for img_index in range(len(images))]
-#             batch_list.append((images, titles))
-            
-#         nrows = len(batch_list)
-#         ncols = max(len(images) for images, _ in batch_list)
-
-#         _, axs = plt.subplots(nrows, ncols, figsize=(ncols * 2, nrows * 2))
-#         if nrows == 1:
-#             axs = np.expand_dims(axs, axis=0)
-#         if ncols == 1:
-#             axs = np.expand_dims(axs, axis=1)
-        
-#         for row_idx, (images, titles) in enumerate(batch_list):
-#             for col_idx in range(ncols):
-#                 ax = axs[row_idx][col_idx]
-#                 if col_idx < len(images):
-#                     ax.imshow(images[col_idx])
-#                     ax.set_title(titles[col_idx], fontsize=8)
-#                     ax.axis('off')
-#                 else:
-#                     ax.set_visible(False)
-
-#         plt.suptitle(name)
-#         plt.tight_layout()
-#         plt.show()
+def test_no_duplicates_across_jpg_dataloaders():
+    (dl1, dl2, dl3), (ds1, ds2, ds3), _ = get_dataloaders(batch_size=16)
+    names = ("train","validation","test")
+    overall = {}
+    for name, dl, ds in zip(names, (dl1,dl2,dl3), (ds1,ds2,ds3)):
+        for h in collect_hashes_once(dl, ds):
+            if h in overall:
+                raise AssertionError(
+                    f"Duplicate found! Image in '{name}' was already in '{overall[h]}'."
+                )
+            overall[h] = name
+    total = len(ds1) + len(ds2) + len(ds3)
+    assert len(overall) == total
 
 
-# def test_visualize_3_dataloaders_three_rows_each(batch_size=16):
-#     import matplotlib.pyplot as plt
-#     import numpy as np
-
-#     (dl1, dl2, dl3), _, _ = get_dataloaders(batch_size=batch_size)
-#     dl2.get_next_batch()
-#     dataloaders = {"dl1": dl1, "dl2": dl2, "dl3": dl3}
-#     rows = 3
-
-#     plot_batches = []  # Each element: (loader_name, images, titles)
-#     max_imgs_in_row = 0
-
-#     for loader_name, dl in dataloaders.items():
-#         for batch_idx in range(len(dl)):
-#             batch = dl.get_next_batch()
-#             imgs = batch["img"]
-#             titles = [f"{loader_name} {batch_idx}:{i}" for i in range(len(imgs))]
-#             if batch_idx < rows:
-#                 plot_batches.append((loader_name, imgs, titles))
-#             max_imgs_in_row = max(max_imgs_in_row, len(imgs))
-
-#     total_rows = len(dataloaders) * rows
-#     total_cols = max_imgs_in_row
-
-#     _, axs = plt.subplots(total_rows, total_cols, figsize=(total_cols * 2, total_rows * 2))
-
-#     if total_rows == 1:
-#         axs = np.expand_dims(axs, axis=0)
-#     if total_cols == 1:
-#         axs = np.expand_dims(axs, axis=1)
-
-#     for row_idx, (loader_name, imgs, titles) in enumerate(plot_batches):
-#         for col_idx in range(total_cols):
-#             ax = axs[row_idx][col_idx]
-#             if col_idx < len(imgs):
-#                 ax.imshow(imgs[col_idx])
-#                 ax.set_title(titles[col_idx], fontsize=7)
-#                 ax.axis("off")
-#             else:
-#                 ax.set_visible(False)
-
-#     plt.suptitle(f"First {rows} batches (rows) for each dataloader "
-#                  f"— columns vary with batch size", fontsize=14, y=1.02)
-#     plt.tight_layout()
-#     plt.show()
-
-
-# def test_perf(benchmark):
-#     def performance_benchmark(dl: m.DataLoader):
-#         total_mean = 0.0
-#         num_iters = len(dl) * 64
-#         for _ in range(num_iters):
-#             batch = dl.get_next_batch()
-#             x = batch['img']
-#             total_mean += x.mean()
-
-#     _, dl, _ = get_dataloader(batch_size=16)
-#     benchmark(performance_benchmark, dl)
+ 
 
 # def test_correctness_exr():
 #     download_file(EXR_DATASET_URL, EXR_DATASET_FILE)
@@ -266,33 +180,64 @@ def test_one_dataloader_trice():
 
 #     assert np.allclose(img, gt_img)
 
-# def test_correctness_png():
-#     download_file(PNG_DATASET_URL, PNG_DATASET_FILE)
-#     ds = m.Dataset.from_subdirs("temp", [m.Head(m.FileType.PNG, "img", (191, 250, 3))], ["img"], init_ds_fn)
-#     dl = m.DataLoader(ds, 1, NUM_THREADS, PREFETCH_SIZE)
-#     img = dl.get_next_batch()['img'][0]
+def test_correctness_png():
+    download_file(PNG_DATASET_URL, PNG_DATASET_FILE)
+    ds = m.Dataset.from_subdirs("temp", [m.Head(m.FileType.PNG, "img", (191, 250, 3))], ["img"], init_ds_fn)
+    dl = m.DataLoader(ds, 1, NUM_THREADS, PREFETCH_SIZE)
+    img = dl.get_next_batch()['img'][0]
 
-#     pil_img = np.array(Image.open(PNG_DATASET_FILE).convert("RGB"), np.float32)
-#     pil_img = pil_img / 255.0
+    pil_img = np.array(Image.open(PNG_DATASET_FILE).convert("RGB"), np.float32)
+    pil_img = pil_img / 255.0
 
-#     assert np.all((img - pil_img) < 1 / 255.0)
+    assert np.all((img - pil_img) < 1 / 255.0)
 
-# def test_correctness_npy(tmp_path):
-#     subdir = tmp_path / "subdir"
-#     subdir.mkdir()
+def test_correctness_npy(tmp_path):
+    subdir = tmp_path / "subdir"
+    subdir.mkdir()
 
-#     for i in range(16):
-#         testFile = tmp_path / "subdir" / f"file{i}"
-#         np.save(testFile, np.ones((1, 3, 3, 4), dtype=np.float32))
+    for i in range(16):
+        testFile = tmp_path / "subdir" / f"file{i}"
+        np.save(testFile, np.ones((1, 3, 3, 4), dtype=np.float32))
 
-#     ds = m.Dataset.from_subdirs(
-#         str(tmp_path), 
-#         [m.Head(m.FileType.NPY, "np", (3, 3, 4))],
-#         ["subdir"],
-#         init_ds_fn
-#     )
+    ds = m.Dataset.from_subdirs(
+        str(tmp_path), 
+        [m.Head(m.FileType.NPY, "np", (3, 3, 4))],
+        ["subdir"],
+        init_ds_fn
+    )
 
-#     dl = m.DataLoader(ds, 16, NUM_THREADS, PREFETCH_SIZE)
+    dl = m.DataLoader(ds, 16, NUM_THREADS, PREFETCH_SIZE)
 
-#     batch = dl.get_next_batch()['np']
-#     assert np.all(np.ones((16, 3, 3, 4)) == batch)
+    batch = dl.get_next_batch()['np']
+    assert np.all(np.ones((16, 3, 3, 4)) == batch)
+
+
+def test_perf(benchmark):
+    """Benchmark: time to fetch a stream of batches.
+
+    Measures a relevant throughput metric for the dataloader: the time it
+    takes to deliver batches end-to-end (I/O, decode, H->D copy, handoff).
+    We avoid asserting on timing to keep the test stable across machines.
+    """
+    bs = 16
+    _, dl, _ = get_dataloader(batch_size=bs)
+
+    # Warmup a bit to fill prefetch and spin up threads
+    for _ in range(min(2, len(dl))):
+        _ = dl.get_next_batch()
+
+    num_batches = len(dl) * 16  # keep runtime reasonable
+
+    def fetch_loop():
+        items = 0
+        for _ in range(num_batches):
+            batch = dl.get_next_batch()
+            x = batch['img']
+            # Touch shape/size to ensure the object is realized and then drop it
+            items += int(x.size)
+            del batch
+        return items
+
+    total_items = benchmark(fetch_loop)
+    # Sanity check to keep benchmark from being optimized away
+    assert total_items > 0
