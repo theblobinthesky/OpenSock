@@ -12,15 +12,15 @@ I broke something midway...
 Meh.. Damn.
 
 TODO (important improvements for production use):
-- Write tests for different prefetch size, thread size configurations
 - Add support for compressed files in the dataloader
 - Cleanup jpg data loader
 - Write high-perf test suite
-- Deal with parallel dataloaders (as that doesn't really make much sense)
 - Replace existing build system with something much faster and easier to debug
 
 Fixed:
 - Fix all sensible clang-tidy warnings
+- Write tests for different prefetch size, thread size configurations
+- Deal with parallel dataloaders (as that doesn't really make much sense)
 
 
 Test results for the compressor:

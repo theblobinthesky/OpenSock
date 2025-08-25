@@ -38,8 +38,8 @@ public:
 
     pybind11::dict getNextBatch();
 
-    // private: TODO
     static std::atomic_uint64_t nextId;
+    static std::mutex concurrencyMutex; // TODO: Maybe this is not necessary. Maybe remove this later.
     uint64_t id;
     BatchedDataset batchedDataset;
     const size_t batchSize;

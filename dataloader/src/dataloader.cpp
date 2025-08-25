@@ -7,6 +7,7 @@
 namespace py = pybind11;
 
 std::atomic_uint64_t DataLoader::nextId;
+std::mutex DataLoader::concurrencyMutex;
 
 size_t getOutputBatchMemorySize(const BatchedDataset &batchedDataset, const size_t batchSize) {
     size_t outputBatchMemorySize = 0;
@@ -76,6 +77,7 @@ void deleter(DLManagedTensor *self) {
 }
 
 py::dict DataLoader::getNextBatch() {
+    std::unique_lock lock(concurrencyMutex);
     const auto [datasetStartingOffset, gpuAllocations, fences]
             = ResourcePool::get().acquireAndGetNextBatch(shared_from_this());
 
