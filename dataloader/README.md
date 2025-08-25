@@ -12,11 +12,14 @@ I broke something midway...
 Meh.. Damn.
 
 TODO (important improvements for production use):
-- Add processing list to data loader in order to remove reset race condition
-- Fix tests (they are acktschually incorrect)
-- Fix memcpy race condition
-- Refactor threadpool for each individual dataloader
-- Change order (you know what i mean)
+- Write tests for different prefetch size, thread size configurations
+- Fix all sensible clang-tidy warnings
+- Add support for compressed files in the dataloader
+- Cleanup jpg data loader
+- Write high-perf test suite
+- Deal with parallel dataloaders (as that doesn't really make much sense)
+
+Fixed:
 
 
 Test results for the compressor:

@@ -5,7 +5,7 @@
 #include "dataset.h"
 
 MirroredAllocator::MirroredAllocator(HostAndGpuDeviceInterface *device)
-    : device(device), hostData(nullptr), gpuData(nullptr) {
+    : device(device) {
 }
 
 MirroredAllocator::~MirroredAllocator() {
@@ -188,7 +188,7 @@ void CudaHostAndGpuDeviceInterface::freeEverything() {
     gpuData = nullptr;
 }
 
-uint64_t CudaHostAndGpuDeviceInterface::insertNextFenceIntoStream() {
+Fence CudaHostAndGpuDeviceInterface::insertNextFenceIntoStream() {
     cudaEvent_t event;
     if (cudaEventCreateWithFlags(&event, cudaEventDisableTiming) != cudaSuccess) {
         throw std::runtime_error("cudaEventCreate failed.");
@@ -200,17 +200,18 @@ uint64_t CudaHostAndGpuDeviceInterface::insertNextFenceIntoStream() {
 
     auto fence = eventIndex.fetch_add(1);
     fenceToEventMap.emplace(fence, event);
-    return fence;
+    return {fence};
 }
 
-void CudaHostAndGpuDeviceInterface::synchronizeFenceWithConsumerStream(const uint64_t fence,
-                                                                       const uintptr_t consumerStream) {
-    const auto found = fenceToEventMap.find(fence);
+void CudaHostAndGpuDeviceInterface::synchronizeFenceWithConsumerStream(const Fence fence,
+                                                                       const ConsumerStream consumerStream) {
+    const auto found = fenceToEventMap.find(fence.id);
     if (found == fenceToEventMap.end()) {
         throw std::runtime_error("Fence is invalid.");
     }
 
-    auto consumer = reinterpret_cast<cudaStream_t>(consumerStream);
+    // NOLINTNEXTLINE(performance-no-int-to-ptr)
+    auto consumer = reinterpret_cast<cudaStream_t>(consumerStream.id);
     cudaEvent_t event = found->second;
     if (cudaStreamWaitEvent(consumer, event) != cudaSuccess) {
         throw std::runtime_error("cudaStreamWaitEvent failed.");
@@ -222,8 +223,8 @@ void CudaHostAndGpuDeviceInterface::synchronizeFenceWithConsumerStream(const uin
     }
 }
 
-void CudaHostAndGpuDeviceInterface::synchronizeFenceWithHostDevice(const uint64_t fence) {
-    const auto found = fenceToEventMap.find(fence);
+void CudaHostAndGpuDeviceInterface::synchronizeFenceWithHostDevice(const Fence fence) {
+    const auto found = fenceToEventMap.find(fence.id);
     if (found == fenceToEventMap.end()) {
         throw std::runtime_error("Fence is invalid.");
     }
@@ -375,9 +376,10 @@ void ResourcePool::threadMain(const size_t threadIdx, const std::atomic_uint32_t
         }
         DO_SHUTDOWN_OR_GENCHANGE_IF_NECESSARY()
 
+        assert(allocations.getArena().host != nullptr);
         std::memcpy(allocations.getArena().host, temporaryAllocator.getArena(), dl->outputBatchMemorySize);
         std::vector<uint8_t *> gpuAllocations;
-        std::vector<uint64_t> fences;
+        std::vector<Fence> fences;
         if (allocations.getArena()) {
             for (size_t headIdx = 0; headIdx < heads.size(); headIdx++) {
                 const CpuAllocation &nonPinnedCpuAllocation = hostAllocations[headIdx];
@@ -476,10 +478,10 @@ PrefetchItem ResourcePool::acquireAndGetNextBatch(const std::shared_ptr<DataLoad
     return prefetchItem;
 }
 
-void ResourcePool::synchronizeConsumerStream(const uint64_t fence, const uintptr_t consumerStream) {
+void ResourcePool::synchronizeConsumerStream(const Fence fence, const ConsumerStream consumerStream) {
     device.synchronizeFenceWithConsumerStream(fence, consumerStream);
 }
 
-void ResourcePool::synchronizeHostDevice(const uint64_t fence) {
+void ResourcePool::synchronizeHostDevice(const Fence fence) {
     device.synchronizeFenceWithHostDevice(fence);
 }

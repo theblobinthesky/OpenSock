@@ -7,7 +7,6 @@
 #include <random>
 #include <utils.h>
 
-namespace py = pybind11;
 namespace fs = std::filesystem;
 
 Head::Head(
@@ -17,8 +16,8 @@ Head::Head(
 ) : directoryType(DirectoryType::UNPACKED_IN_FILES),
     filesType(_filesType),
     dictName(std::move(_dictName)), shape(std::move(_shape)) {
-    for (const int dim: shape) {
-        if (dim <= 0) {
+    for (const auto dim: shape) {
+        if (dim == 0) {
             throw std::invalid_argument(
                 "Dimensions need to be strictly positive.");
         }
@@ -31,7 +30,8 @@ Head::Head(
 
     switch (filesType) {
         case FileType::JPG:
-        case FileType::PNG: {
+        case FileType::PNG:
+        case FileType::EXR: {
             if (shape.size() != 3) {
                 throw std::invalid_argument(
                     "Jpeg images have shape (h, w, 3).");
@@ -43,9 +43,7 @@ Head::Head(
             }
         }
         break;
-        default: break; // TODO
-            // throw std::runtime_error(
-            //     "File types other than jpg and npy are not supported.");
+        default: break;
     }
 }
 
@@ -70,7 +68,7 @@ const std::vector<uint32_t> &Head::getShape() const {
 
 size_t Head::getShapeSize() const {
     size_t totalSize = 1;
-    for (const int dim: shape) {
+    for (const auto dim: shape) {
         totalSize *= dim;
     }
 

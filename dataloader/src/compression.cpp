@@ -56,7 +56,11 @@ size_t readBinaryFileIntoBuffer(const char *path, uint8_t *buffer, size_t buffer
         fclose(fp);
         throw std::runtime_error(std::format("Failed to get file size: {}", path));
     }
-    rewind(fp);
+
+    if (fseek(fp, 0, SEEK_SET) != 0) {
+        fclose(fp);
+        throw std::runtime_error(std::format("Failed to seek in file: {}", path));
+    }
 
     if (static_cast<size_t>(fileSize) > bufferSize) {
         fclose(fp);
@@ -143,6 +147,7 @@ void applyShapePermutationInternal(const uint32_t shape[MAX_SHAPE_SIZE], const u
     for (size_t i = 0; i < length; i++) {
         size_t newIdx = 0;
         for (size_t s = 0; s < shapeSize; s++) {
+            assert(shape[s] != 0);
             const size_t oldDimIdx = (i / oldStrides[s]) % shape[s];
             newIdx += oldDimIdx * remapCache[s];
         }
@@ -152,16 +157,17 @@ void applyShapePermutationInternal(const uint32_t shape[MAX_SHAPE_SIZE], const u
 }
 
 void applyShapePermutation(const uint32_t shape[MAX_SHAPE_SIZE], const uint32_t permutation[MAX_SHAPE_SIZE],
-                           const size_t shapeSize, const size_t itemSize,
+                           const CompressorSettings &settings,
                            const uint8_t *dataIn, uint8_t *dataOut) {
+    const size_t itemSize = settings.getItemSize();
     if (itemSize == 1) {
-        applyShapePermutationInternal<uint8_t>(shape, permutation, shapeSize, dataIn, dataOut);
+        applyShapePermutationInternal<uint8_t>(shape, permutation, settings.shapeSize, dataIn, dataOut);
     } else if (itemSize == 2) {
-        applyShapePermutationInternal<uint16_t>(shape, permutation, shapeSize, dataIn, dataOut);
+        applyShapePermutationInternal<uint16_t>(shape, permutation, settings.shapeSize, dataIn, dataOut);
     } else if (itemSize == 4) {
-        applyShapePermutationInternal<uint32_t>(shape, permutation, shapeSize, dataIn, dataOut);
+        applyShapePermutationInternal<uint32_t>(shape, permutation, settings.shapeSize, dataIn, dataOut);
     } else if (itemSize == 8) {
-        applyShapePermutationInternal<uint64_t>(shape, permutation, shapeSize, dataIn, dataOut);
+        applyShapePermutationInternal<uint64_t>(shape, permutation, settings.shapeSize, dataIn, dataOut);
     } else {
         throw std::runtime_error("Cannot apply shape permutation to item size other than 1, 2, 4 or 8.");
     }
@@ -178,8 +184,7 @@ void revertShapePermutation(const CompressorSettings &settings, const uint8_t *d
         inversePermutation[settings.permutation[i]] = i;
     }
 
-    applyShapePermutation(inverseShape, inversePermutation, settings.shapeSize, settings.getItemSize(),
-                          dataIn, dataOut);
+    applyShapePermutation(inverseShape, inversePermutation, settings, dataIn, dataOut);
 }
 
 void applyBitshuffle(const uint8_t *dataIn, uint8_t *dataOut, const size_t numItems, const size_t itemSize) {
@@ -219,14 +224,18 @@ size_t applyCodec(const Codec codec, const uint8_t *dataIn, uint8_t *dataOut, co
 }
 
 size_t revertCodec(const Codec codec, const uint8_t *dataIn, uint8_t *dataOut, const size_t compressedSize) {
-    const auto requiredSize = ZSTD_getFrameContentSize(dataIn, compressedSize);
+    if (codec != Codec::NONE) {
+        const auto requiredSize = ZSTD_getFrameContentSize(dataIn, compressedSize);
 
-    const size_t res = ZSTD_decompress(dataOut, requiredSize, dataIn, compressedSize);
-    if (ZSTD_isError(res)) {
-        throw std::runtime_error(std::format("ZSTD decompress failed: {}", ZSTD_getErrorName(res)));
+        const size_t res = ZSTD_decompress(dataOut, requiredSize, dataIn, compressedSize);
+        if (ZSTD_isError(res)) {
+            throw std::runtime_error(std::format("ZSTD decompress failed: {}", ZSTD_getErrorName(res)));
+        }
+
+        return res;
     }
 
-    return res;
+    throw std::runtime_error(std::format("Codec {} cannot be reverted.", static_cast<uint32_t>(codec)));
 }
 
 void applyAllShortOfCodec(uint8_t *dataIn,
@@ -251,8 +260,7 @@ void applyAllShortOfCodec(uint8_t *dataIn,
 
     uint8_t *permute_out, *permute_scratch;
     if (!settings.isIdentityPermutation()) {
-        applyShapePermutation(settings.shape, settings.permutation, settings.shapeSize, settings.getItemSize(),
-                              fp16_out, fp16_scratch);
+        applyShapePermutation(settings.shape, settings.permutation, settings, fp16_out, fp16_scratch);
         permute_out = fp16_scratch;
         permute_scratch = fp16_out;
     } else {
@@ -284,7 +292,7 @@ Compressor::Compressor(CompressorOptions _options) : options(std::move(_options)
                                                      threadPool([this] { this->threadMain(); }, options.numThreads) {
     for (const auto dim: options.shape) {
         if (dim <= 0) {
-            throw std::runtime_error("The dimension of a shape cannot be negative.");
+            throw std::runtime_error("The dimension of a shape cannot be non-positive.");
         }
     }
 
@@ -475,7 +483,7 @@ Decompressor::Decompressor(std::vector<uint32_t> _shape)
           + alignUp(sizeof(CompressorSettings), 16)),
       arenaSize(2 * bufferSize),
       allocator(new uint8_t[arenaSize], arenaSize) {
-    for (const int dim: shape) {
+    for (const auto dim: shape) {
         if (dim <= 0) {
             throw std::runtime_error("Shape is invalid.");
         }

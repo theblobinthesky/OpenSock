@@ -11,8 +11,8 @@ std::atomic_uint64_t DataLoader::nextId;
 size_t getOutputBatchMemorySize(const BatchedDataset &batchedDataset, const size_t batchSize) {
     size_t outputBatchMemorySize = 0;
     for (const Head &head: batchedDataset.getDataset().getHeads()) {
-        size_t itemMemorySize = head.getBytesPerItem();
-        for (const int dim: head.getShape()) {
+        uint64_t itemMemorySize = head.getBytesPerItem();
+        for (const auto dim: head.getShape()) {
             itemMemorySize *= dim;
         }
 
@@ -46,7 +46,7 @@ DataLoader::DataLoader(
     LOG_INFO("DataLoader with id={} initialized.", id);
 }
 
-DLWrapper::DLWrapper(const uint64_t fence,
+DLWrapper::DLWrapper(const Fence fence,
                      const int deviceType,
                      const int deviceId,
                      DLManagedTensor *dlManagedTensor)
@@ -60,7 +60,7 @@ pybind11::capsule DLWrapper::getDLpackCapsule(const pybind11::object &consumerSt
         resourcePool.synchronizeHostDevice(fence);
     } else {
         const auto consumerStream = static_cast<uintptr_t>(py::int_(consumerStreamObject));
-        resourcePool.synchronizeConsumerStream(fence, consumerStream);
+        resourcePool.synchronizeConsumerStream(fence, ConsumerStream{consumerStream});
     }
 
     return pybind11::capsule(dlManagedTensor, "dltensor");
@@ -92,7 +92,7 @@ py::dict DataLoader::getNextBatch() {
     for (size_t i = 0; i < heads.size(); i++) {
         const Head &head = heads[i];
         uint8_t *gpuAllocation = gpuAllocations[i];
-        const uint64_t fence = fences[i];
+        const Fence fence = fences[i];
         ResourcePool::get().getAllocator()->handOff(gpuAllocation);
 
         const std::vector<uint32_t> &shape = head.getShape();
@@ -114,7 +114,7 @@ py::dict DataLoader::getNextBatch() {
                 throw std::runtime_error("Invalid item format.");
         }
 
-        constexpr int deviceType = 2; // TODO: This hardcodes CUDA.
+        constexpr int deviceType = kDLCUDA; // TODO: This hardcodes CUDA.
         constexpr int deviceId = 0; // TODO: This hardcodes GPU0.
         auto *dlManagedTensor = new DLManagedTensor{
             .dl_tensor = {

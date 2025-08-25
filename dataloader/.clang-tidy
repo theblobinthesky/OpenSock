@@ -1,11 +1,13 @@
 Checks: >
   clang-analyzer-*,
   bugprone-*,
+  concurrency-*,
   misc-unused-*,
   modernize-*,
   -modernize-use-trailing-return-type,
   -modernize-avoid-c-arrays,
   performance-*,
+  -performance-enum-size,
   WarningsAsErrors: ''
 HeaderFilterRegex: 'src/.*'
 FormatStyle: none

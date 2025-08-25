@@ -42,11 +42,11 @@ public:
 
     virtual void freeEverything() = 0;
 
-    virtual uint64_t insertNextFenceIntoStream() = 0;
+    virtual Fence insertNextFenceIntoStream() = 0;
 
-    virtual void synchronizeFenceWithConsumerStream(uint64_t fence, uintptr_t consumerStream) = 0;
+    virtual void synchronizeFenceWithConsumerStream(Fence fence, ConsumerStream consumerStream) = 0;
 
-    virtual void synchronizeFenceWithHostDevice(uint64_t fence) = 0;
+    virtual void synchronizeFenceWithHostDevice(Fence fence) = 0;
 
     virtual void copyFromHostToGpuMemory(const uint8_t *host, uint8_t *gpu, const uint32_t size) = 0;
 };
@@ -76,8 +76,8 @@ public:
 private:
     HostAndGpuDeviceInterface *device;
 
-    uint8_t *hostData;
-    uint8_t *gpuData;
+    uint8_t *hostData = nullptr;
+    uint8_t *gpuData = nullptr;
 
     size_t numItems = 0;
     size_t itemSize = 0;
@@ -109,11 +109,11 @@ public:
 
     void freeEverything() override;
 
-    uint64_t insertNextFenceIntoStream() override;
+    Fence insertNextFenceIntoStream() override;
 
-    void synchronizeFenceWithConsumerStream(uint64_t fence, uintptr_t consumerStream) override;
+    void synchronizeFenceWithConsumerStream(Fence fence, ConsumerStream consumerStream) override;
 
-    void synchronizeFenceWithHostDevice(uint64_t fence) override;
+    void synchronizeFenceWithHostDevice(Fence fence) override;
 
     void copyFromHostToGpuMemory(const uint8_t *host, uint8_t *gpu, uint32_t size) override;
 
@@ -132,7 +132,7 @@ private:
 struct PrefetchItem {
     int32_t datasetStartingOffset;
     std::vector<uint8_t *> gpuAllocations;
-    std::vector<uint64_t> fences;
+    std::vector<Fence> fences;
 
     bool operator<(const PrefetchItem &other) const;
 };
@@ -149,9 +149,9 @@ public:
 
     PrefetchItem acquireAndGetNextBatch(const std::shared_ptr<DataLoader> &dataLoader);
 
-    void synchronizeConsumerStream(uint64_t fence, uintptr_t consumerStream);
+    void synchronizeConsumerStream(Fence fence, ConsumerStream consumerStream);
 
-    void synchronizeHostDevice(uint64_t fence);
+    void synchronizeHostDevice(Fence fence);
 
     [[nodiscard]] MirroredAllocator *getAllocator() noexcept;
 

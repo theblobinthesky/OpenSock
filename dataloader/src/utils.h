@@ -73,7 +73,7 @@ private:
 template<typename T>
 class BumpAllocator {
 public:
-    BumpAllocator(T arena, const size_t arenaSize) : arena(arena), offset(0), arenaSize(arenaSize) {
+    BumpAllocator(T arena, const size_t arenaSize) : arena(arena), arenaSize(arenaSize) {
     }
 
     T allocate(const size_t size) {
@@ -92,10 +92,12 @@ public:
 
 private:
     T arena;
-    size_t offset;
-    size_t arenaSize;
+    size_t offset = 0;
+    size_t arenaSize = 0;
 };
 
+// Safe for us: environment never mutated after startup
+// NOLINTNEXTLINE(concurrency-mt-unsafe)
 inline bool existsEnvVar(const std::string &name) {
     return std::getenv(name.c_str()) != nullptr;
 }
@@ -109,5 +111,13 @@ inline uint64_t alignUp(const uint64_t offset, const uint64_t alignTo) {
 #if !defined(__AVX2__)
 #error This project requires avx2 support.
 #endif
+
+struct Fence {
+    uint64_t id;
+};
+
+struct ConsumerStream {
+    uint64_t id;
+};
 
 #endif

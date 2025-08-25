@@ -49,9 +49,6 @@ private:
     std::vector<uint32_t> shape;
 };
 
-#define IMAGE_HEIGHT(subDir) static_cast<size_t>(subDir.getShape()[0])
-#define IMAGE_WIDTH(subDir) static_cast<size_t>(subDir.getShape()[1])
-
 struct DatasetBatch {
     int32_t startingOffset;
     std::vector<std::vector<std::string> > batchPaths;

@@ -10,14 +10,14 @@ class ResourceClient;
 
 class DLWrapper {
 public:
-    DLWrapper(uint64_t fence, int deviceType, int deviceId, DLManagedTensor *dlManagedTensor);
+    DLWrapper(Fence fence, int deviceType, int deviceId, DLManagedTensor *dlManagedTensor);
 
     [[nodiscard]] pybind11::capsule getDLpackCapsule(const pybind11::object &consumerStreamObject) const;
 
     [[nodiscard]] std::pair<int, int> getDLpackDevice() const;
 
 private:
-    uint64_t fence;
+    Fence fence;
     int deviceType;
     int deviceId;
     DLManagedTensor *dlManagedTensor;
