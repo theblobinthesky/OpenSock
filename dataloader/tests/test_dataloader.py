@@ -31,6 +31,7 @@ DL_CONFIGS = [
     (8, 1),
     (8, 2)
 ]
+NUM_THREADS, PREFETCH_SIZE = 16, 4
 
 # Pytest fixture to parameterize tests over thread/prefetch configurations.
 @pytest.fixture(params=DL_CONFIGS, ids=lambda p: f"threads={p[0]},prefetch={p[1]}")
@@ -184,23 +185,21 @@ def test_no_duplicates_across_jpg_dataloaders(dl_cfg):
     assert len(overall) == total
 
 
- 
+def test_correctness_exr():
+    download_file(EXR_DATASET_URL, EXR_DATASET_FILE)
+    ds = m.Dataset.from_subdirs("temp", [m.Head(m.FileType.EXR, "img", (1080, 1920, 3))], ["img"], init_ds_fn)
+    dl = m.DataLoader(ds, 1, NUM_THREADS, PREFETCH_SIZE)
+    img = dl.get_next_batch()['img'][0]
 
-# def test_correctness_exr():
-#     download_file(EXR_DATASET_URL, EXR_DATASET_FILE)
-#     ds = m.Dataset.from_subdirs("temp", [m.Head(m.FileType.EXR, "img", (1080, 1920, 3))], ["img"], init_ds_fn)
-#     dl = m.DataLoader(ds, 1, NUM_THREADS, PREFETCH_SIZE)
-#     img = dl.get_next_batch()['img'][0]
+    gt_img = cv2.imread(EXR_DATASET_FILE, cv2.IMREAD_UNCHANGED).astype(np.float32)
+    gt_img = cv2.cvtColor(gt_img, cv2.COLOR_BGR2RGB)
 
-#     gt_img = cv2.imread(EXR_DATASET_FILE, cv2.IMREAD_UNCHANGED).astype(np.float32)
-#     gt_img = cv2.cvtColor(gt_img, cv2.COLOR_BGR2RGB)
+    assert np.allclose(img, gt_img)
 
-#     assert np.allclose(img, gt_img)
-
-def test_correctness_png(dl_cfg):
+def test_correctness_png():
     download_file(PNG_DATASET_URL, PNG_DATASET_FILE)
     ds = m.Dataset.from_subdirs("temp", [m.Head(m.FileType.PNG, "img", (191, 250, 3))], ["img"], init_ds_fn)
-    dl = m.DataLoader(ds, 1, dl_cfg["num_threads"], dl_cfg["prefetch_size"])
+    dl = m.DataLoader(ds, 1, NUM_THREADS, PREFETCH_SIZE)
     img = dl.get_next_batch()['img'][0]
 
     pil_img = np.array(Image.open(PNG_DATASET_FILE).convert("RGB"), np.float32)
@@ -208,7 +207,7 @@ def test_correctness_png(dl_cfg):
 
     assert np.all((img - pil_img) < 1 / 255.0)
 
-def test_correctness_npy(tmp_path, dl_cfg):
+def test_correctness_npy(tmp_path):
     subdir = tmp_path / "subdir"
     subdir.mkdir()
 
@@ -223,7 +222,7 @@ def test_correctness_npy(tmp_path, dl_cfg):
         init_ds_fn
     )
 
-    dl = m.DataLoader(ds, 16, dl_cfg["num_threads"], dl_cfg["prefetch_size"])
+    dl = m.DataLoader(ds, 16, NUM_THREADS, PREFETCH_SIZE)
 
     batch = dl.get_next_batch()['np']
     assert np.all(np.ones((16, 3, 3, 4)) == batch)

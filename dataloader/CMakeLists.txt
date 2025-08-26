@@ -1,4 +1,5 @@
-cmake_minimum_required(VERSION 3.30)
+cmake_minimum_required(VERSION 3.28.0)
+set(CMAKE_GENERATOR Ninja)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_FLAGS_DEBUG "-g3 -O0 -fno-omit-frame-pointer -mavx2 -mf16c -Wno-unused-variable")
 set(CMAKE_CXX_FLAGS_RELEASE "-O3 -DNDEBUG -ffast-math -mavx2 -mf16c")
@@ -9,6 +10,7 @@ project(
         LANGUAGES C CXX
 )
 
+set(Python_FIND_UNVERSIONED_NAMES FIRST)
 find_package(Python REQUIRED COMPONENTS Interpreter Development.Module)
 find_package(pybind11 CONFIG REQUIRED)
 find_package(JPEG REQUIRED)
@@ -102,5 +104,7 @@ target_compile_definitions(_core PRIVATE
         $<$<CONFIG:Debug>: SPDLOG_ACTIVE_LEVEL=SPDLOG_LEVEL_TRACE>
         $<$<CONFIG:Release>: SPDLOG_ACTIVE_LEVEL=SPDLOG_LEVEL_OFF>
 )
+
+target_link_options(_core PRIVATE -fuse-ld=mold)
 
 install(TARGETS _core DESTINATION native_dataloader)

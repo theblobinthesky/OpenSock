@@ -3,24 +3,17 @@ Memory bandwidth utilization in GB/s on RTX 4080 system:
 - CUDA (pinned): 19.41
 - CUDA (malloc): 9.07
 
-Benchmark results in seconds:
-- JAX put_device: 3.61
-- Custom pinned: 5.15 
-- Custom pinned + avx2: 14.13
-I broke something midway...
-
-Meh.. Damn.
-
 TODO (important improvements for production use):
 - Add support for compressed files in the dataloader
-- Cleanup jpg data loader
+- Cleanup all data options
 - Write high-perf test suite
-- Replace existing build system with something much faster and easier to debug
+- Add Github Pipeline with tests
 
 Fixed:
 - Fix all sensible clang-tidy warnings
 - Write tests for different prefetch size, thread size configurations
 - Deal with parallel dataloaders (as that doesn't really make much sense)
+- Replace existing build system with something much faster and easier to debug
 
 
 Test results for the compressor:
