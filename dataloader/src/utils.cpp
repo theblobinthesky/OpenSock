@@ -24,7 +24,9 @@ ThreadPool::ThreadPool(BlockingThreadMain _threadMain, const size_t _threadCount
 void ThreadPool::resize(const size_t newThreadCount) {
     LOG_DEBUG("ThreadPool::resize from {} to {} begin", desiredThreadCount.load(), newThreadCount);
 
-    const size_t oldThreadCount = desiredThreadCount.load();
+    // Use the actual number of running threads as the current size;
+    // desiredThreadCount is an intent observed by workers, not a count of started threads.
+    const size_t oldThreadCount = threads.size();
     desiredThreadCount = newThreadCount;
 
     // If we are downsizing, wake up any threads potentially blocked on

@@ -28,6 +28,7 @@ struct Allocation {
 };
 
 // Allow for AMD, TPU etc. support later down the line.
+// None of these interface methods not need to be protected by a mutex.
 class HostAndGpuDeviceInterface {
 public:
     virtual ~HostAndGpuDeviceInterface() = default;
@@ -96,7 +97,6 @@ public:
 // TODO: When i migrate to multi-gpu training, i will have to account for numa nodes on server cpus.
 // TODO: Not an issue just yet, though.
 
-// TODO: Maybe some of these methods need to be protected wrt. concurrent access.
 class CudaHostAndGpuDeviceInterface final : public HostAndGpuDeviceInterface {
 public:
     CudaHostAndGpuDeviceInterface();

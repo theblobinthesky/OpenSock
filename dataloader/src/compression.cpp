@@ -329,6 +329,7 @@ Compressor::Compressor(CompressorOptions _options) : options(std::move(_options)
         }
     }
     workQueueSize = workQueue.size();
+    shutdownCounter = 0;
 }
 
 void Compressor::start() {
@@ -338,9 +339,6 @@ void Compressor::start() {
     workNotify.wait(lock, [this] {
         return shutdownCounter == options.numThreads;
     });
-
-    // It is important to wait, until all threads have completed their work.
-    // Otherwise, ~Compressor will free the arena and crash the program.
 }
 
 Compressor::~Compressor() {

@@ -28,9 +28,6 @@ void MirroredAllocator::reserveAtLeast(const size_t newNumItems, const size_t ne
     std::unique_lock lock(mutex);
 
     LOG_DEBUG("reserveAtLeast newNumItems={}, newItemSize={}", newNumItems, newItemSize);
-    // TODO: I don't think this is necessary anymore. cudaStreamSynchronize(ResourcePool::get().getCudaStream());
-    // TODO: OLD EXPLANATION: This is ugly, but necessary atp bc. otherwise we might not be done async copying when we hand off to jax.
-    // TODO: OLD EXPLANATION: Find a better option than this, so we don't stall quite as much.
     if (const size_t requiredSize = newNumItems * newItemSize; requiredSize > numItems * itemSize) {
         hostData = device->hostMemoryChangeSizeAndInvalidateMemory(requiredSize);
         gpuData = device->gpuMemoryIncreasePoolSizeAndInvalidateMemory(requiredSize);
@@ -60,7 +57,6 @@ bool MirroredAllocator::allocate(Allocation &alloc) {
     alloc = freeList.back();
     freeList.pop_back();
 
-    // TODO: Remove later?
     if (allocAndHandOffGpuData.contains(alloc.gpu)) {
         throw std::runtime_error(std::format("Tried to allocate space ({} host, {}) gpu that has not yet been freed.",
                                              reinterpret_cast<uint64_t>(alloc.host),
@@ -87,6 +83,7 @@ void MirroredAllocator::free(const uint8_t *gpuPtr) {
         .gpu = gpuData + idx * itemSize,
         .size = itemSize
     });
+    lock.unlock();
 
     if (isDrained()) {
         drainCv.notify_all();
@@ -313,7 +310,7 @@ void ResourcePool::wakeupAllThreads() {
     allocator.memoryNotify.fetch_add(1);
     allocator.memoryNotify.notify_all();
 
-    // genChangeSendOff->count_down();
+    // TODO (i don't think this is necessary): genChangeSendOff->count_down();
 }
 
 void ResourcePool::threadMain(const size_t threadIdx, const std::atomic_uint32_t &desiredThreadCount) {
@@ -339,9 +336,7 @@ void ResourcePool::threadMain(const size_t threadIdx, const std::atomic_uint32_t
         if (IS_GENCHANGE_REQUIRED()) {
             genChangeAssemble->count_down();
             rememberedGenIdx = genIdx.load();
-            LOG_TRACE("thread {} waiting for sendoff", threadIdx);
             genChangeSendOff->wait();
-            LOG_TRACE("thread {} done with sendoff", threadIdx);
             continue;
         }
 
@@ -379,7 +374,6 @@ void ResourcePool::threadMain(const size_t threadIdx, const std::atomic_uint32_t
 
 
         // Grab a (host,gpu) memory pair.
-        LOG_TRACE("thread {} waiting for memory", threadIdx);
         auto allocations = BumpAllocator(Allocation{}, 0);
         while (!IS_SHUTDOWN_OR_GENCHANGE_REQUIRED()) {
             const uint64_t old = allocator.memoryNotify.load();
@@ -396,7 +390,6 @@ void ResourcePool::threadMain(const size_t threadIdx, const std::atomic_uint32_t
         DO_SHUTDOWN_OR_GENCHANGE_IF_NECESSARY()
 
 
-        LOG_TRACE("thread {} got memory", threadIdx);
         assert(allocations.getArena().host != nullptr);
         std::memcpy(allocations.getArena().host, temporaryAllocator.getArena(), dl->outputBatchMemorySize);
         std::vector<uint8_t *> gpuAllocations;
