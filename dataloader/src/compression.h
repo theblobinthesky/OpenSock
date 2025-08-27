@@ -2,6 +2,7 @@
 #define VERSION_COMPRESSION_H
 #include <queue>
 #include <utility>
+#include <string>
 
 #include "utils.h"
 
@@ -173,5 +174,7 @@ private:
     uint8_t *dataInBuffer;
     uint8_t *dataScratchBuffer;
 };
+
+CompressorSettings probeCompressedFileSettings(const std::string &path);
 
 #endif

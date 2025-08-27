@@ -227,6 +227,58 @@ def test_correctness_npy(tmp_path):
     batch = dl.get_next_batch()['np']
     assert np.all(np.ones((16, 3, 3, 4)) == batch)
 
+@pytest.mark.parametrize("cast_to_fp16", [True, False])
+def test_correctness_compressed_trivial(tmp_path, cast_to_fp16):
+    def _make_trivial_npy_dir(root: str, subdir: str, n_files: int = 8, shape=(2, 3, 1)) -> str:
+        d = os.path.join(root, subdir)
+        os.makedirs(d, exist_ok=True)
+        H, W, C = shape
+        for i in range(n_files):
+            arr = np.arange(H * W * C, dtype=np.float32).reshape(H, W, C) + i
+            np.save(os.path.join(d, f"file{i}"), arr)
+        return d
+
+    # Prepare small npy inputs
+    in_sub = _make_trivial_npy_dir(str(tmp_path), "in", n_files=10, shape=(2, 3, 1))
+    out_sub = os.path.join(str(tmp_path), "out")
+    os.makedirs(out_sub, exist_ok=True)
+
+    # Compress them using the native compressor
+    shape = [2, 3, 1]
+    options = m.CompressorOptions(
+        num_threads=4,
+        input_directory=in_sub,
+        output_directory=out_sub,
+        shape=shape,
+        cast_to_fp16=cast_to_fp16,
+        permutations=[[0, 1, 2]],
+        with_bitshuffle=False,
+        allowed_codecs=[],
+        tolerance_for_worse_codec=0.01,
+    )
+    m.Compressor(options).start()
+
+    # Build dataset + dataloader consuming compressed files
+    ds = m.Dataset.from_subdirs(
+        str(tmp_path),
+        [m.Head(m.FileType.COMPRESSED, "feat", shape)],
+        ["out"],
+        init_ds_fn,
+    )
+    dl = m.DataLoader(ds, 4, 4, 2)
+
+    # Verify contents for one batch
+    batch = dl.get_next_batch()["feat"]
+    assert batch.shape[1:] == (2, 3, 1)
+    # Expect float32 output from dataloader for now
+    assert batch.dtype == np.float32
+
+    # Compare to originals (allow tolerance if fp16)
+    tol = 1e-2 if cast_to_fp16 else 0.0
+    for i in range(min(4, len(ds))):
+        orig = np.load(os.path.join(in_sub, f"file{i}.npy")).astype(np.float32)
+        assert np.allclose(batch[i], orig, atol=tol, rtol=0)
+
 
 def test_end_to_end_perf(benchmark):
     bs = 16

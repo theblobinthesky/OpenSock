@@ -1,7 +1,7 @@
 #ifndef JPEG_UTILS_H
 #define JPEG_UTILS_H
 #include "resource.h"
-#include "dataset.h"
+#include "datasource.h"
 #include <vector>
 #include <string>
 

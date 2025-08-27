@@ -6,8 +6,9 @@ Memory bandwidth utilization in GB/s on RTX 4080 system:
 TODO (important improvements for production use):
 - Add support for compressed files in the dataloader
 - Cleanup all data options
-- Write high-perf test suite
-- Add Github Pipeline with tests
+- Fix last races and improve test suite
+- Support WebDataset
+- Dataset refactor with probing/autodiscovery
 
 Fixed:
 - Fix all sensible clang-tidy warnings

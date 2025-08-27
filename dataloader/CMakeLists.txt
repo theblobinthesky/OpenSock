@@ -69,8 +69,7 @@ add_subdirectory("${SPDLOG_SUBMODULE_DIR}" EXCLUDE_FROM_ALL) # EXCLUDE_FROM_ALL 
 # Build the python library.
 python_add_library(_core MODULE
         src/dataloader.cpp
-        src/dataset.cpp
-        src/io.cpp
+        src/datasource.cpp
         src/data.cpp
         src/resource.cpp
         src/utils.cpp

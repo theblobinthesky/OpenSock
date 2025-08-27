@@ -2,7 +2,7 @@
 #include <format>
 
 #include "data.h"
-#include "dataset.h"
+#include "datasource.h"
 
 MirroredAllocator::MirroredAllocator(HostAndGpuDeviceInterface *device) : device(device) {
 }

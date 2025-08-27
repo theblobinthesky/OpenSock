@@ -1,6 +1,6 @@
 #ifndef DATALOADER_H
 #define DATALOADER_H
-#include "dataset.h"
+#include "datasource.h"
 #include "resource.h"
 #include <atomic>
 #include <dlpack/dlpack.h>

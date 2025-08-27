@@ -1,12 +1,12 @@
 #include "compression.h"
 
 #include <cstring>
+#include <filesystem>
 #include <format>
 #include <utility>
 #include <immintrin.h>
 #include <zstd.h>
 #include "cnpy.h"
-#include "io.h"
 
 extern "C" {
 #include "bitshuffle_core.h"
@@ -76,6 +76,49 @@ size_t readBinaryFileIntoBuffer(const char *path, uint8_t *buffer, size_t buffer
     }
 
     return read;
+}
+
+CompressorSettings probeCompressedFileSettings(const std::string &path) {
+    FILE *fp = fopen(path.c_str(), "rb");
+    if (!fp) {
+        throw std::runtime_error(std::format("Failed to open file for reading: {}", path));
+    }
+
+    if (fseek(fp, 0, SEEK_END) != 0) {
+        fclose(fp);
+        throw std::runtime_error(std::format("Failed to seek in file: {}", path));
+    }
+
+    const long fileSize = ftell(fp);
+    if (fileSize < 0) {
+        fclose(fp);
+        throw std::runtime_error(std::format("Failed to get file size: {}", path));
+    }
+
+    if (static_cast<size_t>(fileSize) < sizeof(CompressorSettings)) {
+        fclose(fp);
+        throw std::runtime_error(std::format(
+            "File too small to contain settings: {} bytes < {}", static_cast<size_t>(fileSize),
+            sizeof(CompressorSettings)));
+    }
+
+    if (fseek(fp, fileSize - static_cast<long>(sizeof(CompressorSettings)), SEEK_SET) != 0) {
+        fclose(fp);
+        throw std::runtime_error(std::format("Failed to seek to settings in file: {}", path));
+    }
+
+    CompressorSettings settings{};
+    const size_t read = fread(&settings, 1, sizeof(CompressorSettings), fp);
+    fclose(fp);
+    if (read != sizeof(CompressorSettings)) {
+        throw std::runtime_error(std::format("Failed to read settings from file: {}", path));
+    }
+
+    if (settings.magic != MAGIC_NUMBER) {
+        throw std::runtime_error("The compressed array contains an incorrect magic number.");
+    }
+
+    return settings;
 }
 
 void castToFP16(const float *data, const size_t size, uint16_t *out) {
@@ -281,6 +324,18 @@ void applyAllShortOfCodec(uint8_t *dataIn,
 size_t getMaxSizeRequiredByCodec(const std::vector<uint32_t> &shape) {
     const uint64_t size = getLength(shape) * sizeof(float); // TODO: only weak upper bound potentially
     return ZSTD_compressBound(size);
+}
+
+static std::vector<std::string> listAllFiles(const std::string &directoryPath) {
+    std::vector<std::string> paths;
+
+    for (const std::filesystem::directory_entry &entry:
+         std::filesystem::recursive_directory_iterator(
+             directoryPath)) {
+        paths.push_back(entry.path());
+    }
+
+    return paths;
 }
 
 Compressor::Compressor(CompressorOptions _options) : options(std::move(_options)),
