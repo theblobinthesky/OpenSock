@@ -1,4 +1,4 @@
-#include "compression.h"
+#include "dataSources/compression.h"
 
 #include <cstring>
 #include <filesystem>

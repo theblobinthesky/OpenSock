@@ -1,0 +1,42 @@
+Hello codex. This is the specification for my Data Collection Web Interface for OpenSock.
+
+# General goal of OpenSock
+Users can take an image of a heap of socks, spread out on the ground. The app then tells them, which are pairs and who they belong to in the family.
+
+# General goal of the website
+Data collection of sock images for learning to differentiate them in training.
+First, instruct the user as to what data they should collect.
+Once they are educated, allow them to take pictures and upload them to our servers.
+
+## What do i mean by instruct?
+I need a guide made up of "slides". Each slide is mostly an instruction image, with maybe a bit of text.
+Example:
+- Slide 1: [Image of a pair of socks, with a circle around the left sock] 
+    Collect 20-30 pairs of socks and take one of them out of each pair.
+    All of these socks should be different in some way, e.g. a different color, size, pattern etc..
+    You can purposely add socks with only subtle differences, just don't use identical socks.
+
+- Slide 2: [Socks spread out flat on the floor; Every sock is stretched out] Take a photo like that. Don't move them between the photos.
+- Slide 3: [Socks turned on the other side; Every sock is stretched out] Take a photo like that. -|-
+- Slide 4: [Socks crumbled a bit, to disguise their size] Take a photo like that. -|-
+- Slide 5: [Socks crumbled in a different way, to disguise their size] Take a photo like that. -|-
+- Slide 6: Take as many different configs as you like.
+
+
+## What do i mean by collect?
+The user has the ability to take a new photo or upload existing ones.
+The user has the ability to insert their name.
+
+"If you want to appear in the credits of my project, if it works:"
+The user has the ability to insert their Instagram, X, etc. handle in a different field in plain text.
+
+
+
+# Technical details
+The site should translate at least to German and English, but honestly should be extensible.
+It's really important everything is translated, as even old people should be able to use it.
+The site is supposed to be collecting images of socks (for )
+
+# Tech Stack
+Use React for the frontend and Go for the backend.
+We should discuss, whether one even needs a database here. Maybe.

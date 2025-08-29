@@ -1,22 +1,44 @@
-#ifndef DATASET_H
-#define DATASET_H
+#ifndef DATAIO_H
+#define DATAIO_H
 #include <atomic>
 #include <vector>
 #include <filesystem>
 #include <format>
 #include <pybind11/stl.h>
 
-enum class DirectoryType {
-    UNPACKED_IN_FILES,
-    PACKED_INTO_SHARDS
+#include "utils.h"
+
+struct CpuAllocation {
+    union {
+        uint8_t *uint8;
+        float *float32;
+    } batchBuffer;
 };
 
-enum class FileType {
-    JPG,
-    PNG,
-    EXR,
-    NPY,
-    COMPRESSED
+enum class SpatialHint : uint8_t {
+    NONE,
+    RASTER,
+    POINTS
+};
+
+struct ItemKey {
+    std::string keyName;
+    SpatialHint spatialHint;
+};
+
+struct Sample {
+    std::string sampleName;
+};
+
+class IDataSource {
+public:
+    virtual ~IDataSource() = default;
+
+    virtual std::vector<ItemKey> getItemKeys() = 0;
+
+    virtual std::vector<Sample> getSamples() = 0;
+
+    virtual void loadFile(uint8_t *&data, size_t &size) = 0;
 };
 
 enum class ItemFormat {
@@ -24,30 +46,49 @@ enum class ItemFormat {
     FLOAT
 };
 
-class Head {
-public:
-    Head(FileType _filesType, std::string _dictName, std::vector<uint32_t> _shape);
-
-    [[nodiscard]] std::string getExt() const;
-
-    [[nodiscard]] std::string getDictName() const;
-
-    [[nodiscard]] const std::vector<uint32_t> &getShape() const;
-
-    [[nodiscard]] size_t getShapeSize() const;
-
-    [[nodiscard]] FileType getFilesType() const;
-
-    [[nodiscard]] ItemFormat getItemFormat() const;
-
-    [[nodiscard]] int32_t getBytesPerItem() const;
-
-private:
-    DirectoryType directoryType;
-    FileType filesType;
-    std::string dictName;
+struct ItemSettings {
+    ItemFormat format;
+    uint32_t numBytes;
     std::vector<uint32_t> shape;
+
+    [[nodiscard]] uint32_t getShapeSize() const {
+        uint32_t size = 1;
+        for (const uint32_t dim: shape) size *= dim;
+        return size;
+    }
+
+    // TODO: dito. size_t batchBufferSize;
 };
+
+class IDataDecoder {
+public:
+    virtual ~IDataDecoder() = default;
+
+    virtual ItemSettings probeFromMemory(uint8_t *inputData, size_t inputSize) = 0;
+
+    virtual uint8_t *loadFromMemory(const ItemSettings &settings,
+                                    uint8_t *inputData, size_t inputSize, BumpAllocator<uint8_t *> &output) = 0;
+
+    virtual std::string getExtension() = 0;
+};
+
+template<size_t D>
+class IDataTransformAugmentation {
+public:
+    virtual ~IDataTransformAugmentation() = default;
+
+    // Returns if the input shape is supported by this augmenter.
+    virtual bool augment(const std::vector<size_t> &inputShape,
+                         std::vector<size_t> &outputShape,
+                         double affine[D][D + 1]) = 0;
+};
+
+class IoResources {
+    std::unordered_map<std::string, IDataSource> sources;
+    std::unordered_map<std::string, IDataDecoder> decoders;
+    std::unordered_map<std::string, IDataTransformAugmentation> augmenters;
+};
+
 
 struct DatasetBatch {
     int32_t startingOffset;
@@ -117,4 +158,4 @@ private:
     std::atomic_int32_t lastWaitingBatch;
 };
 
-#endif //DATASET_H
+#endif

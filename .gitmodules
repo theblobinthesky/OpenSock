@@ -10,3 +10,6 @@
 [submodule "dataloader/submodules/spdlog"]
 	path = dataloader/submodules/spdlog
 	url = https://github.com/gabime/spdlog.git
+[submodule "dataloader/submodules/asio"]
+	path = dataloader/submodules/asio
+	url = https://github.com/boostorg/asio

@@ -1,4 +1,4 @@
-#include "datasource.h"
+#include "dataio.h"
 #include <utility>
 #include <vector>
 #include <filesystem>
@@ -8,17 +8,6 @@
 
 namespace fs = std::filesystem;
 
-static std::vector<std::string> listAllFiles(const std::string &directoryPath) {
-    std::vector<std::string> paths;
-
-    for (const std::filesystem::directory_entry &entry:
-         std::filesystem::recursive_directory_iterator(
-             directoryPath)) {
-        paths.push_back(entry.path());
-    }
-
-    return paths;
-}
 
 Head::Head(
     const FileType _filesType,

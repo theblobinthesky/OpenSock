@@ -69,12 +69,21 @@ add_subdirectory("${SPDLOG_SUBMODULE_DIR}" EXCLUDE_FROM_ALL) # EXCLUDE_FROM_ALL 
 # Build the python library.
 python_add_library(_core MODULE
         src/dataloader.cpp
-        src/datasource.cpp
-        src/data.cpp
         src/resource.cpp
         src/utils.cpp
         src/library.cpp
+        src/dataio.cpp
         src/compression.cpp
+        src/dataSources/FlatDataSource.cpp
+        src/dataSources/WebDatasetDataSource.cpp
+        src/dataDecoders/JpgDataDecoder.cpp
+        src/dataDecoders/PngDataDecoder.cpp
+        src/dataDecoders/ExrDataDecoder.cpp
+        src/dataDecoders/NpyDataDecoder.cpp
+        src/dataDecoders/CompressedDataDecoder.cpp
+        src/dataAugmenter/ResizeDataAugmenter.cpp
+        src/dataAugmenter/RandomResizedCrop.cpp
+        src/dataAugmenter/Pad.cpp
         WITH_SOABI
 )
 

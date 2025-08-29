@@ -1,8 +1,8 @@
 #include "resource.h"
 #include <format>
 
-#include "data.h"
-#include "datasource.h"
+#include "datadecoder.h"
+#include "dataio.h"
 
 MirroredAllocator::MirroredAllocator(HostAndGpuDeviceInterface *device) : device(device) {
 }
