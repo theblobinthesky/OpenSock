@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" aria-labelledby="title desc" role="img" focusable="false">
+  <title id="title">OpenSock Icon (Magnifier)</title>
+  <desc id="desc">Two socks encircled by a distinct magnifying glass; larger lens, neutral ring/handle, subtle glass tint.</desc>
+  <defs>
+    <style>
+      /* Socks (unchanged palette) */
+      .sockA   { fill: #5DADE2; stroke: #0B3D91; stroke-width: 2; }
+      .sockB   { fill: #76D7C4; stroke: #0B3D91; stroke-width: 2; }
+      .patch   { fill: rgba(255,255,255,0.85); stroke: #0B3D91; stroke-width: 1.5; }
+      .cuff    { fill: rgba(255,255,255,0.9); stroke: #0B3D91; stroke-width: 1.5; }
+
+      /* Magnifier base styles */
+      .ringBase { fill: none; stroke: url(#ringStroke); stroke-width: 4; stroke-linecap: round; }
+      .ringInner{ fill: none; stroke: rgba(255,255,255,0.7); stroke-width: 1.25; }
+      .ringHighlight { fill: none; stroke: rgba(255,255,255,0.6); stroke-width: 1.6; stroke-linecap: round; }
+      .lensTint { fill: url(#lensRadial); }
+      .glare { fill: none; stroke: rgba(255,255,255,0.6); stroke-width: 2.2; stroke-linecap: round; }
+      .handle { fill: #3F4A5A; }
+      .joint  { fill: #2F3A4A; }
+      .cap    { display: none; }
+    </style>
+
+    <!-- Subtle drop shadow for the whole magnifier group -->
+    <filter id="mgShadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="1.25" stdDeviation="1.6" flood-color="#0b1a30" flood-opacity="0.25"/>
+    </filter>
+
+    <!-- Metallic ring stroke gradient -->
+    <linearGradient id="ringStroke" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#2F3A4A"/>
+      <stop offset="50%" stop-color="#4B5568"/>
+      <stop offset="100%" stop-color="#2A3342"/>
+    </linearGradient>
+
+    <!-- Lens radial tint (clear center, subtle edge) -->
+    <radialGradient id="lensRadial" cx="50%" cy="45%" r="55%">
+      <stop offset="0%" stop-color="#E6F4FF" stop-opacity="0.15"/>
+      <stop offset="65%" stop-color="#CBE7FF" stop-opacity="0.14"/>
+      <stop offset="100%" stop-color="#8EBFEA" stop-opacity="0.10"/>
+    </radialGradient>
+
+    <!-- Handle gradient -->
+    <linearGradient id="handleGrad" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#5A6B7E"/>
+      <stop offset="100%" stop-color="#2F3A4A"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Socks centered within the lens -->
+  <g id="socks" transform="translate(3,3)">
+    <g transform="rotate(-20 24 34)">
+      <path class="sockA" d="M22 9 h10 a3 3 0 0 1 3 3 v14 a6 6 0 0 0 2.5 4.9 l6.5 4.5 a6 6 0 0 1 2.5 4.9 v2 a6 6 0 0 1 -6 6 h-6 a10 10 0 0 1 -6.8 -2.6 l-3.4 -2.9 a8 8 0 0 1 -2.8 -6 v-25 a3 3 0 0 1 3 -3 z"/>
+      <rect class="cuff" x="22" y="9" width="13" height="4" rx="2"/>
+      <ellipse class="patch" cx="28.5" cy="38" rx="4.2" ry="3.2"/>
+      <ellipse class="patch" cx="38.5" cy="47" rx="4.8" ry="3.6"/>
+    </g>
+
+    <g transform="translate(64 0) scale(-1 1) rotate(-12 28 36)">
+      <path class="sockB" d="M24 11 h10 a3 3 0 0 1 3 3 v14 a6 6 0 0 0 2.2 4.7 l6.8 4.9 a6 6 0 0 1 2.0 4.5 v2 a6 6 0 0 1 -6 6 h-6 a10 10 0 0 1 -6.8 -2.6 l-3.2 -2.7 a8 8 0 0 1 -3 -6.2 v-24.6 a3 3 0 0 1 3 -3 z"/>
+      <rect class="cuff" x="24" y="11" width="13" height="4" rx="2"/>
+      <ellipse class="patch" cx="30.5" cy="39" rx="4.1" ry="3.1"/>
+      <ellipse class="patch" cx="40.3" cy="48" rx="4.6" ry="3.4"/>
+    </g>
+  </g>
+
+  <!-- Magnifying glass: refined geometry, gradients, and highlights -->
+  <g filter="url(#mgShadow)">
+    <!-- Lens (larger for emphasis) -->
+    <circle class="lensTint" cx="32" cy="31" r="28"/>
+
+    <!-- Primary ring -->
+    <circle class="ringBase" cx="32" cy="31" r="28"/>
+    <!-- Subtle inner ring for crisp edge -->
+    <circle class="ringInner" cx="32" cy="31" r="26.6"/>
+    <!-- Curved specular highlight along upper-left arc -->
+    <path class="ringHighlight" d="M11.2 28.6 A26 26 0 0 1 25 12.8"/>
+
+    <!-- Glass glare inside lens -->
+    <path class="glare" d="M16 23 C22 18, 29 16.5, 36 18" opacity="0.4"/>
+
+    <!-- Handle: tiny, slightly thicker, flat fill; tangent at 45° -->
+    <!-- Anchor computed at ring outer radius (r=28, stroke=4 => outerR=30); anchor ≈ (53.2, 52.2) -->
+    <g transform="rotate(45 53.2 52.2)">
+      <!-- Handle bar with pill ends; centered on anchor -->
+      <rect class="handle" x="53.2" y="49.4" width="9" height="5.6" rx="2.8"/>
+      <!-- Joint circle (subtle) -->
+      <circle class="joint" cx="53.2" cy="52.2" r="2.2"/>
+    </g>
+  </g>
+</svg>

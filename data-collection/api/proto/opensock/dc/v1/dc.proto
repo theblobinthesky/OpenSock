@@ -1,0 +1,59 @@
+syntax = "proto3";
+package opensock.dc.v1;
+option go_package = "opensock/datacollection/proto/gen/opensock/dc/v1;dcv1";
+
+message CreateSessionRequest {
+  string name = 1; string handle = 2; string email = 3; bool notify_opt_in = 4; string language = 5;
+  enum Mode { MODE_UNSPECIFIED = 0; MIXED_UNIQUES = 1; SAME_TYPE = 2; }
+  Mode mode = 6;
+}
+message CreateSessionResponse { string session_id = 1; }
+
+message FinalizeSessionRequest { string session_id = 1; }
+message FinalizeSessionResponse { bool ok = 1; }
+
+service DataCollectionService {
+  rpc CreateSession(CreateSessionRequest) returns (CreateSessionResponse);
+  rpc FinalizeSession(FinalizeSessionRequest) returns (FinalizeSessionResponse);
+}
+
+// Admin RPCs
+message ListSessionsRequest { string email = 1; string name = 2; string mode = 3; string status = 4; }
+message SessionSummary {
+  string id = 1; string email = 2; string name = 3; string handle = 4; string mode = 5; int32 image_count = 6; string created_at = 7; string finalized_at = 8;
+}
+message ListSessionsResponse { repeated SessionSummary sessions = 1; }
+message DeleteSessionRequest { string session_id = 1; }
+message DeleteUserRequest { string email = 1; }
+message DeleteResponse { bool ok = 1; }
+
+service AdminService {
+  rpc ListSessions(ListSessionsRequest) returns (ListSessionsResponse);
+  rpc DeleteSession(DeleteSessionRequest) returns (DeleteResponse);
+  rpc DeleteUser(DeleteUserRequest) returns (DeleteResponse);
+  rpc GetConfig(GetAdminConfigRequest) returns (GetAdminConfigResponse);
+  rpc UpdateConfig(UpdateAdminConfigRequest) returns (GetAdminConfigResponse);
+}
+
+// Upload RPCs
+message InitUploadRequest { string session_id = 1; string filename = 2; string mime_type = 3; uint64 total_size = 4; bytes file_checksum = 5; }
+message InitUploadResponse { string upload_id = 1; }
+message UploadChunkRequest { string upload_id = 1; uint32 index = 2; bytes chunk = 3; bytes chunk_checksum = 4; }
+message UploadChunkResponse { bool ok = 1; }
+message CompleteUploadRequest { string upload_id = 1; bytes file_checksum = 2; }
+message CompleteUploadResponse { bool ok = 1; string session_id = 2; }
+
+service UploadService {
+  rpc InitUpload(InitUploadRequest) returns (InitUploadResponse);
+  rpc UploadChunk(UploadChunkRequest) returns (UploadChunkResponse);
+  rpc CompleteUpload(CompleteUploadRequest) returns (CompleteUploadResponse);
+}
+
+// Config RPC
+message GetConfigRequest {}
+message GetConfigResponse { uint32 session_image_cap = 1; map<string, uint32> min_required = 2; uint32 file_size_limit_mb = 3; }
+service ConfigService { rpc Get(GetConfigRequest) returns (GetConfigResponse); }
+
+message GetAdminConfigRequest {}
+message GetAdminConfigResponse { uint32 session_image_cap = 1; uint32 min_required_mixed = 2; uint32 min_required_same = 3; uint32 file_size_limit_mb = 4; }
+message UpdateAdminConfigRequest { uint32 session_image_cap = 1; uint32 min_required_mixed = 2; uint32 min_required_same = 3; uint32 file_size_limit_mb = 4; }

@@ -35,8 +35,295 @@ The user has the ability to insert their Instagram, X, etc. handle in a differen
 # Technical details
 The site should translate at least to German and English, but honestly should be extensible.
 It's really important everything is translated, as even old people should be able to use it.
-The site is supposed to be collecting images of socks (for )
+The site is supposed to be collecting images of socks (for training a sock identification/matching system).
 
 # Tech Stack
 Use React for the frontend and Go for the backend.
-We should discuss, whether one even needs a database here. Maybe.
+We will use a database (Postgres preferred) to store submission metadata and manage deletion workflows. Image blobs are stored on local disk (preferred). Object storage can be added later if needed.
+Client–server API uses Protocol Buffers and Connect-style RPC routes. No REST endpoints.
+Note: The web client currently uses simple fetch() calls against the Connect RPC HTTP routes (JSON payloads) instead of the generated Connect‑Web TS client. Switching to the generated client is optional and can be done later without changing server behavior.
+Codegen & versioning: use `buf`/`protoc` with Connect‑Web TS client generation; keep proto evolution simple (stable field numbers; minimal deprecation/BC needs).
+## Instruction Slides
+Slides are static assets (images + short text), fully translated.
+- Slide 1: Collect 20–30 pairs of socks and take one sock out of each pair. All socks should differ in some way (color, size, pattern). Subtle differences are fine; avoid identical socks. Only socks on the ground; no people or other private content.
+- Slide 2: Spread socks flat on the floor, each stretched out. Take a photo like that. Do not move socks between photos. Use the same camera for the entire session.
+- Slide 3: Flip socks to the other side, same arrangement. Take a photo like that.
+- Slide 4: Crumple the socks a bit to disguise size. Take a photo like that.
+- Slide 5: Crumple them in a different way. Take a photo like that.
+- Slide 6: Optionally try additional configurations. Keep the same camera and positioning.
+
+## Collection Flow (Mobile-first)
+- Start a new session on mobile (phones/tablets preferred; desktop supported but secondary).
+- Enter optional display name and social handle for credits; email is required (used for deletion requests and optional notification when the app is ready).
+- Capture images via browser camera or upload existing images. Keep the same camera for the entire session.
+- Session image cap: up to 20 images per session (enforced client- and server-side; configurable).
+- Exact duplicate prevention is required globally across all submissions (not just within-session); compute SHA-256 after EXIF stripping/transcoding and reject exact re-submits.
+- File size limit: 25MB per image (configurable on server and client).
+ - Soft resolution nudge: warn if width < 1024px with guidance to use higher resolution; still accept.
+ - Submit and finalize the session. Users can proceed through slides without per‑slide or global minimums; the final slide remains optional.
+ - Session expiry: Entire session (and any related upload sessions) expires after 24h of inactivity. On expiry, delete all associated images, uploads, hashes, and metadata.
+
+## Privacy & Consent
+- Parse focal length if present; store only that numeric value (no other EXIF). Use camera model transiently to detect same-camera usage for warnings, but do not persist it. Then strip all EXIF/GPS and ancillary metadata server-side before storage. Display a clear note: "We collect nothing but the images you submit" (no trackers/analytics).
+- No people or private scenes; socks-on-the-ground only.
+ - Provide consent checkboxes as required (EU/DSGVO), with Terms and Privacy links. Terms & Privacy (EN/DE) approved as drafted; copy remains minimal and focused on training usage and deletion rights.
+- Data retention: keep indefinitely until deletion requests are received.
+
+## Internationalization
+- Full i18n coverage using key-based message catalogs (English and German to start). Everything visible to users must be translated, including slides and form labels. Provide English fallback for missing keys.
+- Language auto-detected from browser (default English). No manual language toggle in the UI.
+- Language is not stored as metadata and is not included in submissions.
+- German copy uses informal “Du”.
+
+### i18n Keys (Slides & Flow)
+- Mode selection
+  - `mode.mixed.title` = Mixed Uniques
+  - `mode.same.title` = Same Type
+  - `mode.preview.note` = Keep socks where they are; only flip or crumple.
+- Mixed Uniques slides
+  - `slides.mixed.1.title` = Flat, stretched
+  - `slides.mixed.2.title` = Flip sides (in place)
+  - `slides.mixed.3.title` = Crumple A (in place)
+  - `slides.mixed.4.title` = Crumple B (optional)
+  - `slides.mixed.5.title` = Extras (optional)
+- Same Type slides
+  - `slides.same.1.title` = Flat grid (in place)
+  - `slides.same.2.title` = Flip sides (in place)
+  - `slides.same.3.title` = Crumple (in place)
+  - `slides.same.4.title` = Extras (optional)
+- Guidance & recap
+  - `guidance.sticky` = Do not move socks between photos.
+  - `recap.title` = Contribution submitted
+  - `recap.id` = Contribution ID
+  - `recap.nudge` = For best results, keep ~20 socks per photo with spacing.
+
+## Accessibility & Typography (proposed)
+- Minimum base font size 16px; large tap targets (44×44pt) for controls.
+- High‑contrast color palette meeting WCAG AA; avoid conveying info by color alone.
+- Clear alt text for slide images; concise, senior‑friendly sentence structure in EN/DE.
+
+
+## Terminology (UI vs Backend)
+- UI uses the term "Contribution" instead of "Session" for clarity.
+- Backend/API and storage continue to use "session" identifiers internally.
+
+## Collection Modes & Interlaced Flow
+- Default UI: The interlaced slide + upload flow is the default capture experience.
+- Modes:
+  - Mixed Uniques: a set of different single socks (default).
+  - Same Type: multiple socks of the exact same type (e.g., many identical socks). Do not randomize positions between shots; socks should remain in place and only flip/turn/crumple.
+- Session setup:
+  - User selects mode at session start and optionally enters an approximate number of socks available.
+  - Use the same camera for the entire session; do not move socks between shots except when instructed.
+- Interlaced slides & uploads:
+  - Show one slide, then allow capture/upload for that slide.
+  - First slide (collect socks) has no upload. Subsequent slides encourage uploads but do not block navigation.
+  - Final slide allows additional uploads until the session limit is reached.
+- Multi‑pass: If the user has more socks than practical for one session (e.g., 40 socks), they can create another session and repeat the flow.
+
+### Per‑Mode Slide Sets (final)
+- Mixed Uniques
+  1) Flat, stretched (required)
+  2) Flip sides in place (required)
+  3) Crumple A in place (required)
+  4) Crumple B in place (optional)
+  5) Extras (optional)
+- Same Type
+  1) Flat grid, same positions (required)
+  2) Flip sides in place (required)
+  3) Crumple in place (required)
+  4) Extras (optional)
+
+### Post‑Finalize Recap
+- After finalize, show a recap with timestamp and a copyable Contribution ID for support.
+- Nudge: “For best results, keep about 20 socks per photo with some spacing. Start another contribution for more.”
+
+## Credits & Attribution
+- Optional display name and social handle are collected for future project credits. Stored internally only; not publicly displayed until project completion. No additional moderation is planned.
+
+## UI/UX Enhancements (approved)
+- Mode picker: two large cards with concise examples; selecting a card shows a short mode‑specific preview.
+- Sticky guidance: always‑visible visual indicator (SVG animation) reminding “Do not move socks between photos”.
+- Progress checklist: top progress indicator for slide order (uploads encouraged, not enforced).
+- Guidance: soft level/tilt hints only. Remove 3×3 grid and 4:3 framing overlays.
+- Client camera: prefer the rear camera (`facingMode: environment`) when available.
+- iOS Safari: show a pre‑permission explainer screen before requesting camera access.
+
+## Camera Capture Quality
+- Goal: maximize detail, especially in dark fabrics.
+- Mobile web constraints: getUserMedia/ImageCapture typically yields 8‑bit sRGB; true HDR/10–12‑bit capture is not consistently available to web apps.
+- Strategy:
+  - Default to file input with `accept="image/*" capture="environment"` to open the native camera app (which may produce HEIC/HDR on iOS/Android). Keep originals.
+  - Offer an in‑browser camera option for quick capture; request highest available resolution; fallback if ImageCapture is unsupported.
+  - Accept HEIC/HEIF (HDR) uploads; do not downscale or transcode in the client.
+
+
+## Data Model & Storage
+- Sessions group multiple images shot without moving socks and using the same camera. Store a stable session ID, timestamps, and optional user fields (name, handle, email, notify_opt_in).
+ - Images: accept common formats (JPEG/PNG/TIFF/HEIC/EXR if provided); no device downscaling required; high resolution is preferred. Server may transcode later if needed. Do not store normalized copies; only originals are retained.
+- Metadata: Postgres stores session records and metadata; images stored on local disk. Exact duplicate detection uses a hash (e.g., SHA-256) computed on pixels after applying EXIF Orientation and stripping metadata, with a global hash index across all submissions. Originals are preserved as uploaded.
+- Deletion: Support erasure by email request; admin UI enables selective deletion by email and by session, removing images and metadata.
+- Admin UI: Allow searching by name or email and selecting the correct session from a list to delete; no deletion codes.
+ - Format handling: Do not reject any listed formats (including HEIC/EXR). If the server cannot decode a format immediately, store the original bytes and handle normalization offline later.
+ - Additional fields: session `mode` (MIXED_UNIQUES or SAME_TYPE); optional numeric `focal_length` if present in EXIF. `approx_socks` is a client‑side hint only (not persisted) to suggest whether multiple sessions are advisable.
+ - Dedup index: On deletion or session expiry, remove corresponding entries from the global hash index.
+
+### Storage Layout (images on disk; metadata in Postgres)
+- Root: `storage/YYYY/MM/DD/{session_id}/`
+- Files: `{timestampNs}_{shortHash}.{ext}` (server‑generated; ignore client filenames to avoid PII leaks)
+- Source of truth for metadata is Postgres (sessions, images, dedup index). Optional exports to JSON/CSV can be added later if needed; no `session.json`/`images.jsonl` are written in normal operation.
+
+## API (initial)
+- Exposed via gRPC‑web unary methods with the following semantics (route names are conceptual):
+- POST `/sessions` → create a session (returns `session_id`). Payload may include name, handle, email, notify_opt_in, mode. `language` is not used/persisted. The client may optionally use `approx_socks` locally to decide whether to start multiple sessions, but it is not persisted.
+- POST `/sessions/{id}/images` → upload image(s); enforce per-session cap and global dedup; enforce 25MB max per file; strip metadata; store image + metadata.
+- Chunked uploads (resume): `POST /uploads/init` → upload_id, `PUT /uploads/{upload_id}/chunk` (5MB chunks, per-chunk checksum, naive retry), `POST /uploads/{upload_id}/complete` (verify final checksum); associate completed upload with a session; expiry after 24h of inactivity.
+- POST `/sessions/{id}/finalize` → mark session complete.
+- Admin (protected behind a long preconfigured password on a hidden route):
+  - GET `/admin/sessions?email=...` → list sessions by email; support search by name or email.
+  - DELETE `/admin/sessions/{id}` → delete one session (images + metadata).
+ - DELETE `/admin/users/{email}` → delete all sessions for an email.
+ - Error schema: return `{ error_key: string, params?: object }` on errors (to enable i18n) with appropriate HTTP status codes; on success return typed fields and include `remaining_cap` on uploads.
+
+## Security
+- Admin routes: HTTP Basic Auth with a long env‑configured password under `/admin`; all admin requests require auth. No additional hardening required as per spec.
+- Filenames: server‑generated; client filenames are not stored to avoid accidental PII.
+- Timestamps: store in UTC; display in the user’s local time in UI.
+ - Expiry cleanup: background job runs periodically (e.g., hourly) to delete expired sessions/images/hashes.
+
+## Dev Environment
+- Default local ports: API `:8080`, Web UI `:5173` (Vite). CORS allows `http://localhost:5173` in dev.
+- Postgres via Docker Compose (dev only):
+  - Service name: `db`; image: `postgres:16`; ports: `5432:5432`.
+  - Env: `POSTGRES_DB=opensock`, `POSTGRES_USER=opensock`, `POSTGRES_PASSWORD=opensock`.
+  - App env: `DATABASE_URL=postgres://opensock:opensock@localhost:5432/opensock?sslmode=disable`.
+  - Start: `docker compose up -d db`.
+
+### Dev Quickstart
+1) `docker compose up -d db`
+2) Start API with `PORT=8080 DATABASE_URL=postgres://opensock:opensock@localhost:5432/opensock?sslmode=disable`
+3) Start Web with `VITE_API_BASE=http://localhost:8080`
+4) Open `http://localhost:5173`
+
+## Database & Migrations
+- DB: Postgres is the source of truth for all session and image metadata and the global dedup index.
+- Core tables (high‑level):
+  - `sessions(id, created_at, finalized_at, name, handle, email, notify_opt_in, mode, image_count, focal_length)`
+  - `images(id, session_id, server_filename, original_mime, size_bytes, sha256, hash_source, width, height, created_at)`
+  - `dedup_index(sha256 PRIMARY KEY, image_id)`
+- Migrations: versioned SQL migrations applied on startup in dev using `migrate`; production migrations applied manually.
+
+## API Contract (.proto Outline)
+syntax = "proto3";
+package opensock.dc.v1;
+
+message Error { string error_key = 1; map<string,string> params = 2; }
+
+message CreateSessionRequest {
+  string name = 1; string handle = 2; string email = 3; bool notify_opt_in = 4; 
+  string language = 5 [deprecated = true]; // UI auto-detects; not persisted
+  enum Mode { MODE_UNSPECIFIED = 0; MIXED_UNIQUES = 1; SAME_TYPE = 2; }
+  Mode mode = 6; int32 approx_socks = 7; // client-side hint only; ignored by server
+}
+message CreateSessionResponse { string session_id = 1; }
+
+message UploadImageRequest { string session_id = 1; bytes image = 2; string filename = 3; string mime_type = 4; }
+message UploadImageResponse { uint32 uploaded = 1; uint32 rejected_duplicate = 2; uint32 remaining_cap = 3; }
+
+message FinalizeSessionRequest { string session_id = 1; }
+message FinalizeSessionResponse { bool ok = 1; }
+
+message InitUploadRequest { string session_id = 1; string filename = 2; string mime_type = 3; uint64 total_size = 4; bytes file_checksum = 5; }
+message InitUploadResponse { string upload_id = 1; }
+message UploadChunkRequest { string upload_id = 1; uint32 index = 2; bytes chunk = 3; bytes chunk_checksum = 4; }
+message UploadChunkResponse { bool ok = 1; }
+message CompleteUploadRequest { string upload_id = 1; bytes file_checksum = 2; }
+message CompleteUploadResponse { bool ok = 1; string session_id = 2; }
+
+message ListSessionsRequest { string email = 1; string name = 2; string mode = 3; }
+message SessionSummary { string id = 1; string email = 2; string name = 3; string handle = 4; string mode = 5; int32 image_count = 6; }
+message ListSessionsResponse { repeated SessionSummary sessions = 1; }
+message DeleteSessionRequest { string session_id = 1; }
+message DeleteUserRequest { string email = 1; }
+message DeleteResponse { bool ok = 1; }
+
+service DataCollectionService {
+  rpc CreateSession(CreateSessionRequest) returns (CreateSessionResponse);
+  rpc UploadImage(UploadImageRequest) returns (UploadImageResponse);
+  rpc FinalizeSession(FinalizeSessionRequest) returns (FinalizeSessionResponse);
+}
+service UploadService {
+  rpc InitUpload(InitUploadRequest) returns (InitUploadResponse);
+  rpc UploadChunk(UploadChunkRequest) returns (UploadChunkResponse);
+  rpc CompleteUpload(CompleteUploadRequest) returns (CompleteUploadResponse);
+}
+service AdminService {
+  rpc ListSessions(ListSessionsRequest) returns (ListSessionsResponse);
+  rpc DeleteSession(DeleteSessionRequest) returns (DeleteResponse);
+  rpc DeleteUser(DeleteUserRequest) returns (DeleteResponse);
+}
+
+## Moderation & Analytics
+- No moderation at submission time; downstream autolabel handles content. No analytics or third‑party trackers.
+
+## Error Handling
+- Keep UX simple: surface upload errors, retry once automatically with backoff, and allow manual retry. No offline queue.
+- Upload resume: supported via chunked uploads (5MB chunks), naive per‑chunk retries, final checksum verification; upload sessions expire after 24h of inactivity.
+
+[codex] Error Key Taxonomy (proposed)
+- Upload
+  - `upload.cap_reached` { remaining: number } → 409
+  - `upload.too_large` { limit_mb: number } → 413
+  - `upload.duplicate` { } → 409
+  - `upload.unsupported_format` { mime: string } → 415
+  - `upload.failed` { reason?: string } → 500
+- Session
+  - `session.not_found` { } → 404
+  - `session.expired` { } → 410
+- Admin
+  - `admin.unauthorized` { } → 401
+  - `admin.forbidden` { } → 403
+- Common
+  - `common.bad_request` { field?: string } → 400
+  - `common.internal_error` { } → 500
+
+
+## Legal: Terms & Privacy (Approved Draft)
+English (concise, draft)
+- Controller: Erik Stern, Gutmaninger Straße 26, 93413 Cham, Germany. Contact: erik.stern@outlook.de.
+- Purpose: Collect images of socks to develop and research automated sock identification/matching.
+- Data collected: Submitted images; numeric focal length (if present); optional display name, social handle, email; minimal technical logs necessary to operate the service (no trackers/analytics).
+- Use & retention: Data is used for training, evaluation, and research for OpenSock; retained indefinitely unless you request deletion.
+- Sharing: No sale of data. Service providers may process data on our behalf under confidentiality and data processing agreements.
+- Legal basis: Consent (Art. 6(1)(a) GDPR). You may withdraw consent at any time.
+- Your rights: Access, rectification, erasure, restriction, portability, objection. Contact us to exercise your rights.
+- Deletion: Email us from the address you provided (or provide sufficient identifying information) to request deletion of your sessions.
+- Children: Do not submit images containing people. This service is not directed to children.
+
+Deutsch (kurz, Entwurf)
+- Verantwortlicher: Erik Stern, Gutmaninger Straße 26, 93413 Cham, Deutschland. Kontakt: erik.stern@outlook.de.
+- Zweck: Sammlung von Bildern von Socken zur Entwicklung/Forschung eines Systems zur Sockenerkennung/-zuordnung.
+- Verarbeitete Daten: Eingereichte Bilder; numerische Brennweite (falls vorhanden); optionale Angaben (Anzeigename, Social‑Handle, E‑Mail); minimale technische Protokolle zur Bereitstellung (keine Tracker/Analytics).
+- Nutzung & Aufbewahrung: Nutzung zu Training, Bewertung und Forschung für OpenSock; Aufbewahrung auf unbestimmte Zeit bis zur Löschanforderung.
+- Weitergabe: Keine Veräußerung. Dienstleister können Daten in unserem Auftrag verarbeiten (vertraulich, Auftragsverarbeitung).
+- Rechtsgrundlage: Einwilligung (Art. 6 Abs. 1 lit. a DSGVO). Widerruf jederzeit möglich.
+- Ihre Rechte: Auskunft, Berichtigung, Löschung, Einschränkung, Datenübertragbarkeit, Widerspruch. Kontaktieren Sie uns.
+- Löschung: E‑Mail von der angegebenen Adresse (oder ausreichende Angaben) zur Löschung Ihrer Sitzungen.
+- Kinder: Keine Bilder mit Personen einreichen. Dienst richtet sich nicht an Kinder.
+
+## Deployment
+- Host with local-disk storage (preference). Deploy as Docker container.
+- TLS / reverse proxy: Not required for local dev. For production, either Caddy (simple) or Traefik (flexible) can terminate TLS; decision is non‑blocking and deferred.
+- CORS: Configurable origins (allow all in dev; restrict to known domains in prod). [todo: list allowed origins]
+- Backups: No backup requirements at the application layer (operator/infrastructure may handle backups externally if desired).
+- Encryption at rest: Left to infrastructure policy.
+
+## Codebase Layout
+- `data-collection/web` (React, mobile-first UI with i18n and camera/upload flow).
+- `data-collection/api` (Go HTTP API + Postgres integration; media storage abstraction; admin UI).
+
+## Out of Scope
+- Continuous dataset exports and public browsing are not required at this time.
+
+## Questions / Clarifications
+None at this time. Remaining todos are captured inline (e.g., CORS origins list; draft EN/DE strings for slides/guidance and error copy).

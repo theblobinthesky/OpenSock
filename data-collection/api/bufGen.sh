@@ -1,0 +1,2 @@
+cd proto
+buf generate

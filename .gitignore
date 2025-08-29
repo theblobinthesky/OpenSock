@@ -26,3 +26,5 @@ cmake-build-debug
 .vscode
 *.db
 .*/
+setup.sh
+node_modules
