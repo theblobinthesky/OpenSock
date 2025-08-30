@@ -28,3 +28,4 @@ cmake-build-debug
 .*/
 setup.sh
 node_modules
+storage

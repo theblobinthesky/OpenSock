@@ -1,4 +1,26 @@
-const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8080'
+// Prefer explicit env, otherwise derive from current host with port fallback
+const GUESSED_API_BASE = (() => {
+  try {
+    const { protocol, hostname } = window.location
+    const port = (import.meta.env.VITE_API_PORT as string) || '8080'
+    return `${protocol}//${hostname}:${port}`
+  } catch {
+    return 'http://localhost:8080'
+  }
+})()
+function isLocalHost(name: string) {
+  return name === 'localhost' || name === '127.0.0.1' || name === '::1'
+}
+
+let API_BASE = (import.meta.env.VITE_API_BASE as string | undefined) || GUESSED_API_BASE
+try {
+  const url = new URL(API_BASE)
+  const pageHost = window.location.hostname
+  if (isLocalHost(url.hostname) && !isLocalHost(pageHost)) {
+    const port = (import.meta.env.VITE_API_PORT as string) || (url.port || '8080')
+    API_BASE = `${window.location.protocol}//${pageHost}:${port}`
+  }
+} catch {}
 const CONNECT_BASE = `${API_BASE}/opensock.dc.v1.DataCollectionService`
 
 export async function createSession(payload: {
@@ -36,12 +58,22 @@ async function initUpload(sessionId: string, filename: string, mime: string, tot
     body: JSON.stringify({ sessionId, filename, mimeType: mime, totalSize }),
   })
   if (!res.ok) { throw new Error(await res.text() || 'init failed') }
-  const data = await res.json() as { upload_id: string }
-  return data.upload_id
+  const data = await res.json() as any
+  return (data.uploadId || data.upload_id)
+}
+
+function toBase64(chunk: Uint8Array): string {
+  // Build a binary string in chunks (ensures code points 0–255)
+  let binary = ''
+  const STEP = 0x8000
+  for (let i = 0; i < chunk.length; i += STEP) {
+    binary += String.fromCharCode(...chunk.subarray(i, Math.min(i + STEP, chunk.length)))
+  }
+  return btoa(binary)
 }
 
 async function uploadChunk(uploadId: string, index: number, chunk: Uint8Array): Promise<void> {
-  const b64 = btoa(String.fromCharCode(...chunk))
+  const b64 = toBase64(chunk)
   const res = await fetch(`${UPLOAD_BASE}/UploadChunk`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ uploadId, index, chunk: b64 }),

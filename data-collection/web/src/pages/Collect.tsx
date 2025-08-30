@@ -92,8 +92,8 @@ export default function Collect() {
         <input name="handle" placeholder={i18n.t('collect.handle')} />
         <input name="email" placeholder={i18n.t('collect.email')} type="email" required />
         <div>
-          <label><input type="radio" name="mode" value="MIXED_UNIQUES" defaultChecked /> Mixed Uniques</label>
-          <label style={{marginLeft:12}}><input type="radio" name="mode" value="SAME_TYPE" /> Same Type</label>
+          <label><input type="radio" name="mode" value="MIXED_UNIQUES" defaultChecked /> {i18n.t('mode.mixed.title')}</label>
+          <label style={{marginLeft:12}}><input type="radio" name="mode" value="SAME_TYPE" /> {i18n.t('mode.same.title')}</label>
         </div>
         <label><input name="notify" type="checkbox" /> {i18n.t('collect.notify')}</label>
         <label><input type="checkbox" checked={consent} onChange={e=>setConsent(e.target.checked)} /> {i18n.t('collect.consent')}</label>
@@ -116,7 +116,7 @@ export default function Collect() {
         <input ref={inputRef} type="file" accept="image/*" multiple capture="environment" onChange={e=>onUpload(e.target.files)} />
       </div>
       {remaining !== null && <div>{i18n.t('upload.remaining')}: {remaining} / cap {cap} (uploaded ~ {uploaded})</div>}
-      {!canFinalize && <div style={{color:'#b36b00'}}>Add at least {minRequired} images before finalizing.</div>}
+      {!canFinalize && <div style={{color:'#b36b00'}}>{(i18n.t('collect.need_min')||'Add at least {n} images before finalizing.').replace('{n}', String(minRequired))}</div>}
       <button disabled={busy || !canFinalize} onClick={onFinalize}>{i18n.t('finalize')}</button>
       {error && <div style={{color:'crimson'}}>{error}</div>}
     </div>

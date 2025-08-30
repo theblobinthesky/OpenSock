@@ -14,11 +14,11 @@ function stepsFor(mode: Mode): Step[] {
       { key: 'same.4', title: i18n.t('slides.same.4.title'), required: false },
     ]
   }
+  // Mixed flow: Flat, Flip, Crumple, then Extras (optional, supports multiple images)
   return [
     { key: 'mixed.1', title: i18n.t('slides.mixed.1.title'), required: true },
     { key: 'mixed.2', title: i18n.t('slides.mixed.2.title'), required: true },
     { key: 'mixed.3', title: i18n.t('slides.mixed.3.title'), required: true },
-    { key: 'mixed.4', title: i18n.t('slides.mixed.4.title'), required: false },
     { key: 'mixed.5', title: i18n.t('slides.mixed.5.title'), required: false },
   ]
 }
@@ -35,12 +35,27 @@ export default function Interlaced() {
   const [stepIdx, setStepIdx] = useState(0)
   const [remaining, setRemaining] = useState<number | null>(null)
   const [uploadedByStep, setUploadedByStep] = useState<Record<number, number>>({})
-  const inputRef = useRef<HTMLInputElement | null>(null)
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
+  const cameraInputRef = useRef<HTMLInputElement | null>(null)
+  const progressRef = useRef<HTMLDivElement | null>(null)
+  const currentStepRef = useRef<HTMLDivElement | null>(null)
+  const [previewsByStep, setPreviewsByStep] = useState<Record<number, string[]>>({})
+  const [replacedByStep, setReplacedByStep] = useState<Record<number, boolean>>({})
   const [recap, setRecap] = useState<{ id: string, at: string } | null>(null)
   const [warnLowRes, setWarnLowRes] = useState<string | null>(null)
   // removed: 4:3 framing overlay toggle and 3x3 grid overlay
   const [tilt, setTilt] = useState<{beta:number, gamma:number} | null>(null)
   const [needsPerm, setNeedsPerm] = useState<boolean>(false)
+  const [confirmOpen, setConfirmOpen] = useState(false)
+  const pendingRef = useRef<null | {
+    name: string
+    handle: string
+    email: string
+    notify_opt_in: boolean
+    language: string
+    mode: Mode
+  }>(null)
+  const [copied, setCopied] = useState<boolean>(false)
 
   const steps = useMemo(() => stepsFor(mode), [mode])
   const totalUploaded = Object.values(uploadedByStep).reduce((a, b) => a + b, 0)
@@ -48,11 +63,30 @@ export default function Interlaced() {
   React.useEffect(()=>{
     // load config
     getConfig().then(cfg=>{
-      setCap(cfg.session_image_cap)
+      const capVal = Number((cfg as any).session_image_cap)
+      if (!Number.isFinite(capVal) || capVal <= 0) setCap(20); else setCap(capVal)
       // @ts-ignore: file_size_limit_mb may be present
       if ((cfg as any).file_size_limit_mb) setMaxMB((cfg as any).file_size_limit_mb)
     }).catch(()=>{})
   },[])
+
+  // Auto-scroll progress bar to active step
+  React.useEffect(() => {
+    const el = currentStepRef.current
+    if (!el) return
+    // Use scrollIntoView to center the active blob horizontally
+    try {
+      el.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' })
+    } catch {
+      // Fallback: manual scroll calculation
+      const container = progressRef.current
+      if (!container) return
+      const rect = el.getBoundingClientRect()
+      const crect = container.getBoundingClientRect()
+      const offset = (rect.left + rect.right) / 2 - (crect.left + crect.right) / 2
+      container.scrollLeft += offset
+    }
+  }, [stepIdx])
 
   // Device orientation hints
   React.useEffect(()=>{
@@ -86,10 +120,10 @@ export default function Interlaced() {
 
   const onCreate = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault()
-    if (!consent) { setError('Please accept consent'); return }
+    if (!consent) { setError(i18n.t('errors.consent_required')); return }
     setError(null)
     const fd = new FormData(e.currentTarget)
-    const payload = {
+    pendingRef.current = {
       name: String(fd.get('name') || ''),
       handle: String(fd.get('handle') || ''),
       email: String(fd.get('email') || ''),
@@ -97,6 +131,13 @@ export default function Interlaced() {
       language: i18n.lang,
       mode: mode,
     }
+    setConfirmOpen(true)
+  }
+
+  const proceedCreate = async () => {
+    if (!pendingRef.current) return
+    const payload = pendingRef.current
+    setConfirmOpen(false)
     setBusy(true)
     try {
       const res = await createSession(payload)
@@ -107,7 +148,7 @@ export default function Interlaced() {
       try {
         const parsed = JSON.parse(String(e.message))
         if (parsed.error_key === 'session.email_required') {
-          setError('Email is required to continue.')
+          setError(i18n.t('errors.email_required'))
         } else {
           setError(e.message)
         }
@@ -117,6 +158,11 @@ export default function Interlaced() {
 
   const onUpload = async (files: FileList | null) => {
     if (!sessionId || !files || files.length === 0) return
+    // If cap reached, nudge user to submit
+    if (totalUploaded >= cap) {
+      setError(i18n.t('errors.upload.at_limit'))
+      return
+    }
     // soft low-res nudge
     setWarnLowRes(null)
     try {
@@ -125,23 +171,42 @@ export default function Interlaced() {
       const img = new Image()
       img.src = url
       await img.decode()
-      if (img.width < 1024) setWarnLowRes('For better results, use higher resolution if possible.')
+      if (img.width < 1024) setWarnLowRes(i18n.t('upload.low_res_hint'))
       URL.revokeObjectURL(url)
     } catch {}
     setBusy(true)
     try {
-      const resp = await uploadImages(sessionId, Array.from(files))
+      const arr = Array.from(files)
+      const prevLen = (previewsByStep[stepIdx] || []).length
+      const resp = await uploadImages(sessionId, arr)
       const newUploadedThisStep = (uploadedByStep[stepIdx] || 0) + resp.uploaded
       const currentTotal = totalUploaded
       const remainingLocal = Math.max(0, cap - (currentTotal + resp.uploaded))
       setRemaining(remainingLocal)
       setUploadedByStep((prev) => ({ ...prev, [stepIdx]: newUploadedThisStep }))
       if (resp.uploaded === 0) {
-        setError('No new images uploaded. If you re-used the same photo, please take a fresh one (duplicates are skipped).')
+        setError(i18n.t('errors.upload.duplicate'))
       } else {
         setError(null)
+        // Only add previews for actually-uploaded files
+        const acc = arr.slice(0, resp.uploaded).map(f=>URL.createObjectURL(f))
+        setPreviewsByStep(prev=>{
+          const prevList = prev[stepIdx] || []
+          if (step.required) {
+            return { ...prev, [stepIdx]: acc.length ? [acc[0]] : prevList }
+          }
+          const next = prevList.concat(acc).slice(-8)
+          return { ...prev, [stepIdx]: next }
+        })
+        if (step.required) {
+          setReplacedByStep(prev => ({ ...prev, [stepIdx]: prevLen > 0 && resp.uploaded > 0 }))
+        }
+        if (remainingLocal === 0) {
+          setError(i18n.t('errors.upload.at_limit'))
+        }
       }
-      if (inputRef.current) inputRef.current.value = ''
+      if (fileInputRef.current) fileInputRef.current.value = ''
+      if (cameraInputRef.current) cameraInputRef.current.value = ''
     } catch (e:any) {
       const msg = String(e?.message||'')
       if (msg.includes('unsupported')) setError(i18n.t('errors.upload.unsupported_format'))
@@ -150,8 +215,16 @@ export default function Interlaced() {
     } finally { setBusy(false) }
   }
 
-  const onNext = () => { if (stepIdx < steps.length - 1) setStepIdx(stepIdx + 1) }
-  const onPrev = () => { if (stepIdx > 0) setStepIdx(stepIdx - 1) }
+  const onNext = async () => {
+    if (stepIdx < steps.length - 1) {
+      setStepIdx(stepIdx + 1)
+      setError(null); setWarnLowRes(null)
+      try { window.scrollTo({ top: 0, behavior: 'smooth' }) } catch {}
+    } else {
+      await onFinalize()
+    }
+  }
+  const onPrev = () => { if (stepIdx > 0) { setStepIdx(stepIdx - 1); setError(null); setWarnLowRes(null); try { window.scrollTo({ top: 0, behavior: 'smooth' }) } catch {} } }
 
   const onFinalize = async () => {
     if (!sessionId) return
@@ -167,123 +240,312 @@ export default function Interlaced() {
 
   if (!sessionId) {
     return (
-      <form onSubmit={onCreate} className="container" style={{ display: 'grid', gap: 12, padding: 16, maxWidth: 680 }}>
-        <h2>{i18n.t('collect.title')}</h2>
-        {error && <div className="alert alert-danger" style={{margin:0}}>{error}</div>}
-        <label>
-          <input className="form-control" name="name" placeholder={i18n.t('collect.name')} />
-          <div className="text-muted" style={{fontSize:12, marginTop:4}}>Optional. If you want, we can list this name in credits later.</div>
-        </label>
-        <label>
-          <input className="form-control" name="handle" placeholder={i18n.t('collect.handle')} />
-          <div className="text-muted" style={{fontSize:12, marginTop:4}}>Optional. Social handle for credits (e.g. @name). Leave blank to stay anonymous.</div>
-        </label>
-        <input className="form-control" name="email" placeholder={i18n.t('collect.email')} type="email" required />
-        <div>
-          <div className="text-muted" style={{fontSize:12}}>Pick what you’re photographing:</div>
-          <div style={{display:'grid', gap:8, gridTemplateColumns:'repeat(2, minmax(0, 1fr))'}}>
-            <button type="button" onClick={()=>setMode('MIXED_UNIQUES')} className={"mode-card" + (mode==='MIXED_UNIQUES'?' selected':'')} aria-pressed={mode==='MIXED_UNIQUES'}>
-              <img src="/slides/mixed/1.svg" alt="Mixed Uniques example" />
-              <div className="overlay"><div className="title">Mixed Uniques</div><div className="subtitle">Different single socks</div></div>
-            </button>
-            <button type="button" onClick={()=>setMode('SAME_TYPE')} className={"mode-card" + (mode==='SAME_TYPE'?' selected':'')} aria-pressed={mode==='SAME_TYPE'}>
-              <img src="/slides/same/1.svg" alt="Same Type example" />
-              <div className="overlay"><div className="title">Same Type</div><div className="subtitle">Multiple identical socks</div></div>
+      <form onSubmit={onCreate} className="grid gap-4 p-4 max-w-2xl mx-auto overflow-x-hidden relative">
+        {confirmOpen && (
+          <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center px-4">
+            <div className="w-full max-w-md bg-white rounded-xl shadow-xl ring-1 ring-gray-200 p-4 grid gap-3">
+              <div className="text-lg font-semibold">{i18n.t('confirm.title')}</div>
+              <div className="text-sm text-gray-700">
+                <p className="mb-2">{i18n.t('confirm.note')}</p>
+                <ul className="list-disc pl-5 space-y-1">
+                  <li>{i18n.t('rules.shared')}</li>
+                  <li>{mode==='MIXED_UNIQUES' ? i18n.t('rules.mixed') : i18n.t('rules.same')}</li>
+                </ul>
+              </div>
+              <div className="flex gap-2 justify-end">
+                <button type="button" className="px-3 py-2 rounded border border-gray-300 hover:bg-gray-50 text-sm" onClick={()=>setConfirmOpen(false)}>{i18n.t('confirm.cancel')}</button>
+                <button type="button" className="px-3 py-2 rounded bg-brand-600 text-white hover:bg-brand-700 text-sm" onClick={proceedCreate}>{i18n.t('confirm.accept')}</button>
+              </div>
+            </div>
+          </div>
+        )}
+        {/* About OpenSock */}
+        <div className="text-gray-800 bg-white rounded-xl ring-1 ring-gray-200 p-4">
+          <div className="text-lg font-semibold mb-2">{i18n.t('about.title')}</div>
+          <div className="text-[15px] leading-6 space-y-2 mb-3">
+            <p>{i18n.t('about.purpose')}</p>
+            <p>{i18n.t('about.family')}</p>
+            <p>{i18n.t('about.why')}</p>
+          </div>
+          <div>
+            <div className="text-sm font-medium text-gray-700 mb-2">{i18n.t('about.modes.title')}</div>
+            <ul className="list-disc pl-5 text-[15px] leading-6 space-y-1.5">
+              <li>{i18n.t('about.modes.mixed')}</li>
+              <li>{i18n.t('about.modes.same')}</li>
+            </ul>
+          </div>
+          <div className="mt-4">
+            <button type="button" className="inline-flex items-center gap-2 px-4 py-2 rounded-md bg-brand-600 text-white hover:bg-brand-700"
+              onClick={()=>{ const el = document.getElementById('contribute-form-start'); if (el) el.scrollIntoView({behavior:'smooth', block:'start'}); }}>
+              {i18n.t('contribute.scroll_cta')}
             </button>
           </div>
         </div>
-        <div className="form-check">
-          <input className="form-check-input" id="notify" name="notify" type="checkbox" />
-          <label className="form-check-label" htmlFor="notify">{i18n.t('collect.notify')}</label>
+        <h2 className="text-xl font-semibold">{i18n.t('contribute.title')}</h2>
+        {error && <div className="flex items-center gap-2 text-red-700 bg-red-50 border border-red-200 px-3 py-2 rounded">{error}</div>}
+        <div id="contribute-form-start" />
+        <label className="grid gap-1">
+          <span className="text-sm text-gray-700">{i18n.t('collect.email_label')} <span className="text-red-600">{i18n.t('collect.required')}</span></span>
+          <input className="w-full rounded border border-gray-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-brand-500" name="email" placeholder={i18n.t('collect.email')} type="email" required />
+        </label>
+        <label className="grid gap-1">
+          <span className="text-sm text-gray-700">{i18n.t('collect.name_label')} <span className="text-gray-400">{i18n.t('collect.optional')}</span></span>
+          <input className="w-full rounded border border-gray-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-brand-500" name="name" placeholder={i18n.t('collect.name')} />
+          <div className="text-xs text-gray-500">{i18n.t('collect.name_help')}</div>
+        </label>
+        <label className="grid gap-1">
+          <span className="text-sm text-gray-700">{i18n.t('collect.handle_label')} <span className="text-gray-400">{i18n.t('collect.optional')}</span></span>
+          <input className="w-full rounded border border-gray-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-brand-500" name="handle" placeholder={i18n.t('collect.handle')} />
+          <div className="text-xs text-gray-500">{i18n.t('collect.handle_help')}</div>
+        </label>
+        <div>
+          <div className="text-xs text-gray-500 mb-2">{i18n.t('collect.pick')}</div>
+          <div className="grid grid-cols-2 gap-2">
+            <button type="button" onClick={()=>setMode('MIXED_UNIQUES')} className={`relative overflow-hidden rounded-lg ring-2 ${mode==='MIXED_UNIQUES'?'ring-brand-500':'ring-gray-200'} hover:ring-brand-400 transition`}
+              aria-pressed={mode==='MIXED_UNIQUES'}>
+              <img src="/slides/mixed/1.svg" alt={`${i18n.t('mode.mixed.title')} example`} className="w-full h-32 object-cover" />
+              <div className="absolute inset-x-0 bottom-0 px-2 pt-8 pb-2 text-white bg-gradient-to-t from-black/70 via-black/40 to-transparent min-h-20">
+                <div className="font-semibold text-sm">{i18n.t('mode.mixed.title')}</div>
+                <div className="text-[11px] opacity-90">{i18n.t('mode.mixed.sub')}</div>
+              </div>
+            </button>
+            <button type="button" onClick={()=>setMode('SAME_TYPE')} className={`relative overflow-hidden rounded-lg ring-2 ${mode==='SAME_TYPE'?'ring-brand-500':'ring-gray-200'} hover:ring-brand-400 transition`}
+              aria-pressed={mode==='SAME_TYPE'}>
+              <img src="/slides/same/1.svg" alt={`${i18n.t('mode.same.title')} example`} className="w-full h-32 object-cover" />
+              <div className="absolute inset-x-0 bottom-0 px-2 pt-8 pb-2 text-white bg-gradient-to-t from-black/70 via-black/40 to-transparent min-h-20">
+                <div className="font-semibold text-sm">{i18n.t('mode.same.title')}</div>
+                <div className="text-[11px] opacity-90">{i18n.t('mode.same.sub')}</div>
+              </div>
+            </button>
+          </div>
         </div>
-        <div className="form-check">
-          <input className="form-check-input" id="consent" type="checkbox" checked={consent} onChange={e=>setConsent(e.target.checked)} />
-          <label className="form-check-label" htmlFor="consent">{i18n.t('collect.consent')}</label>
-        </div>
-        <small className="text-muted">{i18n.t('note.privacy')} <a href="#terms">Terms</a> · <a href="#privacy">Privacy</a></small>
-        <button className="btn btn-primary" disabled={busy || !consent} type="submit">{i18n.t('collect.start')}</button>
+        <label className="flex items-center gap-2">
+          <input className="w-4 h-4" id="notify" name="notify" type="checkbox" />
+          <span className="text-sm">{i18n.t('collect.notify')}</span>
+        </label>
+        <label className="flex items-center gap-2">
+          <input className="w-4 h-4" id="consent" type="checkbox" checked={consent} onChange={e=>setConsent(e.target.checked)} />
+          <span className="text-sm">{i18n.t('collect.consent')}</span>
+        </label>
+        <small className="text-xs text-gray-500">{i18n.t('note.privacy')} <a className="underline" href="#terms">Terms</a> · <a className="underline" href="#privacy">Privacy</a></small>
+        <button className="inline-flex items-center justify-center gap-2 rounded-md bg-brand-600 text-white px-4 py-2 hover:bg-brand-700 disabled:opacity-50" disabled={busy || !consent} type="submit">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5"><path d="M12 2.25c.414 0 .75.336.75.75v5.19l1.72-1.72a.75.75 0 1 1 1.06 1.06l-3 3a.75.75 0 0 1-1.06 0l-3-3a.75.75 0 1 1 1.06-1.06l1.72 1.72V3a.75.75 0 0 1 .75-.75ZM3 13.5a.75.75 0 0 1 .75-.75h16.5a.75.75 0 0 1 .75.75v5.25A2.25 2.25 0 0 1 18.75 21H5.25A2.25 2.25 0 0 1 3 18.75V13.5Z"/></svg>
+          {i18n.t('collect.start')}
+        </button>
       </form>
     )
   }
 
   if (recap) {
     return (
-      <div style={{ padding: 16, display:'grid', gap:12, maxWidth: 640, margin: '0 auto' }}>
-        <h2>{i18n.t('recap.title')}</h2>
-        <div className="text-muted">{new Date(recap.at).toLocaleString()}</div>
-        <div style={{display:'flex', alignItems:'center', gap:8}}>
-          <span>{i18n.t('recap.id')}:</span>
-          <code style={{background:'#f5f5f5', padding:'4px 6px', borderRadius:4}}>{recap.id}</code>
-          <button className="btn btn-light btn-sm" onClick={()=>{navigator.clipboard.writeText(recap.id)}} title="Copy">Copy</button>
-        </div>
-        <div className="small text-muted">{i18n.t('recap.nudge')}</div>
-        <div style={{display:'flex', gap:8}}>
-          <button onClick={()=>{ setSessionId(null); setUploadedByStep({}); setRemaining(null); setError(null); setWarnLowRes(null); setStepIdx(0); setRecap(null); }}>Start another contribution</button>
-        </div>
-        {/* bubble level indicator */}
-        {tilt && (
-          <div style={{ position:'absolute', left:8, top:8, width:64, height:64, borderRadius:32, background:'rgba(255,255,255,0.7)', border:'2px solid rgba(0,0,0,0.2)', display:'flex', alignItems:'center', justifyContent:'center' }}>
-            {(() => {
-              const clamp = (v:number, lo:number, hi:number)=> Math.max(lo, Math.min(hi, v))
-              const x = clamp((tilt.gamma||0)/30, -1, 1) * 22
-              const y = clamp((tilt.beta||0)/30, -1, 1) * 22
-              return <div style={{ width:14, height:14, borderRadius:7, background:'#1976d2', transform:`translate(${x}px, ${y}px)` }} />
-            })()}
+      <div className="px-4 py-8">
+        <div className="max-w-md mx-auto bg-white rounded-2xl shadow ring-1 ring-gray-200 p-6 text-center grid gap-4">
+          <div className="mx-auto w-12 h-12 rounded-full bg-green-100 text-green-700 flex items-center justify-center">
+            <img src="/icons/check.svg" alt="Success" className="w-8 h-8" />
           </div>
-        )}
+          <div>
+            <h2 className="text-xl font-semibold">{i18n.t('recap.title') || 'Contribution submitted'}</h2>
+            <div className="text-sm text-gray-600">{new Date(recap.at).toLocaleString()}</div>
+          </div>
+          <div className="flex items-center justify-center gap-2 flex-wrap">
+            <span className="text-sm text-gray-600">{i18n.t('recap.id') || 'ID'}:</span>
+            <div className="relative inline-block max-w-[240px] sm:max-w-[320px] w-full">
+              <code className="block text-sm bg-gray-50 px-2 py-1 rounded border border-gray-200 whitespace-nowrap overflow-hidden">{recap.id}</code>
+              <div className="pointer-events-none absolute right-0 top-0 h-full w-10 bg-gradient-to-l from-gray-50 to-transparent rounded-r"></div>
+            </div>
+            <button
+              className={`px-2 py-1 rounded border text-sm transition-all active:scale-95 ${copied ? 'bg-green-50 text-green-700 border-green-300' : 'border-gray-300 hover:bg-gray-50'}`}
+              onClick={()=>{ navigator.clipboard.writeText(recap.id); setCopied(true); setTimeout(()=>setCopied(false), 1200) }}
+              title="Copy"
+            >
+              {copied ? 'Copied!' : 'Copy'}
+            </button>
+          </div>
+          <div className="text-sm text-gray-600">{i18n.t('recap.nudge')}</div>
+          <div>
+            <button className="inline-flex items-center gap-2 px-4 py-2 rounded-md bg-brand-600 text-white hover:bg-brand-700" onClick={()=>{ setSessionId(null); setUploadedByStep({}); setRemaining(null); setError(null); setWarnLowRes(null); setStepIdx(0); setRecap(null); }}>
+              {i18n.t('recap.start_another')}
+            </button>
+          </div>
+        </div>
       </div>
     )
   }
 
   const step = steps[stepIdx]
   const uploadedThisStep = uploadedByStep[stepIdx] || 0
-  const imgSrc = mode === 'SAME_TYPE' ? `/slides/same/${stepIdx+1}.svg` : `/slides/mixed/${stepIdx+1}.svg`
+  function imgSrcFor(stepKey: string): string {
+    const [kind, index] = stepKey.split('.')
+    if (kind === 'mixed') return `/slides/mixed/${index}.svg`
+    return `/slides/same/${index}.svg`
+  }
+  const imgSrc = imgSrcFor(step.key)
   const alt = step.title
 
+  // slide descriptions for clarity (for older, non-technical users)
+  const desc = mode === 'SAME_TYPE' ? [
+    'Lay identical socks in a neat grid. Keep positions.',
+    'Flip socks in place; maintain the grid.',
+    'Gently crumple socks in place; take photo.',
+    'Optional extras of the same set.',
+  ] : [
+    'Lay different single socks flat and stretched. Keep positions.',
+    'Flip socks in place; do not rearrange.',
+    'Crumple socks slightly; keep them where they are.',
+    'Optional: Another crumple variation.',
+    'Optional: Any extra variations you like.',
+  ]
+
+  const infoText = i18n.t('mode.preview.note')
+  // Progress UI: simple dots with state icons
+  const canProceed = step.required ? uploadedThisStep > 0 : true
+
   return (
-    <div style={{ padding: 16, display:'grid', gap:12, maxWidth: 640, margin: '0 auto' }}>
-      {error && <div className="alert alert-danger" style={{margin:0}}>{error}</div>}
-      <div style={{display:'flex', gap:6}}>
-        {steps.map((s, i) => (
-          <div key={s.key} title={s.title} style={{width:12, height:12, borderRadius:6, background: i<stepIdx? '#4caf50' : i===stepIdx? '#1976d2' : '#ccc'}} />
-        ))}
+    <div className="grid gap-4 p-4 max-w-3xl mx-auto w-full overflow-x-hidden bg-slate-50 rounded-2xl shadow-inner ring-1 ring-slate-200">
+      {/* Progress indicator */}
+      <div className="flex items-center gap-3 px-1 py-1 overflow-x-auto no-scrollbar" aria-label="Progress" ref={progressRef}>
+        {steps.map((s, i) => {
+          const state = i < stepIdx ? 'done' : i === stepIdx ? 'current' : 'todo'
+          const needs = s.required && (uploadedByStep[i]||0)===0
+          return (
+            <div
+              key={s.key}
+              className="flex items-center gap-2 shrink-0"
+              ref={state==='current' ? currentStepRef : undefined}
+            >
+              <div className={`relative w-6 h-6 rounded-full flex items-center justify-center ${state==='done'?'bg-green-500':state==='current'?'bg-brand-600':'bg-gray-300'}`} title={s.title}>
+                {state==='done' && <img src="/icons/check.svg" alt="done" className="w-3 h-3" />}
+                {state==='current' && <span className="w-1.5 h-1.5 rounded-full bg-white"></span>}
+                {needs && state!=='done' && <span className="absolute -top-0.5 -right-0.5 w-2 h-2 bg-red-500 rounded-full ring-2 ring-white" aria-hidden="true"></span>}
+              </div>
+              <div className="text-xs text-gray-700 whitespace-nowrap">{s.title}</div>
+              {i<steps.length-1 && (
+                <div className="relative w-10 h-1 rounded bg-gray-200 overflow-hidden -translate-y-0.5">
+                  <div className={`absolute left-0 top-0 h-full bg-green-400 transition-all duration-500 ${i<stepIdx? 'w-full' : i===stepIdx ? 'w-0' : 'w-0'}`}></div>
+                </div>
+              )}
+            </div>
+          )
+        })}
       </div>
-      <h3 style={{display:'flex', alignItems:'center', gap:8}}>
-        {step.title}
-        <span className="text-muted" title="Do not move socks between photos. Flip or crumple in place."><i className="bi bi-info-circle"></i></span>
-      </h3>
-      <div style={{ position:'relative', border: '1px solid #dee2e6', height: 220, marginBottom: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow:'hidden', borderRadius: 6 }}>
-        <img src={imgSrc} alt={alt} style={{ maxWidth:'100%', maxHeight:'100%', objectFit:'contain' }} />
-        {/* bubble level indicator */}
+
+      {/* Title + small description */}
+      <div>
+        <h3 className="text-lg font-semibold">{step.title}</h3>
+        <p className="text-sm text-gray-600">{desc[stepIdx]}</p>
+      </div>
+      {/* Info / Warning / Error bubbles (tight spacing) */}
+      <div className="grid gap-1">
+        <div className="text-sm text-blue-900 bg-blue-50 border border-blue-200 rounded px-3 py-2 flex items-start gap-2">
+          <span className="w-5 h-5 rounded-full bg-gray-200 flex items-center justify-center mt-0.5"><img src="/icons/info.svg" alt="info" className="w-3 h-3" /></span>
+          <span className="leading-5">
+            <div className="font-medium">{infoText}</div>
+            <div className="text-[12px] mt-0.5">{i18n.t('note.no_zoom')}</div>
+            <div className="text-[12px] mt-0.5">{mode==='MIXED_UNIQUES' ? i18n.t('rules.mixed') : i18n.t('rules.same')}</div>
+          </span>
+        </div>
+        {warnLowRes && (
+          <div className="text-sm text-amber-900 bg-amber-50 border border-amber-200 rounded px-3 py-2 flex items-start gap-2">
+            <span className="w-5 h-5 rounded-full bg-amber-100 flex items-center justify-center mt-0.5"><img src="/icons/warning.svg" alt="warning" className="w-3 h-3" /></span>
+            <span>{warnLowRes}</span>
+          </div>
+        )}
+        {error && (
+          <div className="text-sm text-red-900 bg-red-50 border border-red-200 rounded px-3 py-2 flex items-start gap-2">
+            <span className="w-5 h-5 rounded-full bg-red-100 flex items-center justify-center mt-0.5"><img src="/icons/error.svg" alt="error" className="w-3 h-3" /></span>
+            <span>{error}</span>
+          </div>
+        )}
+      </div>
+      {/* deduplicated: warn/error already shown above */}
+
+      {/* Illustration with bubble level */}
+      <div className="relative h-56 rounded-xl flex items-center justify-center overflow-hidden bg-white">
+        <div className="absolute bottom-5 right-3 text-[11px] px-3 py-1 rounded-full bg-gray-800/85 text-white shadow-sm">{i18n.t('example.caption')}</div>
+        <img src={imgSrc} alt={alt} className="w-full h-full object-cover" />
         {tilt && (
-          <div style={{ position:'absolute', left:8, top:8, width:64, height:64, borderRadius:32, background:'rgba(255,255,255,0.7)', border:'2px solid rgba(0,0,0,0.2)', display:'flex', alignItems:'center', justifyContent:'center' }}>
+          <div className="absolute left-2 top-2 w-16 h-16 rounded-full bg-white/70 border-2 border-black/20 flex items-center justify-center">
             {(() => {
               const clamp = (v:number, lo:number, hi:number)=> Math.max(lo, Math.min(hi, v))
               const x = clamp((tilt.gamma||0)/30, -1, 1) * 22
               const y = clamp((tilt.beta||0)/30, -1, 1) * 22
-              return <div style={{ width:14, height:14, borderRadius:7, background:'#1976d2', transform:`translate(${x}px, ${y}px)` }} />
+              return <div style={{ transform:`translate(${x}px, ${y}px)` }} className="w-3.5 h-3.5 rounded-full bg-brand-600" />
             })()}
           </div>
         )}
       </div>
-      <div className="d-flex align-items-center gap-2">
-        <input className="form-control" ref={inputRef} type="file" accept="image/*" multiple capture="environment" onChange={e=>onUpload(e.target.files)} />
-        <span className="text-muted">{uploadedThisStep} uploaded for this step</span>
-      </div>
-      {needsPerm && <div className="alert alert-secondary py-2">On iOS Safari, enable motion sensors to show level/tilt hints. <button className="btn btn-sm btn-primary ms-2" onClick={requestOrientationPermission}>Enable guidance</button></div>}
-      {warnLowRes && <div className="alert alert-warning py-1 mb-0">{warnLowRes}</div>}
-      {remaining !== null && <div className="small text-muted">{i18n.t('upload.remaining')}: {remaining} / cap {cap} (total uploaded ~ {totalUploaded})</div>}
 
-      <div className="d-flex gap-2">
-        <button className="btn btn-secondary" onClick={onPrev} disabled={stepIdx===0 || busy}>Back</button>
-        <button className="btn btn-primary" onClick={onNext} disabled={stepIdx===steps.length-1 || busy}>Next</button>
+      {/* Upload control */}
+      <div className="grid gap-2">
+        <input ref={cameraInputRef} className="hidden" type="file" accept="image/*" multiple={!step.required} capture="environment" onChange={e=>onUpload(e.target.files)} />
+        <input ref={fileInputRef} className="hidden" type="file" accept="image/*" multiple={!step.required} onChange={e=>onUpload(e.target.files)} />
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+          <button className="inline-flex items-center justify-center gap-2 px-3 py-2 h-11 rounded-md text-white bg-brand-600 hover:bg-brand-700 disabled:opacity-60 w-full sm:w-auto" onClick={()=>cameraInputRef.current?.click()} disabled={busy}>
+            <img src="/icons/camera.svg" alt="Camera" className="w-5 h-5" />
+            {i18n.t('upload.take_photo')}
+          </button>
+          <button className="inline-flex items-center justify-center gap-2 px-3 py-2 h-11 rounded-md border border-gray-300 hover:bg-gray-50 disabled:opacity-60 w-full sm:w-auto" onClick={()=>fileInputRef.current?.click()} disabled={busy}>
+            <img src="/icons/image.svg" alt="Library" className="w-5 h-5" />
+            {i18n.t('upload.choose_photos')}
+          </button>
+        </div>
+        {busy && (
+          <div className="flex items-center justify-start gap-2 text-sm text-gray-600">
+            <svg className="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="none">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
+            </svg>
+            {i18n.t('upload.uploading')}
+          </div>
+        )}
+        <div className="text-sm text-gray-600">
+          {step.required ? (
+            uploadedThisStep === 0 ? i18n.t('upload.none_yet') : (replacedByStep[stepIdx] ? i18n.t('upload.replaced') : i18n.t('upload.added_ok'))
+          ) : (
+            (uploadedThisStep===1 ? i18n.t('upload.count.singular') : i18n.t('upload.count.plural')).replace('{count}', String(uploadedThisStep))
+          )}
+        </div>
       </div>
-      {stepIdx===steps.length-1 && (
-        <div>
-          <hr />
-          <button className="btn btn-success mt-1" onClick={onFinalize} disabled={busy}>{i18n.t('finalize')}</button>
+      {previewsByStep[stepIdx]?.length ? (
+        <div className="bg-gray-50 rounded-lg p-2 ring-1 ring-gray-100">
+          <div className="text-xs text-gray-500 mb-2 px-1">{i18n.t('upload.your_photos')}</div>
+          <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
+            {previewsByStep[stepIdx].slice(-8).map((u, i)=>(
+            <img key={i} src={u} alt="preview" className="w-full h-20 object-cover rounded-md ring-1 ring-gray-200" />
+            ))}
+          </div>
+        </div>
+      ) : null}
+
+      {needsPerm && (
+        <div className="flex items-center justify-between text-gray-700 bg-gray-50 border border-gray-200 px-3 py-2 rounded">
+          <span className="text-sm">{i18n.t('ios.motion.explain')}</span>
+          <button className="text-sm px-2 py-1 rounded bg-brand-600 text-white" onClick={requestOrientationPermission}>{i18n.t('ios.motion.enable')}</button>
         </div>
       )}
+      {/* Remaining count removed per UX request */}
+
+      {/* Nav buttons */}
+      <div className="flex gap-2">
+        <button className="inline-flex items-center gap-2 px-3 py-2 rounded-md border border-gray-300 hover:bg-gray-50 disabled:opacity-50" onClick={onPrev} disabled={stepIdx===0 || busy}>
+          <img src="/icons/chevron-left.svg" alt="Back" className="w-5 h-5" />
+          {i18n.t('slides.prev')}
+        </button>
+        <button className="inline-flex items-center gap-2 px-4 py-2 rounded-md text-white bg-brand-600 hover:bg-brand-700 disabled:opacity-50"
+          onClick={onNext} disabled={busy || (!canProceed)}>
+          {stepIdx===steps.length-1 ? (
+            <>
+              <img src="/icons/send.svg" alt="Submit" className="w-5 h-5" />
+              <span className="bg-gradient-to-r from-brand-50 to-brand-200 bg-clip-text text-transparent">{i18n.t('finalize')}</span>
+            </>
+          ) : (
+            <>
+              <span className="bg-gradient-to-r from-brand-50 to-brand-200 bg-clip-text text-transparent">{i18n.t('slides.next')}</span>
+              <img src="/icons/chevron-right.svg" alt="Next" className="w-5 h-5" />
+            </>
+          )}
+        </button>
+      </div>
     </div>
   )
 }
