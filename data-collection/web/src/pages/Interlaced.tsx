@@ -19,6 +19,7 @@ function stepsFor(mode: Mode): Step[] {
     { key: 'mixed.1', title: i18n.t('slides.mixed.1.title'), required: true },
     { key: 'mixed.2', title: i18n.t('slides.mixed.2.title'), required: true },
     { key: 'mixed.3', title: i18n.t('slides.mixed.3.title'), required: true },
+    { key: 'mixed.4', title: i18n.t('slides.mixed.4.title'), required: true },
     { key: 'mixed.5', title: i18n.t('slides.mixed.5.title'), required: false },
   ]
 }
@@ -382,18 +383,18 @@ export default function Interlaced() {
   const imgSrc = imgSrcFor(step.key)
   const alt = step.title
 
-  // slide descriptions for clarity (for older, non-technical users)
+  // slide descriptions via i18n
   const desc = mode === 'SAME_TYPE' ? [
-    'Lay identical socks in a neat grid. Keep positions.',
-    'Flip socks in place; maintain the grid.',
-    'Gently crumple socks in place; take photo.',
-    'Optional extras of the same set.',
+    i18n.t('slides.same.1.desc'),
+    i18n.t('slides.same.2.desc'),
+    i18n.t('slides.same.3.desc'),
+    i18n.t('slides.same.4.desc'),
   ] : [
-    'Lay different single socks flat and stretched. Keep positions.',
-    'Flip socks in place; do not rearrange.',
-    'Crumple socks slightly; keep them where they are.',
-    'Optional: Another crumple variation.',
-    'Optional: Any extra variations you like.',
+    i18n.t('slides.mixed.1.desc'),
+    i18n.t('slides.mixed.2.desc'),
+    i18n.t('slides.mixed.3.desc'),
+    i18n.t('slides.mixed.4.desc'),
+    i18n.t('slides.mixed.5.desc'),
   ]
 
   const infoText = i18n.t('mode.preview.note')
@@ -402,46 +403,45 @@ export default function Interlaced() {
 
   return (
     <div className="grid gap-4 p-4 max-w-3xl mx-auto w-full overflow-x-hidden bg-slate-50 rounded-2xl shadow-inner ring-1 ring-slate-200">
-      {/* Progress indicator */}
-      <div className="flex items-center gap-3 px-1 py-1 overflow-x-auto no-scrollbar" aria-label="Progress" ref={progressRef}>
-        {steps.map((s, i) => {
-          const state = i < stepIdx ? 'done' : i === stepIdx ? 'current' : 'todo'
-          const needs = s.required && (uploadedByStep[i]||0)===0
-          return (
-            <div
-              key={s.key}
-              className="flex items-center gap-2 shrink-0"
-              ref={state==='current' ? currentStepRef : undefined}
-            >
-              <div className={`relative w-6 h-6 rounded-full flex items-center justify-center ${state==='done'?'bg-green-500':state==='current'?'bg-brand-600':'bg-gray-300'}`} title={s.title}>
-                {state==='done' && <img src="/icons/check.svg" alt="done" className="w-3 h-3" />}
-                {state==='current' && <span className="w-1.5 h-1.5 rounded-full bg-white"></span>}
-                {needs && state!=='done' && <span className="absolute -top-0.5 -right-0.5 w-2 h-2 bg-red-500 rounded-full ring-2 ring-white" aria-hidden="true"></span>}
+      {/* Progress indicator (track with markers) */}
+      {(() => {
+        return (
+          <div className="px-1 pt-2 pb-3">
+            <div className="mt-2 text-xs text-gray-700 text-center">{i18n.t('progress.step').replace('{x}', String(stepIdx+1)).replace('{y}', String(steps.length))}</div>
+            <div className="overflow-x-auto no-scrollbar" ref={progressRef}>
+              <div className="flex justify-center items-center gap-2 pr-2 mb-1 mt-1">
+                {steps.map((s, i) => {
+                  const state = i < stepIdx ? 'done' : i === stepIdx ? 'current' : 'todo'
+                  const needs = s.required && (uploadedByStep[i]||0)===0
+                  return (
+                    <div key={s.key} className="flex items-center gap-2 shrink-0" ref={state==='current' ? currentStepRef : undefined}>
+                      <div className={`relative w-6 h-6 rounded-full flex items-center justify-center ${state==='done'?'bg-green-500':state==='current'?'bg-brand-600':'bg-gray-300'}`} title={s.title}>
+                        {state==='done' && <img src="/icons/check.svg" alt="done" className="w-3 h-3" />}
+                        {state==='current' && <span className="w-1.5 h-1.5 rounded-full bg-white"></span>}
+                        {needs && state!=='done' && <span className="absolute -top-0.5 -right-0.5 w-2 h-2 bg-red-500 rounded-full ring-2 ring-white" aria-hidden="true"></span>}
+                      </div>
+                      {i < steps.length - 1 && (
+                        <div className="relative w-5 h-1 rounded bg-gray-200 overflow-hidden">
+                          <div className={`absolute left-0 top-0 h-full bg-green-400 transition-all duration-500 ${i<stepIdx? 'w-full' : i===stepIdx ? 'w-1/2' : 'w-0'}`}></div>
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
               </div>
-              <div className="text-xs text-gray-700 whitespace-nowrap">{s.title}</div>
-              {i<steps.length-1 && (
-                <div className="relative w-10 h-1 rounded bg-gray-200 overflow-hidden -translate-y-0.5">
-                  <div className={`absolute left-0 top-0 h-full bg-green-400 transition-all duration-500 ${i<stepIdx? 'w-full' : i===stepIdx ? 'w-0' : 'w-0'}`}></div>
-                </div>
-              )}
             </div>
-          )
-        })}
-      </div>
+          </div>
+        )
+      })()}
 
-      {/* Title + small description */}
-      <div>
-        <h3 className="text-lg font-semibold">{step.title}</h3>
-        <p className="text-sm text-gray-600">{desc[stepIdx]}</p>
-      </div>
-      {/* Info / Warning / Error bubbles (tight spacing) */}
+      {/* Info panel (subtle) */}
       <div className="grid gap-1">
-        <div className="text-sm text-blue-900 bg-blue-50 border border-blue-200 rounded px-3 py-2 flex items-start gap-2">
-          <span className="w-5 h-5 rounded-full bg-gray-200 flex items-center justify-center mt-0.5"><img src="/icons/info.svg" alt="info" className="w-3 h-3" /></span>
+        <div className="text-sm text-gray-700 flex items-start gap-3">
+          <span className="w-7 h-7 rounded-full bg-gray-200 flex items-center justify-center mt-0.5"><img src="/icons/info.svg" alt="info" className="w-4 h-4" /></span>
           <span className="leading-5">
-            <div className="font-medium">{infoText}</div>
-            <div className="text-[12px] mt-0.5">{i18n.t('note.no_zoom')}</div>
-            <div className="text-[12px] mt-0.5">{mode==='MIXED_UNIQUES' ? i18n.t('rules.mixed') : i18n.t('rules.same')}</div>
+            <div className="font-medium text-gray-800">{infoText}</div>
+            <div className="text-[12px] mt-0.5 text-gray-600">{i18n.t('note.no_zoom')}</div>
+            <div className="text-[12px] mt-0.5 text-gray-600">{mode==='MIXED_UNIQUES' ? i18n.t('rules.mixed') : i18n.t('rules.same')}</div>
           </span>
         </div>
         {warnLowRes && (
@@ -458,6 +458,12 @@ export default function Interlaced() {
         )}
       </div>
       {/* deduplicated: warn/error already shown above */}
+
+      {/* Title + instruction (prominent) */}
+      <div>
+        <h3 className="text-xl font-semibold text-gray-900">{step.title}</h3>
+        <p className="text-base font-medium text-gray-800">{desc[stepIdx]}</p>
+      </div>
 
       {/* Illustration with bubble level */}
       <div className="relative h-56 rounded-xl flex items-center justify-center overflow-hidden bg-white">
@@ -536,11 +542,11 @@ export default function Interlaced() {
           {stepIdx===steps.length-1 ? (
             <>
               <img src="/icons/send.svg" alt="Submit" className="w-5 h-5" />
-              <span className="bg-gradient-to-r from-brand-50 to-brand-200 bg-clip-text text-transparent">{i18n.t('finalize')}</span>
+              {i18n.t('finalize')}
             </>
           ) : (
             <>
-              <span className="bg-gradient-to-r from-brand-50 to-brand-200 bg-clip-text text-transparent">{i18n.t('slides.next')}</span>
+              {i18n.t('slides.next')}
               <img src="/icons/chevron-right.svg" alt="Next" className="w-5 h-5" />
             </>
           )}
