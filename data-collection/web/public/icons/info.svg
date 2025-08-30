@@ -1,5 +1,8 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="#4b5563">
-  <path d="M11.25 9a.75.75 0 1 1 1.5 0v6a.75.75 0 0 1-1.5 0V9Zm.75-4.5a1 1 0 1 0 0 2 1 1 0 0 0 0-2Z"/>
-  <path fill-rule="evenodd" d="M12 1.5a10.5 10.5 0 1 0 0 21 10.5 10.5 0 0 0 0-21Zm0 1.5a9 9 0 1 0 0 18 9 9 0 0 0 0-18Z" clip-rule="evenodd"/>
+  <!-- Outer ring -->
+  <path fill-rule="evenodd" clip-rule="evenodd" d="M12 1.5a10.5 10.5 0 1 0 0 21 10.5 10.5 0 0 0 0-21Zm0 1.5a9 9 0 1 0 0 18 9 9 0 0 0 0-18Z"/>
+  <!-- Dot (above) -->
+  <circle cx="12" cy="7.25" r="1.1"/>
+  <!-- Stem -->
+  <rect x="11" y="10" width="2" height="7" rx="1"/>
 </svg>
-
