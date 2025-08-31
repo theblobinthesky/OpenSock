@@ -1,6 +1,7 @@
 venv
 *.pth
 *.pt
+*.npy
 *.yaml
 data/sock_*
 data/data_*

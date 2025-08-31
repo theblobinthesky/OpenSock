@@ -13,3 +13,6 @@
 [submodule "dataloader/submodules/asio"]
 	path = dataloader/submodules/asio
 	url = https://github.com/boostorg/asio
+[submodule "autocalibration/submodules/dinov3"]
+	path = autocalibration/submodules/dinov3
+	url = https://github.com/facebookresearch/dinov3.git
