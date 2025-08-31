@@ -54,7 +54,7 @@ Slides are static assets (images + short text), fully translated.
 
 ## Collection Flow (Mobile-first)
 - Start a new session on mobile (phones/tablets preferred; desktop supported but secondary).
-- Enter optional display name and social handle for credits; email is required (used for deletion requests and optional notification when the app is ready).
+- Enter optional name for credits; email is required (used for deletion requests and optional notification when the app is ready).
 - Capture images via browser camera or upload existing images. Keep the same camera for the entire session.
 - Session image cap: up to 20 images per session (enforced client- and server-side; configurable).
 - Exact duplicate prevention is required globally across all submissions (not just within-session); compute SHA-256 after EXIF stripping/transcoding and reject exact re-submits.
@@ -139,15 +139,15 @@ Slides are static assets (images + short text), fully translated.
 - Nudge: “For best results, keep about 20 socks per photo with some spacing. Start another contribution for more.”
 
 ## Credits & Attribution
-- Optional display name and social handle are collected for future project credits. Stored internally only; not publicly displayed until project completion. No additional moderation is planned.
+- Optional name is collected for future project credits. Stored internally only; not publicly displayed until project completion. No additional moderation is planned.
 
 ## UI/UX Enhancements (approved)
 - Mode picker: two large cards with concise examples; selecting a card shows a short mode‑specific preview.
 - Sticky guidance: always‑visible visual indicator (SVG animation) reminding “Do not move socks between photos”.
 - Progress checklist: top progress indicator for slide order (uploads encouraged, not enforced).
-- Guidance: soft level/tilt hints only. Remove 3×3 grid and 4:3 framing overlays.
+- Guidance: concise visual reminders only; no motion sensor prompts.
 - Client camera: prefer the rear camera (`facingMode: environment`) when available.
-- iOS Safari: show a pre‑permission explainer screen before requesting camera access.
+ 
 
 ## Camera Capture Quality
 - Goal: maximize detail, especially in dark fabrics.
@@ -220,10 +220,10 @@ package opensock.dc.v1;
 message Error { string error_key = 1; map<string,string> params = 2; }
 
 message CreateSessionRequest {
-  string name = 1; string handle = 2; string email = 3; bool notify_opt_in = 4; 
-  string language = 5 [deprecated = true]; // UI auto-detects; not persisted
+  string name = 1; string email = 2; bool notify_opt_in = 3; 
+  string language = 4 [deprecated = true]; // UI auto-detects; not persisted
   enum Mode { MODE_UNSPECIFIED = 0; MIXED_UNIQUES = 1; SAME_TYPE = 2; }
-  Mode mode = 6; int32 approx_socks = 7; // client-side hint only; ignored by server
+  Mode mode = 5; int32 approx_socks = 6; // client-side hint only; ignored by server
 }
 message CreateSessionResponse { string session_id = 1; }
 
@@ -241,7 +241,7 @@ message CompleteUploadRequest { string upload_id = 1; bytes file_checksum = 2; }
 message CompleteUploadResponse { bool ok = 1; string session_id = 2; }
 
 message ListSessionsRequest { string email = 1; string name = 2; string mode = 3; }
-message SessionSummary { string id = 1; string email = 2; string name = 3; string handle = 4; string mode = 5; int32 image_count = 6; }
+message SessionSummary { string id = 1; string email = 2; string name = 3; string mode = 4; int32 image_count = 5; }
 message ListSessionsResponse { repeated SessionSummary sessions = 1; }
 message DeleteSessionRequest { string session_id = 1; }
 message DeleteUserRequest { string email = 1; }
@@ -292,7 +292,7 @@ service AdminService {
 English (concise, draft)
 - Controller: Erik Stern, Gutmaninger Straße 26, 93413 Cham, Germany. Contact: erik.stern@outlook.de.
 - Purpose: Collect images of socks to develop and research automated sock identification/matching.
-- Data collected: Submitted images; numeric focal length (if present); optional display name, social handle, email; minimal technical logs necessary to operate the service (no trackers/analytics).
+- Data collected: Submitted images; numeric focal length (if present); optional name, email; minimal technical logs necessary to operate the service (no trackers/analytics).
 - Use & retention: Data is used for training, evaluation, and research for OpenSock; retained indefinitely unless you request deletion.
 - Sharing: No sale of data. Service providers may process data on our behalf under confidentiality and data processing agreements.
 - Legal basis: Consent (Art. 6(1)(a) GDPR). You may withdraw consent at any time.
@@ -303,7 +303,7 @@ English (concise, draft)
 Deutsch (kurz, Entwurf)
 - Verantwortlicher: Erik Stern, Gutmaninger Straße 26, 93413 Cham, Deutschland. Kontakt: erik.stern@outlook.de.
 - Zweck: Sammlung von Bildern von Socken zur Entwicklung/Forschung eines Systems zur Sockenerkennung/-zuordnung.
-- Verarbeitete Daten: Eingereichte Bilder; numerische Brennweite (falls vorhanden); optionale Angaben (Anzeigename, Social‑Handle, E‑Mail); minimale technische Protokolle zur Bereitstellung (keine Tracker/Analytics).
+- Verarbeitete Daten: Eingereichte Bilder; numerische Brennweite (falls vorhanden); optionale Angaben (Name, E‑Mail); minimale technische Protokolle zur Bereitstellung (keine Tracker/Analytics).
 - Nutzung & Aufbewahrung: Nutzung zu Training, Bewertung und Forschung für OpenSock; Aufbewahrung auf unbestimmte Zeit bis zur Löschanforderung.
 - Weitergabe: Keine Veräußerung. Dienstleister können Daten in unserem Auftrag verarbeiten (vertraulich, Auftragsverarbeitung).
 - Rechtsgrundlage: Einwilligung (Art. 6 Abs. 1 lit. a DSGVO). Widerruf jederzeit möglich.

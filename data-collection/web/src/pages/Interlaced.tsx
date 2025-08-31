@@ -46,11 +46,9 @@ export default function Interlaced() {
   const [warnLowRes, setWarnLowRes] = useState<string | null>(null)
   // removed: 4:3 framing overlay toggle and 3x3 grid overlay
   const [tilt, setTilt] = useState<{beta:number, gamma:number} | null>(null)
-  const [needsPerm, setNeedsPerm] = useState<boolean>(false)
   const [confirmOpen, setConfirmOpen] = useState(false)
   const pendingRef = useRef<null | {
     name: string
-    handle: string
     email: string
     notify_opt_in: boolean
     language: string
@@ -89,35 +87,14 @@ export default function Interlaced() {
     }
   }, [stepIdx])
 
-  // Device orientation hints
+  // Device orientation hints (no iOS permission prompt; best-effort only)
   React.useEffect(()=>{
     const handler = (e: DeviceOrientationEvent) => {
       if (e.beta!=null && e.gamma!=null) setTilt({beta: e.beta, gamma: e.gamma})
     }
-    if (typeof (window as any).DeviceOrientationEvent !== 'undefined') {
-      const anyWin = window as any
-      if (typeof anyWin.DeviceOrientationEvent.requestPermission === 'function') {
-        setNeedsPerm(true)
-      } else {
-        window.addEventListener('deviceorientation', handler)
-      }
-    }
-    return () => { window.removeEventListener('deviceorientation', handler) }
+    try { window.addEventListener('deviceorientation', handler) } catch {}
+    return () => { try { window.removeEventListener('deviceorientation', handler) } catch {} }
   },[])
-
-  const requestOrientationPermission = async () => {
-    try {
-      const anyWin = window as any
-      if (typeof anyWin.DeviceOrientationEvent?.requestPermission === 'function') {
-        const res = await anyWin.DeviceOrientationEvent.requestPermission()
-        if (res === 'granted') {
-          setNeedsPerm(false)
-          const handler = (e: DeviceOrientationEvent) => { if (e.beta!=null && e.gamma!=null) setTilt({beta: e.beta, gamma: e.gamma}) }
-          window.addEventListener('deviceorientation', handler)
-        }
-      }
-    } catch {}
-  }
 
   const onCreate = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault()
@@ -126,7 +103,6 @@ export default function Interlaced() {
     const fd = new FormData(e.currentTarget)
     pendingRef.current = {
       name: String(fd.get('name') || ''),
-      handle: String(fd.get('handle') || ''),
       email: String(fd.get('email') || ''),
       notify_opt_in: !!fd.get('notify'),
       language: i18n.lang,
@@ -139,12 +115,20 @@ export default function Interlaced() {
     if (!pendingRef.current) return
     const payload = pendingRef.current
     setConfirmOpen(false)
+    try { window.scrollTo({ top: 0, behavior: 'smooth' }) } catch {}
+    try { window.scrollTo({ top: 0, behavior: 'smooth' }) } catch {}
     setBusy(true)
     try {
       const res = await createSession(payload)
       setSessionId(res.session_id)
       setStepIdx(0)
       setError(null)
+      // Reset any previous previews/state so new session doesn't reuse old photos
+      setUploadedByStep({})
+      setPreviewsByStep({})
+      setReplacedByStep({})
+      setRemaining(null)
+      setWarnLowRes(null)
     } catch (e:any) {
       try {
         const parsed = JSON.parse(String(e.message))
@@ -252,6 +236,7 @@ export default function Interlaced() {
                   <li>{i18n.t('rules.shared')}</li>
                   <li>{mode==='MIXED_UNIQUES' ? i18n.t('rules.mixed') : i18n.t('rules.same')}</li>
                 </ul>
+                <p className="mt-2 text-gray-700">{i18n.t('guidance.best')}</p>
               </div>
               <div className="flex gap-2 justify-end">
                 <button type="button" className="px-3 py-2 rounded border border-gray-300 hover:bg-gray-50 text-sm" onClick={()=>setConfirmOpen(false)}>{i18n.t('confirm.cancel')}</button>
@@ -294,11 +279,7 @@ export default function Interlaced() {
           <input className="w-full rounded border border-gray-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-brand-500" name="name" placeholder={i18n.t('collect.name')} />
           <div className="text-xs text-gray-500">{i18n.t('collect.name_help')}</div>
         </label>
-        <label className="grid gap-1">
-          <span className="text-sm text-gray-700">{i18n.t('collect.handle_label')} <span className="text-gray-400">{i18n.t('collect.optional')}</span></span>
-          <input className="w-full rounded border border-gray-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-brand-500" name="handle" placeholder={i18n.t('collect.handle')} />
-          <div className="text-xs text-gray-500">{i18n.t('collect.handle_help')}</div>
-        </label>
+        {/* Social handle removed per product decision */}
         <div>
           <div className="text-xs text-gray-500 mb-2">{i18n.t('collect.pick')}</div>
           <div className="grid grid-cols-2 gap-2">
@@ -402,7 +383,7 @@ export default function Interlaced() {
   const canProceed = step.required ? uploadedThisStep > 0 : true
 
   return (
-    <div className="grid gap-4 p-4 max-w-3xl mx-auto w-full overflow-x-hidden bg-slate-50 rounded-2xl shadow-inner ring-1 ring-slate-200">
+    <div className="grid gap-4 p-4 mb-16 max-w-3xl mx-auto w-full overflow-x-hidden bg-slate-50 rounded-2xl shadow-inner ring-1 ring-slate-200">
       {/* Progress indicator (track with markers) */}
       {(() => {
         return (
@@ -440,6 +421,7 @@ export default function Interlaced() {
           <span className="w-7 h-7 rounded-full bg-gray-200 flex items-center justify-center mt-0.5"><img src="/icons/info.svg" alt="info" className="w-4 h-4" /></span>
           <span className="leading-5">
             <div className="font-medium text-gray-800">{infoText}</div>
+            <div className="text-[12px] mt-0.5 text-gray-700">{i18n.t('guidance.best')}</div>
             <div className="text-[12px] mt-0.5 text-gray-600">{i18n.t('note.no_zoom')}</div>
             <div className="text-[12px] mt-0.5 text-gray-600">{mode==='MIXED_UNIQUES' ? i18n.t('rules.mixed') : i18n.t('rules.same')}</div>
           </span>
@@ -523,34 +505,35 @@ export default function Interlaced() {
         </div>
       ) : null}
 
-      {needsPerm && (
-        <div className="flex items-center justify-between text-gray-700 bg-gray-50 border border-gray-200 px-3 py-2 rounded">
-          <span className="text-sm">{i18n.t('ios.motion.explain')}</span>
-          <button className="text-sm px-2 py-1 rounded bg-brand-600 text-white" onClick={requestOrientationPermission}>{i18n.t('ios.motion.enable')}</button>
-        </div>
-      )}
+      {/* iOS motion permission UI removed */}
       {/* Remaining count removed per UX request */}
 
-      {/* Nav buttons */}
-      <div className="flex gap-2">
-        <button className="inline-flex items-center gap-2 px-3 py-2 rounded-md border border-gray-300 hover:bg-gray-50 disabled:opacity-50" onClick={onPrev} disabled={stepIdx===0 || busy}>
+      {/* Nav buttons (fixed above footer, full width) */}
+      <div className="fixed inset-x-0 bottom-12 z-40">
+        <div className="bg-white/90 supports-[backdrop-filter]:bg-white/70 backdrop-blur border-t border-gray-200 shadow-sm">
+          <div className="mx-auto max-w-3xl px-4 sm:px-6 py-2">
+            <div className="flex gap-2 w-full">
+              <button className="flex-1 inline-flex items-center justify-center gap-2 px-4 py-3 rounded-md border border-gray-300 hover:bg-gray-50 disabled:opacity-50" onClick={onPrev} disabled={stepIdx===0 || busy}>
           <img src="/icons/chevron-left.svg" alt="Back" className="w-5 h-5" />
           {i18n.t('slides.prev')}
         </button>
-        <button className="inline-flex items-center gap-2 px-4 py-2 rounded-md text-white bg-brand-600 hover:bg-brand-700 disabled:opacity-50"
+        <button className="flex-1 inline-flex items-center justify-center gap-2 px-5 py-3 rounded-md text-white bg-brand-600 hover:bg-brand-700 disabled:opacity-50"
           onClick={onNext} disabled={busy || (!canProceed)}>
-          {stepIdx===steps.length-1 ? (
-            <>
-              <img src="/icons/send.svg" alt="Submit" className="w-5 h-5" />
-              {i18n.t('finalize')}
-            </>
-          ) : (
-            <>
-              {i18n.t('slides.next')}
-              <img src="/icons/chevron-right.svg" alt="Next" className="w-5 h-5" />
-            </>
-          )}
+           {stepIdx===steps.length-1 ? (
+             <>
+               <img src="/icons/send.svg" alt="Submit" className="w-5 h-5" />
+               {i18n.t('finalize')}
+             </>
+           ) : (
+             <>
+               {i18n.t('slides.next')}
+               <img src="/icons/chevron-right.svg" alt="Next" className="w-5 h-5" />
+             </>
+           )}
         </button>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   )

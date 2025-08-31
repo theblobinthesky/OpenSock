@@ -77,8 +77,8 @@ export default function Admin() {
         <div className="flex flex-wrap gap-2">
           <button className="inline-flex items-center justify-center px-3 py-2 rounded bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-50" onClick={fetchSessions} disabled={disabled}>{i18n.t('admin.actions.search')}</button>
           <button className="px-3 py-2 rounded border border-gray-300 hover:bg-gray-50 disabled:opacity-50" disabled={disabled || sessions.length===0} onClick={()=>{
-            const rows = [["id","email","name","handle","mode","image_count","created_at","finalized_at"]].concat(
-              filtered.map(s=>[s.id,s.email,s.name||"",s.handle||"",s.mode,String(s.image_count), new Date(s.created_at).toISOString(), s.finalized_at||""])
+            const rows = [["id","email","name","mode","image_count","created_at","finalized_at"]].concat(
+              filtered.map(s=>[s.id,s.email,s.name||"",s.mode,String(s.image_count), new Date(s.created_at).toISOString(), s.finalized_at||""])
             )
             const csv = rows.map(r=>r.map(x=>`"${String(x).replace(/"/g,'""')}"`).join(',')).join('\n')
             const blob = new Blob([csv], {type:'text/csv'})
@@ -119,7 +119,7 @@ export default function Admin() {
           <table className="min-w-full text-sm">
             <thead className="bg-gray-50/70">
               <tr className="text-left">
-                <th className="p-2">{i18n.t('admin.table.id')}</th><th className="p-2">{i18n.t('admin.table.email')}</th><th className="p-2">{i18n.t('admin.table.name')}</th><th className="p-2">{i18n.t('admin.table.handle')}</th><th className="p-2">{i18n.t('admin.table.mode')}</th><th className="p-2">{i18n.t('admin.table.images')}</th><th className="p-2">{i18n.t('admin.table.created')}</th><th className="p-2">{i18n.t('admin.table.finalized')}</th><th className="p-2">{i18n.t('admin.table.actions')}</th>
+                <th className="p-2">{i18n.t('admin.table.id')}</th><th className="p-2">{i18n.t('admin.table.email')}</th><th className="p-2">{i18n.t('admin.table.name')}</th><th className="p-2">{i18n.t('admin.table.mode')}</th><th className="p-2">{i18n.t('admin.table.images')}</th><th className="p-2">{i18n.t('admin.table.created')}</th><th className="p-2">{i18n.t('admin.table.finalized')}</th><th className="p-2">{i18n.t('admin.table.actions')}</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
@@ -134,7 +134,6 @@ export default function Admin() {
                   </td>
                   <td className="p-2 align-top">{s.email}</td>
                   <td className="p-2 align-top">{s.name || ''}</td>
-                  <td className="p-2 align-top">{s.handle || ''}</td>
                   <td className="p-2 align-top">{s.mode}</td>
                   <td className="p-2 align-top">{s.image_count}</td>
                   <td className="p-2 align-top">{new Date(s.created_at).toLocaleString()}</td>

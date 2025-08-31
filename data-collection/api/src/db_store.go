@@ -73,15 +73,14 @@ func (s *DBStore) CreateSession(req CreateSessionRequest) (*Session, error) {
         ID: id,
         CreatedAt: time.Now().UTC(),
         Name: strings.TrimSpace(req.Name),
-        Handle: strings.TrimSpace(req.Handle),
         Email: strings.TrimSpace(req.Email),
         NotifyOptIn: req.NotifyOptIn,
         Language: strings.TrimSpace(req.Language),
         Mode: strings.TrimSpace(req.Mode),
     }
     if err := os.MkdirAll(s.sessionDir(id), 0o755); err != nil { return nil, err }
-    _, err := s.db.Exec(`INSERT INTO sessions(id, created_at, name, handle, email, notify_opt_in, mode, image_count) VALUES($1,$2,$3,$4,$5,$6,$7,$8)`,
-        sess.ID, sess.CreatedAt, sess.Name, sess.Handle, sess.Email, sess.NotifyOptIn, sess.Mode, 0)
+    _, err := s.db.Exec(`INSERT INTO sessions(id, created_at, name, email, notify_opt_in, mode, image_count) VALUES($1,$2,$3,$4,$5,$6,$7)`,
+        sess.ID, sess.CreatedAt, sess.Name, sess.Email, sess.NotifyOptIn, sess.Mode, 0)
     if err != nil { return nil, err }
     return sess, nil
 }
@@ -136,14 +135,14 @@ func (s *DBStore) FinalizeSession(id string) error {
 }
 
 func (s *DBStore) SessionsByEmail(email string) []Session {
-    rows, err := s.db.Query(`SELECT id, created_at, finalized_at, name, handle, email, notify_opt_in, mode, image_count FROM sessions WHERE email=$1`, email)
+    rows, err := s.db.Query(`SELECT id, created_at, finalized_at, name, email, notify_opt_in, mode, image_count FROM sessions WHERE email=$1`, email)
     if err != nil { return nil }
     defer rows.Close()
     out := []Session{}
     for rows.Next() {
         var sess Session
         var fin sql.NullTime
-        if err := rows.Scan(&sess.ID, &sess.CreatedAt, &fin, &sess.Name, &sess.Handle, &sess.Email, &sess.NotifyOptIn, &sess.Mode, &sess.ImageCount); err == nil {
+        if err := rows.Scan(&sess.ID, &sess.CreatedAt, &fin, &sess.Name, &sess.Email, &sess.NotifyOptIn, &sess.Mode, &sess.ImageCount); err == nil {
             if fin.Valid { t := fin.Time; sess.FinalizedAt = &t }
             out = append(out, sess)
         }
@@ -250,7 +249,7 @@ func (s *DBStore) SessionsQuery(email, name, mode, status string) []Session {
           AND ($2='' OR LOWER(name) LIKE LOWER('%' || $2 || '%'))
           AND ($3='' OR mode=$3)`
     if strings.EqualFold(status, "finalized") { where += " AND finalized_at IS NOT NULL" } else if strings.EqualFold(status, "open") { where += " AND finalized_at IS NULL" }
-    q := `SELECT id, created_at, finalized_at, name, handle, email, notify_opt_in, mode, image_count FROM sessions ` + where
+    q := `SELECT id, created_at, finalized_at, name, email, notify_opt_in, mode, image_count FROM sessions ` + where
     rows, err := s.db.Query(q, email, name, mode)
     if err != nil { return nil }
     defer rows.Close()
@@ -258,7 +257,7 @@ func (s *DBStore) SessionsQuery(email, name, mode, status string) []Session {
     for rows.Next() {
         var sess Session
         var fin sql.NullTime
-        if err := rows.Scan(&sess.ID, &sess.CreatedAt, &fin, &sess.Name, &sess.Handle, &sess.Email, &sess.NotifyOptIn, &sess.Mode, &sess.ImageCount); err == nil {
+        if err := rows.Scan(&sess.ID, &sess.CreatedAt, &fin, &sess.Name, &sess.Email, &sess.NotifyOptIn, &sess.Mode, &sess.ImageCount); err == nil {
             if fin.Valid { t := fin.Time; sess.FinalizedAt = &t }
             out = append(out, sess)
         }

@@ -25,7 +25,6 @@ const CONNECT_BASE = `${API_BASE}/opensock.dc.v1.DataCollectionService`
 
 export async function createSession(payload: {
   name?: string
-  handle?: string
   email?: string
   notify_opt_in?: boolean
   language?: string
@@ -36,7 +35,6 @@ export async function createSession(payload: {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       name: payload.name || "",
-      handle: payload.handle || "",
       email: payload.email || "",
       notifyOptIn: !!payload.notify_opt_in,
       language: payload.language || "",
@@ -153,7 +151,6 @@ export type AdminSession = {
   id: string
   email: string
   name?: string
-  handle?: string
   mode: string
   image_count: number
   created_at: string

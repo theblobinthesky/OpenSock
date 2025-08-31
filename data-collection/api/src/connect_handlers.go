@@ -17,7 +17,7 @@ type ConnectServer struct{ store Store }
 func (s *ConnectServer) CreateSession(ctx context.Context, req *connect.Request[dcv1.CreateSessionRequest]) (*connect.Response[dcv1.CreateSessionResponse], error) {
     r := req.Msg
     cs := CreateSessionRequest{
-        Name: r.GetName(), Handle: r.GetHandle(), Email: r.GetEmail(),
+        Name: r.GetName(), Email: r.GetEmail(),
         NotifyOptIn: r.GetNotifyOptIn(), Language: r.GetLanguage(), Mode: r.GetMode().String(),
     }
     if cs.Email == "" {
@@ -48,7 +48,6 @@ func (s *AdminServer) ListSessions(ctx context.Context, req *connect.Request[dcv
             Id: ss.ID,
             Email: ss.Email,
             Name: ss.Name,
-            Handle: ss.Handle,
             Mode: ss.Mode,
             ImageCount: int32(ss.ImageCount),
             CreatedAt: ss.CreatedAt.UTC().Format(time.RFC3339),

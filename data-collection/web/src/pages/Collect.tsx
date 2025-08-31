@@ -30,7 +30,6 @@ export default function Collect() {
     const fd = new FormData(e.currentTarget)
     const payload = {
       name: String(fd.get('name') || ''),
-      handle: String(fd.get('handle') || ''),
       email: String(fd.get('email') || ''),
       notify_opt_in: !!fd.get('notify'),
       language: i18n.lang,
@@ -89,7 +88,6 @@ export default function Collect() {
       <form onSubmit={onCreate} style={{ display: 'grid', gap: 8, padding: 16 }}>
         <h2>{i18n.t('collect.title')}</h2>
         <input name="name" placeholder={i18n.t('collect.name')} />
-        <input name="handle" placeholder={i18n.t('collect.handle')} />
         <input name="email" placeholder={i18n.t('collect.email')} type="email" required />
         <div>
           <label><input type="radio" name="mode" value="MIXED_UNIQUES" defaultChecked /> {i18n.t('mode.mixed.title')}</label>
