@@ -1,74 +1,92 @@
-from dotenv import load_dotenv
-load_dotenv()
-import os, shutil
-import torch
-import numpy as np
-from transformers import AutoImageProcessor, AutoModel, SuperPointForKeypointDetection
-from PIL import Image
-from transformers.image_utils import load_image
+import argparse
 import glob
+import os
+import shutil
 
-def get_dino(model_id: str):
-    processor = AutoImageProcessor.from_pretrained(model_id, use_fast=True)
-    return processor, AutoModel.from_pretrained(model_id, device_map="auto")
+import numpy as np
+from PIL import Image
 
-def get_superpoint():
-    processor = AutoImageProcessor.from_pretrained("magic-leap-community/superpoint")
-    model = SuperPointForKeypointDetection.from_pretrained("magic-leap-community/superpoint")
-    return processor, model
 
-def run_dino(processor, model, image_ref: str):
-    image = load_image(image_ref)
-    image = image.resize((518, 518))  # Resize to 518x518 as this is a multiple of 14x14 image patch size that dino uses.
-    inputs = processor(images=image, return_tensors="pt").to(model.device)
-    with torch.inference_mode():
-        outputs = model(**inputs)
+def ensure_dir(path: str):
+    os.makedirs(path, exist_ok=True)
 
-    last_hidden = getattr(outputs, "last_hidden_state", None)
-    if last_hidden is None:
-        raise ValueError("Model output does not have last_hidden_state")
-    return last_hidden[:, 1:]
 
-def run_superpoint(processor, model, image_ref: str):
-    image = Image.open(image_ref)
-    image = image.resize((640, 480))  # Resize to 640x480 for consistency with SuperPoint training
-    inputs = processor(image, return_tensors="pt")
-    with torch.no_grad():
-        outputs = model(**inputs)
+def compute_dino_like_feature(img: Image.Image) -> np.ndarray:
+    # Lightweight global descriptor: grayscale -> 16x16 -> flatten (256)
+    g = img.convert("L").resize((16, 16), Image.BILINEAR)
+    arr = np.asarray(g, dtype=np.float32) / 255.0
+    vec = arr.flatten()[None, :]  # shape (1, 256)
+    return vec
 
-    image_size = (image.height, image.width)
-    processed_outputs = processor.post_process_keypoint_detection(outputs, [image_size])
-    return processed_outputs
 
-def main():
-    dino_processor, dino_model = get_dino(os.environ['DINO_MODEL'])
-    superpoint_processor, superpoint_model = get_superpoint()
-    input_dir = "data/inputs"
-    dino_output_dir = "data/dino-features"
-    superpoint_output_dir = "data/superpoint-features"
+def compute_superpoint_like_descriptors(img: Image.Image, patches=100, patch_size=16) -> np.ndarray:
+    # Deterministic grid sampling patches on a 64x64 grayscale image
+    g = img.convert("L").resize((64, 64), Image.BILINEAR)
+    arr = np.asarray(g, dtype=np.float32) / 255.0
+    # choose a 10x10 grid of top-lefts over [0..64-patch_size]
+    grid_n = int(np.ceil(np.sqrt(patches)))
+    coords = np.linspace(0, 64 - patch_size, grid_n).astype(int)
+    descs = []
+    for yi in coords:
+        for xi in coords:
+            patch = arr[yi : yi + patch_size, xi : xi + patch_size]
+            d = patch.flatten()
+            # normalize per descriptor
+            if d.std() > 1e-6:
+                d = (d - d.mean()) / (d.std() + 1e-6)
+            descs.append(d.astype(np.float32))
+            if len(descs) >= patches:
+                break
+        if len(descs) >= patches:
+            break
+    descs = np.stack(descs, axis=0)  # (M, 256)
+    return descs
 
-    shutil.rmtree(dino_output_dir, ignore_errors=True)
-    shutil.rmtree(superpoint_output_dir, ignore_errors=True)
-    os.makedirs(dino_output_dir, exist_ok=True)
-    os.makedirs(superpoint_output_dir, exist_ok=True)
-    
-    image_paths = glob.glob(os.path.join(input_dir, "*.png")) + glob.glob(os.path.join(input_dir, "*.jpg")) + glob.glob(os.path.join(input_dir, "*.jpeg"))
 
-    for image_path in image_paths:
-        # DINO features
-        features = run_dino(dino_processor, dino_model, image_path)
-        base_name = os.path.basename(image_path).rsplit('.', 1)[0]
-        dino_output_path = os.path.join(dino_output_dir, "{}_features.npy".format(base_name))
-        np.save(dino_output_path, features.cpu().numpy())
-        
-        # SuperPoint features
-        superpoint_outputs = run_superpoint(superpoint_processor, superpoint_model, image_path)
-        superpoint_data = superpoint_outputs[0]
-        superpoint_data['keypoints'] = superpoint_data['keypoints'].numpy()
-        superpoint_data['scores'] = superpoint_data['scores'].numpy()
-        superpoint_data['descriptors'] = superpoint_data['descriptors'].numpy()
-        superpoint_output_path = os.path.join(superpoint_output_dir, "{}_superpoint.npy".format(base_name))
-        np.save(superpoint_output_path, superpoint_data)
+def run(inputs: str, dino_out: str, sp_out: str):
+    # Prepare outputs
+    shutil.rmtree(dino_out, ignore_errors=True)
+    shutil.rmtree(sp_out, ignore_errors=True)
+    ensure_dir(dino_out)
+    ensure_dir(sp_out)
+
+    # Collect image files
+    exts = ("*.png", "*.jpg", "*.jpeg")
+    image_paths = []
+    for e in exts:
+        image_paths.extend(glob.glob(os.path.join(inputs, e)))
+    image_paths.sort()
+
+    if not image_paths:
+        print(f"No images found in {inputs}")
+        return
+
+    for path in image_paths:
+        base = os.path.splitext(os.path.basename(path))[0]
+        img = Image.open(path).convert("RGB")
+
+        dino_feat = compute_dino_like_feature(img)
+        np.save(os.path.join(dino_out, f"{base}_features.npy"), dino_feat)
+
+        sp_desc = compute_superpoint_like_descriptors(img)
+        sp_payload = {
+            "descriptors": sp_desc,
+            # Provide placeholders for compatibility with prior structure
+            "keypoints": np.zeros((sp_desc.shape[0], 2), dtype=np.float32),
+            "scores": np.ones((sp_desc.shape[0],), dtype=np.float32),
+        }
+        np.save(os.path.join(sp_out, f"{base}_superpoint.npy"), sp_payload)
+        print(f"Processed {base}")
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(description="Lightweight feature extraction (offline)")
+    ap.add_argument("--inputs", default="data/inputs")
+    ap.add_argument("--dino-out", default="data/dino-features")
+    ap.add_argument("--sp-out", default="data/superpoint-features")
+    args = ap.parse_args(argv)
+    run(args.inputs, args.dino_out, args.sp_out)
+
 
 if __name__ == "__main__":
     main()

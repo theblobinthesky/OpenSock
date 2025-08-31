@@ -5,14 +5,9 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "accelerate>=1.10.1",
-    "dotenv>=0.9.9",
-    "pillow>=11.3.0",
-    "torch[cuda]>=2.8.0",
-    "torchvision>=0.23.0",
-    "transformers>=4.56.0",
-    "tensorflow>=2.0",
-    "wandb>=0.10",
-    "jax[cuda]>=0.4",
-    "optax>=0.1",
+    "numpy>=1.26",
+    "pillow>=10.0",
+    "tqdm>=4.0",
+    "requests>=2.32.5",
+    "blenderproc>=2.8.0",
 ]
