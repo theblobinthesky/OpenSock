@@ -22,6 +22,7 @@ def main(argv=None):
     parser.add_argument("--inputs", default="data/input", help="Input image directory")
     parser.add_argument("--dino-out", default="data/dino-features", help="Output dir for DINO-like features")
     parser.add_argument("--sp-out", default="data/superpoint-features", help="Output dir for SuperPoint-like features")
+    num_scenes = 1000
     args = parser.parse_args(argv)
 
     if args.scrape:
@@ -31,7 +32,7 @@ def main(argv=None):
         print("Completed: Scraping textures")
 
     if args.render:
-        run_command("blender -b -P src/blender_render.py", "Rendering with Blender")
+        run_command(f"blender -b -P src/blender_render.py -- --num-scenes {num_scenes} --output-dir data/dataset --keep-rigidbody --save-blend", "Rendering with Blender")
 
     if not args.skip_preprocess:
         run_command(
@@ -41,13 +42,13 @@ def main(argv=None):
     else:
         print("Skipping preprocess (per flag)")
 
-    if not args.skip_train:
-        run_command(
-            f"python src/train.py",
-            "Training model",
-        )
-    else:
-        print("Skipping train (per flag)")
+    # if not args.skip_train:
+    #     run_command(
+    #         f"python src/train.py",
+    #         "Training model",
+    #     )
+    # else:
+    #     print("Skipping train (per flag)")
 
     print("Pipeline completed successfully!")
 

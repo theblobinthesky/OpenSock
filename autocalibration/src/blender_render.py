@@ -1,15 +1,3 @@
-# run with: blender -b -P blender_render.py
-#
-# Modified Blender renderer for autocalibration pipeline
-# Features:
-# - Uses scraped floor textures from AmbientCG/PolyHaven
-# - Creates repeating floor plane at (0,0)
-# - Top-down camera view for keypoint correspondence
-# - Renders two images from similar viewpoints
-# - Randomly places objects from data/models directory
-# - Physics simulation for natural object placement
-# - Generates entire datasets with configurable size
-#
 import bpy
 from mathutils import Vector
 import numpy as np
@@ -17,13 +5,17 @@ import random
 import math
 import json
 import os
+import shutil
 import sys
 import argparse
+import glob
 
 # Parse command line arguments
 parser = argparse.ArgumentParser(description='Generate autocalibration dataset')
-parser.add_argument('--num-scenes', type=int, default=10, help='Number of scenes to generate')
-parser.add_argument('--output-dir', default='data/dataset', help='Output directory for dataset')
+parser.add_argument('--num-scenes', type=int, default=1, help='Number of scenes to generate')
+parser.add_argument('--output-dir', default=os.path.join(os.path.dirname(__file__), "..", "data", "dataset"), help='Output directory for dataset')
+parser.add_argument('--keep-rigidbody', action='store_true', help='Keep rigid body components after sim for inspection')
+parser.add_argument('--save-blend', action='store_true', help='Save a .blend file per scene for inspection')
 args = parser.parse_args(sys.argv[sys.argv.index('--') + 1:] if '--' in sys.argv else [])
 
 # Set up basic scene
@@ -43,7 +35,7 @@ os.makedirs(args.output_dir, exist_ok=True)
 # Function to get random floor texture from scraped dataset
 def get_random_floor_texture():
     """Get a random floor texture from the scraped dataset."""
-    scraped_dir = "data/scraped-assets"
+    scraped_dir = os.path.join(os.path.dirname(__file__), "..", "data", "scraped-assets")
     if not os.path.exists(scraped_dir):
         print(f"Warning: {scraped_dir} not found, using default textures")
         return {
@@ -94,61 +86,74 @@ def get_random_floor_texture():
 
     return random.choice(texture_sets)
 
-# Create repeating floor plane
-bpy.ops.mesh.primitive_plane_add(size=40, location=(0, 0, 0))  # Large plane for repeating texture
-floor = bpy.context.active_object
-floor.name = "Floor"
 
-# Get random floor texture
-floor_textures = get_random_floor_texture()
+def get_random_hdri():
+    hdri_dir = os.path.join(os.path.dirname(__file__), "..", "data", "hdris")
+    if not os.path.exists(hdri_dir):
+        print(f"Warning: {hdri_dir} not found, using default background")
+        return None
 
-# Create floor material
-mat = bpy.data.materials.new(name='floor_mat')
-mat.use_nodes = True
+    # Find all HDRI files (common formats)
+    hdri_files = []
+    for ext in [".hdr", ".exr", ".png", ".jpg", ".jpeg"]:
+        hdri_files.extend(glob.glob(os.path.join(hdri_dir, f"**/*{ext}"), recursive=True))
 
-# Get Principled BSDF node
-principled_bsdf = None
-for node in mat.node_tree.nodes:
-    if node.type == 'BSDF_PRINCIPLED':
-        principled_bsdf = node
-        break
+    if not hdri_files:
+        print("Warning: No HDRI files found, using default background")
+        return None
 
-if not principled_bsdf:
-    principled_bsdf = mat.node_tree.nodes.new('ShaderNodeBsdfPrincipled')
+    return random.choice(hdri_files)
 
-# Try to set basic texture if available
-if os.path.exists(floor_textures["basecolor"]):
-    try:
-        # Create image texture node
-        tex_node = mat.node_tree.nodes.new('ShaderNodeTexImage')
-        tex_node.image = bpy.data.images.load(floor_textures["basecolor"])
+def assign_floor_material(floor, floor_textures):
+    """Create and assign a repeating textured material to the given floor object."""
+    mat = bpy.data.materials.new(name='floor_mat')
+    mat.use_nodes = True
 
-        # Link to base color
-        mat.node_tree.links.new(tex_node.outputs['Color'], principled_bsdf.inputs['Base Color'])
+    principled_bsdf = None
+    for node in mat.node_tree.nodes:
+        if node.type == 'BSDF_PRINCIPLED':
+            principled_bsdf = node
+            break
 
-        # Set UV scaling for repetition
-        mapping_node = mat.node_tree.nodes.new('ShaderNodeMapping')
-        uv_node = mat.node_tree.nodes.new('ShaderNodeTexCoord')
+    if not principled_bsdf:
+        principled_bsdf = mat.node_tree.nodes.new('ShaderNodeBsdfPrincipled')
 
-        mapping_node.inputs['Scale'].default_value = (5, 5, 1)  # 5x repetition
+    if floor_textures and os.path.exists(floor_textures.get("basecolor", "")):
+        try:
+            tex_node = mat.node_tree.nodes.new('ShaderNodeTexImage')
+            tex_node.image = bpy.data.images.load(floor_textures["basecolor"])
 
-        mat.node_tree.links.new(uv_node.outputs['UV'], mapping_node.inputs['Vector'])
-        mat.node_tree.links.new(mapping_node.outputs['Vector'], tex_node.inputs['Vector'])
+            mat.node_tree.links.new(tex_node.outputs['Color'], principled_bsdf.inputs['Base Color'])
 
-        print(f"Using floor texture: {floor_textures['basecolor']}")
-    except Exception as e:
-        print(f"Warning: Could not set texture: {e}, using default material")
+            mapping_node = mat.node_tree.nodes.new('ShaderNodeMapping')
+            uv_node = mat.node_tree.nodes.new('ShaderNodeTexCoord')
+            mapping_node.inputs['Scale'].default_value = (10, 10, 1)  # repeat
 
-# Assign material to floor
-if floor.data.materials:
-    floor.data.materials[0] = mat
-else:
-    floor.data.materials.append(mat)
+            mat.node_tree.links.new(uv_node.outputs['UV'], mapping_node.inputs['Vector'])
+            mat.node_tree.links.new(mapping_node.outputs['Vector'], tex_node.inputs['Vector'])
+
+            print(f"Using floor texture: {floor_textures['basecolor']}")
+        except Exception as e:
+            print(f"Warning: Could not set texture: {e}, using default material")
+
+    if floor.data.materials:
+        floor.data.materials[0] = mat
+    else:
+        floor.data.materials.append(mat)
+
+    return mat
+
+# Real-life sizes in meters (approximate)
+real_sizes = {
+    "keys": (0.07, 0.07, 0.07),  # 7cm cube
+    "pen": (0.14, 0.008, 0.008),  # 14cm long, 8mm diameter
+    "credit-card": (0.0856, 0.05398, 0.00076)  # Standard credit card
+}
 
 # Load random objects from data/models directory
 def load_random_objects():
     """Load random objects from data/models directory."""
-    models_dir = "data/models"
+    models_dir = os.path.join(os.path.dirname(__file__), "..", "data", "models")
     if not os.path.exists(models_dir):
         print(f"Warning: {models_dir} not found, skipping object loading")
         return []
@@ -166,7 +171,7 @@ def load_random_objects():
     print(f"{obj_files=}")
 
     # Load 2-5 random objects
-    num_objects = random.randint(5, 15)
+    num_objects = random.randint(3, 7)
     selected_files = random.sample(obj_files, min(num_objects, len(obj_files)))
 
     objects = []
@@ -174,7 +179,48 @@ def load_random_objects():
         try:
             # Load the object using Blender's import
             bpy.ops.wm.obj_import(filepath=obj_file)
-            obj = bpy.context.selected_objects[0]  # Get the imported object
+            selected = bpy.context.selected_objects
+
+            if not selected:
+                continue
+
+            # If multiple objects, join them into one
+            if len(selected) > 1:
+                bpy.ops.object.select_all(action='DESELECT')
+                for obj in selected:
+                    obj.select_set(True)
+                bpy.context.view_layer.objects.active = selected[0]
+                bpy.ops.object.join()
+                selected = [selected[0]]
+
+            obj = selected[0]
+
+            # Update the scene to ensure dimensions are correct
+            bpy.context.view_layer.update()
+
+            # Determine object type from path
+            obj_type = None
+            if "keys" in obj_file.lower():
+                obj_type = "keys"
+            elif "pen" in obj_file.lower():
+                obj_type = "pen"
+            elif "credit-card" in obj_file.lower():
+                obj_type = "credit-card"
+
+            # Scale to real-life size
+            if obj_type and obj_type in real_sizes:
+                real_dim = real_sizes[obj_type]
+                current_dim = obj.dimensions
+                print(f"Current dimensions for {obj_file}: {current_dim}")
+                # Calculate scale factor (average for balance)
+                scale_factors = [real_dim[i] / current_dim[i] if current_dim[i] > 0 else 1 for i in range(3)]
+                scale_factor = sum(scale_factors) / 3
+                obj.scale = (scale_factor, scale_factor, scale_factor)
+                print(f"Scaled {obj_file} to real size: {scale_factor}, new dimensions: {obj.dimensions}")
+            else:
+                # Fallback random scale
+                scale = random.uniform(0.5, 2.0) * 0.05
+                obj.scale = (scale, scale, scale)
 
             # Set custom property for category ID
             obj["category_id"] = i + 1
@@ -187,14 +233,10 @@ def load_random_objects():
             )
 
             # Random position on floor (within the plane bounds)
-            x = random.uniform(-1, 1) * 0.5
-            y = random.uniform(-1, 1) * 0.5
+            x = random.uniform(-1, 1) * 1.0
+            y = random.uniform(-1, 1) * 1.0
             z = 0.5  # Slightly above floor to avoid clipping
             obj.location = (x, y, z)
-
-            # Random scale (0.5x to 2x)
-            scale = random.uniform(0.5, 2.0) * 0.05
-            obj.scale = (scale, scale, scale)
 
             objects.append(obj)
             print(f"Loaded object: {obj_file} at ({x:.1f}, {y:.1f}, {z:.1f})")
@@ -203,28 +245,136 @@ def load_random_objects():
 
     return objects
 
-# Load random objects
-random_objects = load_random_objects()
+def run_rigidbody_drop(floor, objects, frame_end: int, keep: bool):
+    """Run rigid body simulation so objects settle on the floor (headless-safe)."""
+    if not objects:
+        return
 
-# Simple physics simulation for natural poses (only if we have objects)
-if random_objects:
-    # Enable rigid body physics
-    bpy.ops.rigidbody.world_add()
-    scene.rigidbody_world.time_scale = 1.0
+    scn = bpy.context.scene
+    scn.frame_start = 1
+    scn.frame_end = frame_end
 
-    # Add rigid body to objects
-    for obj in random_objects:
+    print(f"[RB] Preparing rigid body world (objects={len(objects)})")
+    # Ensure world exists
+    if not scn.rigidbody_world:
+        bpy.ops.rigidbody.world_add()
+    rbw = scn.rigidbody_world
+    # World config with version guards
+    if hasattr(rbw, 'time_scale'):
+        rbw.time_scale = 1.0
+    # Steps per second / substeps naming varies across versions
+    if hasattr(rbw, 'steps_per_second'):
+        rbw.steps_per_second = 120
+    elif hasattr(rbw, 'substeps_per_frame'):
+        rbw.substeps_per_frame = 10
+    # Solver iterations naming varies
+    if hasattr(rbw, 'solver_iterations'):
+        rbw.solver_iterations = 25
+    elif hasattr(rbw, 'num_solver_iterations'):
+        rbw.num_solver_iterations = 25
+    scn.use_gravity = True
+    if hasattr(scn, 'gravity'):
+        scn.gravity = (0.0, 0.0, -9.81)
+    print(f"[RB] World configured: time_scale={getattr(rbw,'time_scale',None)}")
+
+    # Make sure the RBW collection includes our objects
+    if rbw.collection is None:
+        # Create a dedicated collection if missing
+        coll = bpy.data.collections.new("RigidBodyWorld")
+        bpy.context.scene.collection.children.link(coll)
+        rbw.collection = coll
+    else:
+        coll = rbw.collection
+
+    # Floor as passive collider
+    bpy.context.view_layer.objects.active = floor
+    if not getattr(floor, 'rigid_body', None):
+        bpy.ops.rigidbody.object_add(type='PASSIVE')
+    else:
+        floor.rigid_body.type = 'PASSIVE'
+    floor.rigid_body.use_margin = True
+    floor.rigid_body.collision_margin = 0.05
+    floor.rigid_body.collision_shape = 'MESH'
+    # Link to RBW collection
+    try:
+        if floor not in coll.objects:
+            coll.objects.link(floor)
+    except Exception:
+        pass
+    print(f"[RB] Floor rigid_body: type={floor.rigid_body.type if floor.rigid_body else None}, shape={floor.rigid_body.collision_shape if floor.rigid_body else None}")
+
+    # Active rigid bodies for objects
+    for obj in objects:
         bpy.context.view_layer.objects.active = obj
-        bpy.ops.rigidbody.object_add()
+        if not getattr(obj, 'rigid_body', None):
+            bpy.ops.rigidbody.object_add(type='ACTIVE')
+        else:
+            obj.rigid_body.type = 'ACTIVE'
+        obj.rigid_body.mass = 1.0
+        obj.rigid_body.use_margin = True
+        obj.rigid_body.collision_margin = 0.01
+        obj.rigid_body.collision_shape = 'CONVEX_HULL'
+        # Ensure in RBW collection
+        try:
+            if obj not in coll.objects:
+                coll.objects.link(obj)
+        except Exception:
+            pass
+        print(f"[RB] Added ACTIVE rigid body to {obj.name}")
 
-    # Bake physics
-    bpy.ops.ptcache.bake_all(bake=True)
+    # Clear any existing cache and step through frames (headless-safe)
+    try:
+        bpy.ops.ptcache.free_bake_all()
+    except Exception as e:
+        print(f"[RB] free_bake_all failed: {e}")
 
-    # Remove rigid body components after baking
-    for obj in random_objects:
-        if obj.rigid_body:
-            bpy.context.view_layer.objects.active = obj
-            bpy.ops.rigidbody.object_remove()
+    # Configure cache range then bake, which works in background mode
+    if rbw.point_cache:
+        rbw.point_cache.frame_start = scn.frame_start
+        rbw.point_cache.frame_end = scn.frame_end
+    try:
+        bpy.ops.ptcache.bake_all(bake=True)
+        print("[RB] Bake success")
+    except Exception as e:
+        print(f"[RB] Bake failed ({e}), stepping frames manually")
+        deps = bpy.context.evaluated_depsgraph_get()
+        for f in range(scn.frame_start, scn.frame_end + 1):
+            scn.frame_set(f)
+            deps.update()
+
+    # Set to final frame to keep settled transforms
+    scn.frame_set(scn.frame_end)
+    deps = bpy.context.evaluated_depsgraph_get()
+    deps.update()
+    # Copy evaluated transforms to real objects to preserve pose even if RB removed
+    for obj in objects:
+        try:
+            eval_obj = obj.evaluated_get(deps)
+            obj.location = eval_obj.location
+            try:
+                obj.rotation_euler = eval_obj.rotation_euler
+            except Exception:
+                pass
+        except Exception:
+            pass
+    for obj in objects:
+        print(f"[RB] Settled {obj.name} loc={tuple(round(x,4) for x in obj.location)}")
+
+    # Optionally remove rigid body components after settling
+    if not keep:
+        for obj in objects:
+            if getattr(obj, 'rigid_body', None):
+                bpy.context.view_layer.objects.active = obj
+                try:
+                    bpy.ops.rigidbody.object_remove()
+                except Exception:
+                    pass
+        if getattr(floor, 'rigid_body', None):
+            bpy.context.view_layer.objects.active = floor
+            try:
+                bpy.ops.rigidbody.object_remove()
+            except Exception:
+                pass
 
 # Camera setup for top-down view of floor
 def sample_camera_pair():
@@ -293,6 +443,7 @@ def sample_camera_pair():
     return cameras
 
 # Main dataset generation loop
+shutil.rmtree(args.output_dir, ignore_errors=True)
 print(f"Generating {args.num_scenes} scenes...")
 
 for scene_idx in range(args.num_scenes):
@@ -307,50 +458,9 @@ for scene_idx in range(args.num_scenes):
     floor = bpy.context.active_object
     floor.name = "Floor"
 
-    # Get random floor texture
+    # Get random floor texture and assign material
     floor_textures = get_random_floor_texture()
-
-    # Create floor material
-    mat = bpy.data.materials.new(name=f'floor_mat_{scene_idx}')
-    mat.use_nodes = True
-
-    # Get Principled BSDF node
-    principled_bsdf = None
-    for node in mat.node_tree.nodes:
-        if node.type == 'BSDF_PRINCIPLED':
-            principled_bsdf = node
-            break
-
-    if not principled_bsdf:
-        principled_bsdf = mat.node_tree.nodes.new('ShaderNodeBsdfPrincipled')
-
-    # Try to set basic texture if available
-    if os.path.exists(floor_textures["basecolor"]):
-        try:
-            # Create image texture node
-            tex_node = mat.node_tree.nodes.new('ShaderNodeTexImage')
-            tex_node.image = bpy.data.images.load(floor_textures["basecolor"])
-
-            # Link to base color
-            mat.node_tree.links.new(tex_node.outputs['Color'], principled_bsdf.inputs['Base Color'])
-
-            # Set UV scaling for repetition
-            mapping_node = mat.node_tree.nodes.new('ShaderNodeMapping')
-            uv_node = mat.node_tree.nodes.new('ShaderNodeTexCoord')
-            mapping_node.inputs['Scale'].default_value = (5, 5, 1)  # 5x repetition
-
-            mat.node_tree.links.new(uv_node.outputs['UV'], mapping_node.inputs['Vector'])
-            mat.node_tree.links.new(mapping_node.outputs['Vector'], tex_node.inputs['Vector'])
-
-            print(f"Using floor texture: {floor_textures['basecolor']}")
-        except Exception as e:
-            print(f"Warning: Could not set texture: {e}, using default material")
-
-    # Assign material to floor
-    if floor.data.materials:
-        floor.data.materials[0] = mat
-    else:
-        floor.data.materials.append(mat)
+    assign_floor_material(floor, floor_textures)
 
     # Load random objects
     random_objects = load_random_objects()
@@ -392,76 +502,96 @@ for scene_idx in range(args.num_scenes):
     sun.data.energy = 5.0
     sun.data.angle = np.deg2rad(45)  # Soft shadows
 
-    # Set world background to neutral gray
+    # Set up world background with HDRI or fallback to neutral gray
     world = bpy.context.scene.world
     world.use_nodes = True
-    bg_node = world.node_tree.nodes['Background']
-    bg_node.inputs['Color'].default_value = (0.5, 0.5, 0.5, 1.0)  # Neutral gray
-    bg_node.inputs['Strength'].default_value = 1.0
 
-    # Render two images from different camera positions
-    print(f"Rendering scene {scene_idx + 1}...")
+    # Clear existing nodes except World Output
+    for node in list(world.node_tree.nodes):
+        if node.type != 'OUTPUT_WORLD':
+            world.node_tree.nodes.remove(node)
 
-    # Create scene-specific output directory
-    scene_output_dir = os.path.join(args.output_dir, f"scene_{scene_idx:04d}")
-    os.makedirs(scene_output_dir, exist_ok=True)
+    # Get random HDRI
+    hdri_path = get_random_hdri()
 
-    # Render from both cameras
-    scene_images = []
+    if hdri_path:
+        # Set up HDRI background
+        try:
+            # Create Environment Texture node
+            env_tex_node = world.node_tree.nodes.new('ShaderNodeTexEnvironment')
+            env_tex_node.image = bpy.data.images.load(hdri_path)
+
+            # Create Background node
+            bg_node = world.node_tree.nodes.new('ShaderNodeBackground')
+            bg_node.inputs['Strength'].default_value = 1.0
+
+            # Create World Output node (should already exist)
+            world_output = world.node_tree.nodes.get('World Output')
+            if not world_output:
+                world_output = world.node_tree.nodes.new('ShaderNodeOutputWorld')
+
+            # Connect nodes: Environment Texture -> Background -> World Output
+            world.node_tree.links.new(env_tex_node.outputs['Color'], bg_node.inputs['Color'])
+            world.node_tree.links.new(bg_node.outputs['Background'], world_output.inputs['Surface'])
+
+            print(f"Using HDRI: {os.path.basename(hdri_path)}")
+        except Exception as e:
+            print(f"Warning: Could not load HDRI {hdri_path}: {e}, using default background")
+            # Fallback to neutral gray
+            bg_node = world.node_tree.nodes.new('ShaderNodeBackground')
+            bg_node.inputs['Color'].default_value = (0.5, 0.5, 0.5, 1.0)
+            bg_node.inputs['Strength'].default_value = 1.0
+
+            world_output = world.node_tree.nodes.get('World Output')
+            if not world_output:
+                world_output = world.node_tree.nodes.new('ShaderNodeOutputWorld')
+            world.node_tree.links.new(bg_node.outputs['Background'], world_output.inputs['Surface'])
+    else:
+        # No HDRI found, use neutral gray background
+        bg_node = world.node_tree.nodes.new('ShaderNodeBackground')
+        bg_node.inputs['Color'].default_value = (0.5, 0.5, 0.5, 1.0)
+        bg_node.inputs['Strength'].default_value = 1.0
+
+        world_output = world.node_tree.nodes.get('World Output')
+        if not world_output:
+            world_output = world.node_tree.nodes.new('ShaderNodeOutputWorld')
+        world.node_tree.links.new(bg_node.outputs['Background'], world_output.inputs['Surface'])
+
+    # Run rigid body sim so objects settle before rendering
+    run_rigidbody_drop(floor, random_objects, frame_end=152, keep=args.keep_rigidbody)
+
+    # Prepare output dirs
+    camera_0_dir = os.path.join(args.output_dir, "camera_0")
+    camera_1_dir = os.path.join(args.output_dir, "camera_1")
+    camera_info_dir = os.path.join(args.output_dir, "camera_info")
+    blend_dir = os.path.join(args.output_dir, "blend_files")
+    os.makedirs(camera_0_dir, exist_ok=True)
+    os.makedirs(camera_1_dir, exist_ok=True)
+    os.makedirs(camera_info_dir, exist_ok=True)
+    os.makedirs(blend_dir, exist_ok=True)
+
+    # Optionally save .blend for inspection (after sim setup)
+    if args.save_blend:
+        blend_path = os.path.join(blend_dir, f"scene_{scene_idx:04d}.blend")
+        bpy.ops.wm.save_as_mainfile(filepath=blend_path, copy=True)
+
+    # Render from each camera and save metadata
     for i, cam_obj in enumerate(blender_cameras):
-        print(f"  Rendering camera {i+1}/2...")
+        cam_dir = camera_0_dir if i == 0 else camera_1_dir
 
-        # Set camera for this render
         scene.camera = cam_obj
-
-        # Set output path for this camera
-        camera_output_dir = os.path.join(scene_output_dir, f"camera_{i}")
-        os.makedirs(camera_output_dir, exist_ok=True)
-
-        # Set render output
-        scene.render.filepath = os.path.join(camera_output_dir, "rgb.png")
-
-        # Render the image
+        scene.render.image_settings.file_format = 'PNG'
+        scene.render.filepath = os.path.join(cam_dir, f'scene_{scene_idx:04d}_rgb.png')
         bpy.ops.render.render(write_still=True)
 
-        scene_images.append({
+        cam_meta = {
+            'scene_id': scene_idx,
             'camera_id': i,
-            'image_path': os.path.join(camera_output_dir, "rgb.png"),
-            'camera_data': cameras[i]
-        })
-
-        print(f"  Completed camera {i+1}/2")
-
-    # Save scene metadata
-    scene_metadata = {
-        'scene_id': scene_idx,
-        'floor_texture': floor_textures,
-        'objects': [{'name': obj.name, 'location': list(obj.location), 'rotation': list(obj.rotation_euler), 'scale': list(obj.scale), 'category_id': obj.get('category_id', 0)} for obj in random_objects],
-        'cameras': cameras,
-        'images': scene_images
-    }
-
-    class NumpyEncoder(json.JSONEncoder):
-        """ Special json encoder for numpy types """
-        def default(self, obj):
-            if isinstance(obj, np.integer):
-                return int(obj)
-            elif isinstance(obj, np.floating):
-                return float(obj)
-            elif isinstance(obj, np.ndarray):
-                return obj.tolist()
-            return json.JSONEncoder.default(self, obj)
-
-    with open(os.path.join(scene_output_dir, "metadata.json"), "w") as f:
-        print(f"{scene_metadata=}")
-        json.dump(scene_metadata, f, indent=2, cls=NumpyEncoder)
-
-    print(f"Completed scene {scene_idx + 1}")
-
-print(f"\nDataset generation completed!")
-print(f"Generated {args.num_scenes} scenes in {args.output_dir}")
-print("Each scene contains:")
-print("  - 2 camera views with metadata")
-print("  - Random floor texture")
-print("  - Random object placement")
-print("  - Camera intrinsics and poses")
+            'image_path': f'scene_{scene_idx:04d}_rgb.png',
+            'location': list(cam_obj.location),
+            'rotation': list(cam_obj.rotation_euler),
+            'focal_length': cam_obj.data.lens,
+            'intrinsics': {'fx': 1500, 'fy': 1500, 'cx': 512, 'cy': 384}
+        }
+        with open(os.path.join(camera_info_dir, f'scene_{scene_idx:04d}_camera_{i}_info.json'), 'w') as f:
+            json.dump(cam_meta, f, indent=2)

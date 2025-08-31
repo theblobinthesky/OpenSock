@@ -30,4 +30,5 @@ cmake-build-debug
 setup.sh
 node_modules
 storage
-data
+autocalibration/data/dataset
+autocalibration/data/scraped-assets

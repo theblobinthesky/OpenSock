@@ -43,22 +43,30 @@ def compute_superpoint_like_descriptors(img: Image.Image, patches=100, patch_siz
     return descs
 
 
-def run(inputs: str, dino_out: str, sp_out: str):
+def run(camera_0_dir: str, camera_1_dir: str, camera_0_npy: str, camera_1_npy: str):
     # Prepare outputs
-    shutil.rmtree(dino_out, ignore_errors=True)
-    shutil.rmtree(sp_out, ignore_errors=True)
-    ensure_dir(dino_out)
-    ensure_dir(sp_out)
+    shutil.rmtree(camera_0_npy, ignore_errors=True)
+    shutil.rmtree(camera_1_npy, ignore_errors=True)
+    ensure_dir(camera_0_npy)
+    ensure_dir(camera_1_npy)
 
+    # Process camera_0
+    process_directory(camera_0_dir, camera_0_npy, "camera_0")
+
+    # Process camera_1
+    process_directory(camera_1_dir, camera_1_npy, "camera_1")
+
+
+def process_directory(input_dir: str, output_dir: str, label: str):
     # Collect image files
     exts = ("*.png", "*.jpg", "*.jpeg")
     image_paths = []
     for e in exts:
-        image_paths.extend(glob.glob(os.path.join(inputs, e)))
+        image_paths.extend(glob.glob(os.path.join(input_dir, e)))
     image_paths.sort()
 
     if not image_paths:
-        print(f"No images found in {inputs}")
+        print(f"No images found in {input_dir}")
         return
 
     for path in image_paths:
@@ -66,7 +74,7 @@ def run(inputs: str, dino_out: str, sp_out: str):
         img = Image.open(path).convert("RGB")
 
         dino_feat = compute_dino_like_feature(img)
-        np.save(os.path.join(dino_out, f"{base}_features.npy"), dino_feat)
+        np.save(os.path.join(output_dir, f"{base}_features.npy"), dino_feat)
 
         sp_desc = compute_superpoint_like_descriptors(img)
         sp_payload = {
@@ -75,17 +83,18 @@ def run(inputs: str, dino_out: str, sp_out: str):
             "keypoints": np.zeros((sp_desc.shape[0], 2), dtype=np.float32),
             "scores": np.ones((sp_desc.shape[0],), dtype=np.float32),
         }
-        np.save(os.path.join(sp_out, f"{base}_superpoint.npy"), sp_payload)
-        print(f"Processed {base}")
+        np.save(os.path.join(output_dir, f"{base}_superpoint.npy"), sp_payload)
+        print(f"Processed {label}: {base}")
 
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description="Lightweight feature extraction (offline)")
-    ap.add_argument("--inputs", default="data/inputs")
-    ap.add_argument("--dino-out", default="data/dino-features")
-    ap.add_argument("--sp-out", default="data/superpoint-features")
+    ap.add_argument("--camera-0", default="data/dataset/camera_0")
+    ap.add_argument("--camera-1", default="data/dataset/camera_1")
+    ap.add_argument("--camera-0-npy", default="data/dataset/camera_0_npy")
+    ap.add_argument("--camera-1-npy", default="data/dataset/camera_1_npy")
     args = ap.parse_args(argv)
-    run(args.inputs, args.dino_out, args.sp_out)
+    run(args.camera_0, args.camera_1, args.camera_0_npy, args.camera_1_npy)
 
 
 if __name__ == "__main__":
