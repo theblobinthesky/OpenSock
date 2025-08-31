@@ -17,38 +17,35 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description="Autocalibration pipeline")
     parser.add_argument("--scrape", action="store_true", help="Run texture scraping")
     parser.add_argument("--render", action="store_true", help="Run Blender rendering")
-    parser.add_argument("--skip-preprocess", action="store_true", help="Skip feature extraction stage")
-    parser.add_argument("--skip-train", action="store_true", help="Skip training stage")
     parser.add_argument("--inputs", default="data/input", help="Input image directory")
     parser.add_argument("--dino-out", default="data/dino-features", help="Output dir for DINO-like features")
     parser.add_argument("--sp-out", default="data/superpoint-features", help="Output dir for SuperPoint-like features")
-    num_scenes = 1000
+
+    num_assets = 100
+    num_scenes = 3000
+
     args = parser.parse_args(argv)
 
-    if args.scrape:
-        print("Running: Scraping textures")
-        from .scraper import run_scraper
-        run_scraper(max_assets=5)
-        print("Completed: Scraping textures")
+    print("Running: Scraping textures")
+    from scraper import run_scraper
+    # run_scraper(max_assets=num_assets)
+    print("Completed: Scraping textures")
 
-    if args.render:
-        run_command(f"blender -b -P src/blender_render.py -- --num-scenes {num_scenes} --output-dir data/dataset --keep-rigidbody --save-blend", "Rendering with Blender")
+    output_dir = "data/dataset"
+    run_command(
+        f"blender -b -P src/blender_render.py -- --num-scenes {num_scenes} --output-dir {output_dir} --keep-rigidbody --save-blend",
+        "Rendering images"
+    )
 
-    if not args.skip_preprocess:
-        run_command(
-            f"python src/preprocess.py",
-            "Preprocessing images",
-        )
-    else:
-        print("Skipping preprocess (per flag)")
+    # run_command(
+    #     f"python src/preprocess.py",
+    #     "Preprocessing images",
+    # )
 
-    # if not args.skip_train:
-    #     run_command(
-    #         f"python src/train.py",
-    #         "Training model",
-    #     )
-    # else:
-    #     print("Skipping train (per flag)")
+    run_command(
+        f"python src/train.py",
+        "Training model",
+    )
 
     print("Pipeline completed successfully!")
 

@@ -293,7 +293,7 @@ def run_rigidbody_drop(floor, objects, frame_end: int, keep: bool):
     else:
         floor.rigid_body.type = 'PASSIVE'
     floor.rigid_body.use_margin = True
-    floor.rigid_body.collision_margin = 0.05
+    floor.rigid_body.collision_margin = 0.002
     floor.rigid_body.collision_shape = 'MESH'
     # Link to RBW collection
     try:
@@ -312,7 +312,7 @@ def run_rigidbody_drop(floor, objects, frame_end: int, keep: bool):
             obj.rigid_body.type = 'ACTIVE'
         obj.rigid_body.mass = 1.0
         obj.rigid_body.use_margin = True
-        obj.rigid_body.collision_margin = 0.01
+        obj.rigid_body.collision_margin = 0.002
         obj.rigid_body.collision_shape = 'CONVEX_HULL'
         # Ensure in RBW collection
         try:
@@ -563,10 +563,14 @@ for scene_idx in range(args.num_scenes):
     # Prepare output dirs
     camera_0_dir = os.path.join(args.output_dir, "camera_0")
     camera_1_dir = os.path.join(args.output_dir, "camera_1")
+    camera_0_position_dir = os.path.join(args.output_dir, "camera_0_position")
+    camera_1_position_dir = os.path.join(args.output_dir, "camera_1_position")
     camera_info_dir = os.path.join(args.output_dir, "camera_info")
     blend_dir = os.path.join(args.output_dir, "blend_files")
     os.makedirs(camera_0_dir, exist_ok=True)
     os.makedirs(camera_1_dir, exist_ok=True)
+    os.makedirs(camera_0_position_dir, exist_ok=True)
+    os.makedirs(camera_1_position_dir, exist_ok=True)
     os.makedirs(camera_info_dir, exist_ok=True)
     os.makedirs(blend_dir, exist_ok=True)
 
@@ -575,19 +579,61 @@ for scene_idx in range(args.num_scenes):
         blend_path = os.path.join(blend_dir, f"scene_{scene_idx:04d}.blend")
         bpy.ops.wm.save_as_mainfile(filepath=blend_path, copy=True)
 
+    # Enable position pass for 3D coordinate export
+    view_layer = bpy.context.view_layer
+    view_layer.use_pass_position = True
+
+    # Set up compositor to explicitly write the Position pass to EXR
+    scene.use_nodes = True
+    tree = scene.node_tree
+    # Reset node tree for deterministic outputs
+    for n in list(tree.nodes):
+        tree.nodes.remove(n)
+    rl = tree.nodes.new(type='CompositorNodeRLayers')
+    rl.location = (0, 0)
+    pos_out = tree.nodes.new(type='CompositorNodeOutputFile')
+    pos_out.label = 'PositionOutput'
+    pos_out.name = 'PositionOutput'
+    pos_out.location = (300, 0)
+    pos_out.format.file_format = 'OPEN_EXR'
+    pos_out.format.color_depth = '32'
+    pos_out.format.exr_codec = 'ZIP'
+    # Connect Position pass
+    tree.links.new(rl.outputs.get('Position'), pos_out.inputs[0])
+
     # Render from each camera and save metadata
     for i, cam_obj in enumerate(blender_cameras):
         cam_dir = camera_0_dir if i == 0 else camera_1_dir
+        position_dir = camera_0_position_dir if i == 0 else camera_1_position_dir
 
         scene.camera = cam_obj
+
+        # Configure compositor output for this camera BEFORE rendering so it triggers on the first render
+        pos_out.base_path = position_dir
+        pos_out.file_slots[0].path = f"scene_{scene_idx:04d}_position_"
+
+        # Single render: saves RGB via render settings and Position via compositor simultaneously
         scene.render.image_settings.file_format = 'PNG'
         scene.render.filepath = os.path.join(cam_dir, f'scene_{scene_idx:04d}_rgb.png')
         bpy.ops.render.render(write_still=True)
+
+        # Rename compositor output to the canonical filename
+        try:
+            import glob as _glob
+            tmp = sorted(_glob.glob(os.path.join(position_dir, f"scene_{scene_idx:04d}_position_*.exr")))
+            if tmp:
+                final_path = os.path.join(position_dir, f'scene_{scene_idx:04d}_position.exr')
+                if os.path.exists(final_path):
+                    os.remove(final_path)
+                os.rename(tmp[-1], final_path)
+        except Exception as e:
+            print(f"Warning: finalize position EXR failed: {e}")
 
         cam_meta = {
             'scene_id': scene_idx,
             'camera_id': i,
             'image_path': f'scene_{scene_idx:04d}_rgb.png',
+            'position_path': f'scene_{scene_idx:04d}_position.exr',
             'location': list(cam_obj.location),
             'rotation': list(cam_obj.rotation_euler),
             'focal_length': cam_obj.data.lens,

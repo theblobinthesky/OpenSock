@@ -1,2 +1,0 @@
-"""Autocalibration package"""
-
