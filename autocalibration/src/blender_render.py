@@ -9,9 +9,10 @@ import shutil
 import sys
 import argparse
 import glob
+import itertools
 
 # Parse command line arguments
-parser = argparse.ArgumentParser(description='Generate autocalibration dataset')
+parser = argparse.ArgumentParser(description='Generate autocalibration dataset with GPU acceleration')
 parser.add_argument('--num-scenes', type=int, default=1, help='Number of scenes to generate')
 parser.add_argument('--output-dir', default=os.path.join(os.path.dirname(__file__), "..", "data", "dataset"), help='Output directory for dataset')
 parser.add_argument('--keep-rigidbody', action='store_true', help='Keep rigid body components after sim for inspection')
@@ -21,10 +22,11 @@ args = parser.parse_args(sys.argv[sys.argv.index('--') + 1:] if '--' in sys.argv
 # Set up basic scene
 scene = bpy.context.scene
 scene.render.engine = 'CYCLES'
-scene.cycles.samples = 32  # Increased for better quality
-scene.cycles.use_denoising = False
-
-# Set render resolution
+scene.cycles.samples = 64
+scene.cycles.use_denoising = True
+scene.cycles.tile_size = 256  # Larger tiles work better on GPU
+bpy.context.preferences.addons['cycles'].preferences.compute_device_type = 'OPTIX'
+bpy.context.scene.cycles.device = 'GPU'
 scene.render.resolution_x = 1024  # Reduced for faster generation
 scene.render.resolution_y = 768
 scene.render.resolution_percentage = 100
@@ -88,15 +90,15 @@ def get_random_floor_texture():
 
 
 def get_random_hdri():
-    hdri_dir = os.path.join(os.path.dirname(__file__), "..", "data", "hdris")
+    hdri_dir = os.path.join(os.path.dirname(__file__), "..", "data", "scraped-assets", "hdris")
     if not os.path.exists(hdri_dir):
         print(f"Warning: {hdri_dir} not found, using default background")
         return None
 
-    # Find all HDRI files (common formats)
+    # Find all HDRI files (common formats) - flat directory structure
     hdri_files = []
     for ext in [".hdr", ".exr", ".png", ".jpg", ".jpeg"]:
-        hdri_files.extend(glob.glob(os.path.join(hdri_dir, f"**/*{ext}"), recursive=True))
+        hdri_files.extend(glob.glob(os.path.join(hdri_dir, f"*{ext}")))
 
     if not hdri_files:
         print("Warning: No HDRI files found, using default background")
@@ -147,8 +149,37 @@ def assign_floor_material(floor, floor_textures):
 real_sizes = {
     "keys": (0.07, 0.07, 0.07),  # 7cm cube
     "pen": (0.14, 0.008, 0.008),  # 14cm long, 8mm diameter
-    "credit-card": (0.0856, 0.05398, 0.00076)  # Standard credit card
+    "credit-card": (0.0856, 0.05398, 0.00076),  # Standard credit card
+    "cup": (0.10, 0.08, 0.08),  # 10cm tall, 8cm diameter (coffee mug)
+    "smartphone": (0.15, 0.075, 0.008),  # 15cm tall, 7.5cm wide, 8mm thick
+    "tape": (0.06, 0.06, 0.025),  # 6cm diameter, 2.5cm thick (tape roll)
+    "microsd": (0.015, 0.011, 0.001),  # 15mm x 11mm x 1mm (microSD card)
+    "macrosd": (0.032, 0.024, 0.0021)  # 32mm x 24mm x 2.1mm (full-size SD card)
 }
+
+
+def scale_object_to_real_size(obj, obj_type: str):
+    target_dims = np.array(real_sizes[obj_type])
+    current_dims = np.array(obj.dimensions)
+
+    scale_options = []
+    for perm in itertools.permutations([0, 1, 2]):
+        perm_dims = [target_dims[perm[i]] for i in range(3)]
+        scale_facs = perm_dims / current_dims
+        uniform_scale = np.median(scale_facs)
+        scale_options.append((uniform_scale, perm, scale_facs))
+
+    scale_factor, _, _ = min(scale_options, key=lambda x: float(np.sum(np.maximum(x[2] / x[0], x[0] / x[2]))))
+    obj.scale = (scale_factor, scale_factor, scale_factor)
+    final_dim = [d * scale_factor for d in current_dims]
+
+    print(f"-- {obj_type=}")
+    print(f"   Target: {target_dims[0]*100:.1f}×{target_dims[1]*100:.1f}×{target_dims[2]*100:.1f}cm")
+    print(f"   Current: {current_dims[0]*100:.1f}×{current_dims[1]*100:.1f}×{current_dims[2]*100:.1f}cm")
+    print(f"   Scale factor: {scale_factor:.3f}")
+    print(f"   Final: {final_dim[0]*100:.1f}×{final_dim[1]*100:.1f}×{final_dim[2]*100:.1f}cm")
+
+    return scale_factor
 
 # Load random objects from data/models directory
 def load_random_objects():
@@ -158,30 +189,36 @@ def load_random_objects():
         print(f"Warning: {models_dir} not found, skipping object loading")
         return []
 
-    # Find all OBJ files in the models directory
-    obj_files = []
+    # Find all OBJ and blend files in the models directory
+    model_files = []
     for root, dirs, files in os.walk(models_dir):
         for file in files:
-            if file.lower().endswith('.obj'):
-                obj_files.append(os.path.join(root, file))
+            if file.lower().endswith(('.obj')):
+                model_files.append(os.path.join(root, file))
 
-    if not obj_files:
-        print(f"Warning: No OBJ files found in {models_dir}")
+    if not model_files:
+        print(f"Warning: No OBJ or blend files found in {models_dir}")
         return []
-    print(f"{obj_files=}")
 
     # Load 2-5 random objects
     num_objects = random.randint(3, 7)
-    selected_files = random.sample(obj_files, min(num_objects, len(obj_files)))
+    selected_files = random.sample(model_files, min(num_objects, len(model_files)))
 
     objects = []
-    for i, obj_file in enumerate(selected_files):
+    for i, model_file in enumerate(selected_files):
         try:
-            # Load the object using Blender's import
-            bpy.ops.wm.obj_import(filepath=obj_file)
-            selected = bpy.context.selected_objects
+            file_ext = os.path.splitext(model_file)[1].lower()
+
+            if file_ext == '.obj':
+                # Load OBJ file
+                bpy.ops.wm.obj_import(filepath=model_file)
+                selected = bpy.context.selected_objects
+            else:
+                print(f"Unsupported file type: {file_ext}")
+                continue
 
             if not selected:
+                print(f"No objects found in {model_file}")
                 continue
 
             # If multiple objects, join them into one
@@ -199,28 +236,28 @@ def load_random_objects():
             bpy.context.view_layer.update()
 
             # Determine object type from path
+            basename = os.path.basename(model_file).lower()
             obj_type = None
-            if "keys" in obj_file.lower():
+            if "keys" in basename:
                 obj_type = "keys"
-            elif "pen" in obj_file.lower():
+            elif "pen" in basename:
                 obj_type = "pen"
-            elif "credit-card" in obj_file.lower():
+            elif "credit-card" in basename:
                 obj_type = "credit-card"
-
-            # Scale to real-life size
-            if obj_type and obj_type in real_sizes:
-                real_dim = real_sizes[obj_type]
-                current_dim = obj.dimensions
-                print(f"Current dimensions for {obj_file}: {current_dim}")
-                # Calculate scale factor (average for balance)
-                scale_factors = [real_dim[i] / current_dim[i] if current_dim[i] > 0 else 1 for i in range(3)]
-                scale_factor = sum(scale_factors) / 3
-                obj.scale = (scale_factor, scale_factor, scale_factor)
-                print(f"Scaled {obj_file} to real size: {scale_factor}, new dimensions: {obj.dimensions}")
+            elif "cup" in basename:
+                obj_type = "cup"
+            elif "smartphone" in basename:
+                obj_type = "smartphone"
+            elif "tape" in basename:
+                obj_type = "tape"
+            elif "microsd" in basename:
+                obj_type = "microsd"
+            elif "macrosd" in basename:
+                obj_type = "macrosd"
             else:
-                # Fallback random scale
-                scale = random.uniform(0.5, 2.0) * 0.05
-                obj.scale = (scale, scale, scale)
+                raise ValueError("Invalid model")
+
+            scale_object_to_real_size(obj, obj_type, )
 
             # Set custom property for category ID
             obj["category_id"] = i + 1
@@ -235,13 +272,13 @@ def load_random_objects():
             # Random position on floor (within the plane bounds)
             x = random.uniform(-1, 1) * 1.0
             y = random.uniform(-1, 1) * 1.0
-            z = 0.5  # Slightly above floor to avoid clipping
+            z = 0.2  # Slightly above floor to avoid clipping
             obj.location = (x, y, z)
 
             objects.append(obj)
-            print(f"Loaded object: {obj_file} at ({x:.1f}, {y:.1f}, {z:.1f})")
+            print(f"Loaded object: {model_file} at ({x:.1f}, {y:.1f}, {z:.1f})")
         except Exception as e:
-            print(f"Error loading {obj_file}: {e}")
+            print(f"Error loading {model_file}: {e}")
 
     return objects
 
@@ -382,7 +419,7 @@ def sample_camera_pair():
     cameras = []
 
     # Base position and orientation (looking down at floor)
-    base_height = 1.8  # Height above floor
+    base_height = 1.4  # Height above floor
     base_look_at = np.array([0, 0, 0])  # Look at center of floor
 
     for _ in range(2):
@@ -454,7 +491,8 @@ for scene_idx in range(args.num_scenes):
     bpy.ops.object.delete(use_global=False)
 
     # Create floor
-    bpy.ops.mesh.primitive_plane_add(size=40, location=(0, 0, 0))
+    room_size = 5
+    bpy.ops.mesh.primitive_cube_add(size=room_size, location=(0, 0, -room_size / 2))
     floor = bpy.context.active_object
     floor.name = "Floor"
 
@@ -494,13 +532,6 @@ for scene_idx in range(args.num_scenes):
 
     # Set the first camera as active
     scene.camera = blender_cameras[0]
-
-    # Lighting: Simple setup for top-down view
-    # Add a sun light for consistent floor lighting
-    bpy.ops.object.light_add(type='SUN', location=(0, 0, 10))
-    sun = bpy.context.active_object
-    sun.data.energy = 5.0
-    sun.data.angle = np.deg2rad(45)  # Soft shadows
 
     # Set up world background with HDRI or fallback to neutral gray
     world = bpy.context.scene.world
@@ -558,25 +589,28 @@ for scene_idx in range(args.num_scenes):
         world.node_tree.links.new(bg_node.outputs['Background'], world_output.inputs['Surface'])
 
     # Run rigid body sim so objects settle before rendering
-    run_rigidbody_drop(floor, random_objects, frame_end=152, keep=args.keep_rigidbody)
+    frame_end = 152
+    run_rigidbody_drop(floor, random_objects, frame_end=frame_end, keep=args.keep_rigidbody)
 
     # Prepare output dirs
     camera_0_dir = os.path.join(args.output_dir, "camera_0")
     camera_1_dir = os.path.join(args.output_dir, "camera_1")
     camera_0_position_dir = os.path.join(args.output_dir, "camera_0_position")
     camera_1_position_dir = os.path.join(args.output_dir, "camera_1_position")
-    camera_info_dir = os.path.join(args.output_dir, "camera_info")
+    camera_0_info_dir = os.path.join(args.output_dir, "camera_0_info")
+    camera_1_info_dir = os.path.join(args.output_dir, "camera_1_info")
     blend_dir = os.path.join(args.output_dir, "blend_files")
     os.makedirs(camera_0_dir, exist_ok=True)
     os.makedirs(camera_1_dir, exist_ok=True)
     os.makedirs(camera_0_position_dir, exist_ok=True)
     os.makedirs(camera_1_position_dir, exist_ok=True)
-    os.makedirs(camera_info_dir, exist_ok=True)
+    os.makedirs(camera_0_info_dir, exist_ok=True)
+    os.makedirs(camera_1_info_dir, exist_ok=True)
     os.makedirs(blend_dir, exist_ok=True)
 
     # Optionally save .blend for inspection (after sim setup)
     if args.save_blend:
-        blend_path = os.path.join(blend_dir, f"scene_{scene_idx:04d}.blend")
+        blend_path = os.path.join(blend_dir, f"{scene_idx:04d}.blend")
         bpy.ops.wm.save_as_mainfile(filepath=blend_path, copy=True)
 
     # Enable position pass for 3D coordinate export
@@ -605,39 +639,29 @@ for scene_idx in range(args.num_scenes):
     for i, cam_obj in enumerate(blender_cameras):
         cam_dir = camera_0_dir if i == 0 else camera_1_dir
         position_dir = camera_0_position_dir if i == 0 else camera_1_position_dir
+        info_dir = camera_0_info_dir if i == 0 else camera_1_info_dir
 
         scene.camera = cam_obj
 
         # Configure compositor output for this camera BEFORE rendering so it triggers on the first render
         pos_out.base_path = position_dir
-        pos_out.file_slots[0].path = f"scene_{scene_idx:04d}_position_"
+        pos_out.file_slots[0].path = f"{scene_idx:04d}"
 
         # Single render: saves RGB via render settings and Position via compositor simultaneously
         scene.render.image_settings.file_format = 'PNG'
-        scene.render.filepath = os.path.join(cam_dir, f'scene_{scene_idx:04d}_rgb.png')
+        scene.render.filepath = os.path.join(cam_dir, f'{scene_idx:04d}.png')
         bpy.ops.render.render(write_still=True)
-
-        # Rename compositor output to the canonical filename
-        try:
-            import glob as _glob
-            tmp = sorted(_glob.glob(os.path.join(position_dir, f"scene_{scene_idx:04d}_position_*.exr")))
-            if tmp:
-                final_path = os.path.join(position_dir, f'scene_{scene_idx:04d}_position.exr')
-                if os.path.exists(final_path):
-                    os.remove(final_path)
-                os.rename(tmp[-1], final_path)
-        except Exception as e:
-            print(f"Warning: finalize position EXR failed: {e}")
+        os.rename(os.path.join(position_dir, f'{scene_idx:04d}{frame_end:04d}.exr'), os.path.join(position_dir, f'{scene_idx:04d}.exr'))
 
         cam_meta = {
             'scene_id': scene_idx,
             'camera_id': i,
-            'image_path': f'scene_{scene_idx:04d}_rgb.png',
-            'position_path': f'scene_{scene_idx:04d}_position.exr',
+            'image_path': f'{scene_idx:04d}.png',
+            'position_path': f'{scene_idx:04d}.exr',
             'location': list(cam_obj.location),
             'rotation': list(cam_obj.rotation_euler),
             'focal_length': cam_obj.data.lens,
-            'intrinsics': {'fx': 1500, 'fy': 1500, 'cx': 512, 'cy': 384}
+            'intrinsics': {'cx': 512, 'cy': 384}
         }
-        with open(os.path.join(camera_info_dir, f'scene_{scene_idx:04d}_camera_{i}_info.json'), 'w') as f:
+        with open(os.path.join(info_dir, f'{scene_idx:04d}.json'), 'w') as f:
             json.dump(cam_meta, f, indent=2)

@@ -299,7 +299,7 @@ def download_ambientcg_asset(asset_id, downloads, size_preference, out_root, hea
     return meta_out
 
 
-def ambientcg_download(out_root, size_preference=DEFAULT_SIZE_PREFERENCE, max_per_asset=None, max_files=None, keywords=FLOOR_KEYWORDS):
+def ambientcg_download(out_root, size_preference=DEFAULT_SIZE_PREFERENCE, max_per_asset=None, keywords=FLOOR_KEYWORDS):
     """Download floor-like PBR textures from AmbientCG using their API v2."""
     headers = {"User-Agent": "OpenSock-FloorGrabber/1.0 (contact: erik.stern@outlook.com)"}
     total_files_downloaded = 0
@@ -316,11 +316,6 @@ def ambientcg_download(out_root, size_preference=DEFAULT_SIZE_PREFERENCE, max_pe
 
             with tqdm(total=len(assets_list), desc="Downloading AmbientCG") as pbar:
                 for asset_id, downloads in assets_list:
-                    # Check if we've reached the file limit before submitting new task
-                    if max_files and total_files_downloaded >= max_files:
-                        tqdm.write(f"[AmbientCG] Reached max files limit ({max_files}), stopping...")
-                        break
-
                     # Submit download task
                     future = executor.submit(download_ambientcg_asset, asset_id, downloads, size_preference, out_root, headers)
                     future_to_asset[future] = asset_id
@@ -333,13 +328,6 @@ def ambientcg_download(out_root, size_preference=DEFAULT_SIZE_PREFERENCE, max_pe
                             result = future.result()
                             if result and isinstance(result, dict) and result.get("files"):
                                 files_count = len(result["files"])
-                                # Check if adding this would exceed the limit
-                                if max_files and total_files_downloaded + files_count > max_files:
-                                    tqdm.write(f"[AmbientCG] Would exceed max files limit ({max_files}), skipping {asset_id}")
-                                    del future_to_asset[future]
-                                    pbar.update(1)
-                                    continue
-
                                 total_files_downloaded += files_count
 
                             if not result:
@@ -357,11 +345,7 @@ def ambientcg_download(out_root, size_preference=DEFAULT_SIZE_PREFERENCE, max_pe
                         result = future.result()
                         if result and isinstance(result, dict) and result.get("files"):
                             files_count = len(result["files"])
-                            # Only count if we haven't exceeded the limit
-                            if not max_files or total_files_downloaded + files_count <= max_files:
-                                total_files_downloaded += files_count
-                            else:
-                                tqdm.write(f"[AmbientCG] Skipping {asset_id} - would exceed max files limit ({max_files})")
+                            total_files_downloaded += files_count
 
                         if not result:
                             tqdm.write(f"[AmbientCG] {asset_id}: skipped (no suitable download found)")
@@ -386,6 +370,30 @@ def fetch_polyhaven_assets(headers, category_filter, max_assets):
     if isinstance(data, dict):
         for aid, meta in data.items():
             cats = [c.lower() for c in (meta.get("categories") or [])]
+            if any(cf in cats for cf in category_filter):
+                items.append((aid, meta))
+    elif isinstance(data, list):
+        for meta in data:
+            aid = meta.get("id") or meta.get("name")
+            cats = [c.lower() for c in (meta.get("categories") or [])]
+            if aid and any(cf in cats for cf in category_filter):
+                items.append((aid, meta))
+
+    return items[:max_assets] if max_assets else items
+
+
+def fetch_polyhaven_hdri_assets(headers, category_filter, max_assets):
+    """Fetch and filter PolyHaven HDRI assets by categories, focusing on indoor lighting."""
+    assets_url = "https://api.polyhaven.com/assets?t=hdris"
+    res = requests.get(assets_url, timeout=60, headers=headers)
+    res.raise_for_status()
+    data = res.json()
+
+    items = []
+    if isinstance(data, dict):
+        for aid, meta in data.items():
+            cats = [c.lower() for c in (meta.get("categories") or [])]
+            # Filter for indoor lighting categories
             if any(cf in cats for cf in category_filter):
                 items.append((aid, meta))
     elif isinstance(data, list):
@@ -474,8 +482,59 @@ def download_polyhaven_asset(aid, size, out_root, headers):
         return 0
 
 
-def polyhaven_download(out_root, size="8k", category_filter=DEFAULT_POLYHAVEN_CATEGORIES, max_assets=None,
-                      max_files=None, user_agent=DEFAULT_USER_AGENT):
+def download_polyhaven_hdri_asset(aid, size, out_root, headers, hdri_counter):
+    """Download HDRI files for a single PolyHaven HDRI asset."""
+    try:
+        files_url = f"https://api.polyhaven.com/files/{aid}"
+        fjs = requests.get(files_url, timeout=60, headers=headers).json()
+
+        size_key = size.lower()
+
+        # Create flat HDRIs directory
+        hdri_dir = os.path.join(out_root, "hdris")
+        ensure_dir(hdri_dir)
+
+        # Download main HDRI file
+        if "hdri" in fjs and size_key in fjs["hdri"]:
+            hdri_data = fjs["hdri"][size_key]
+
+            # Choose format: HDR if available, otherwise EXR
+            if isinstance(hdri_data, dict):
+                if "hdr" in hdri_data:
+                    format_data = hdri_data["hdr"]
+                    ext = ".hdr"
+                elif "exr" in hdri_data:
+                    format_data = hdri_data["exr"]
+                    ext = ".exr"
+                else:
+                    tqdm.write(f"[PolyHaven-HDRI] {aid}: no suitable HDRI format found")
+                    return 0
+
+                url = format_data["url"]
+            else:
+                # Fallback for direct URL
+                url = hdri_data
+                ext = os.path.splitext(url.split("?")[0])[1] or ".hdr"
+
+            # Use sequential naming
+            out_path = os.path.join(hdri_dir, f"{hdri_counter:04d}{ext}")
+            status = download(url, out_path, headers=headers)
+            if status in ["ok", "skip"]:
+                tqdm.write(f"[PolyHaven-HDRI] {aid} -> {hdri_counter:04d}{ext} @{size_key}: {status}")
+                return 1  # Return 1 for successful download
+            else:
+                tqdm.write(f"[PolyHaven-HDRI] {aid}: failed to download HDRI")
+                return 0
+        else:
+            tqdm.write(f"[PolyHaven-HDRI] {aid}: HDRI file not available at {size_key}")
+            return 0
+
+    except Exception as e:
+        tqdm.write(f"[PolyHaven-HDRI] Error downloading {aid}: {e}")
+        return 0
+
+
+def polyhaven_download(out_root, size="8k", category_filter=DEFAULT_POLYHAVEN_CATEGORIES, max_assets=None, user_agent=DEFAULT_USER_AGENT):
     """Download floor-like PBR textures from PolyHaven."""
     headers = {"User-Agent": user_agent}
     total_files_downloaded = 0
@@ -491,11 +550,6 @@ def polyhaven_download(out_root, size="8k", category_filter=DEFAULT_POLYHAVEN_CA
 
         with tqdm(total=len(items_list), desc="Downloading PolyHaven") as pbar:
             for aid, meta in items_list:
-                # Check if we've reached the file limit before submitting new task
-                if max_files and total_files_downloaded >= max_files:
-                    tqdm.write(f"[PolyHaven] Reached max files limit ({max_files}), stopping...")
-                    break
-
                 # Submit download task
                 future = executor.submit(download_polyhaven_asset, aid, size, out_root, headers)
                 future_to_asset[future] = aid
@@ -506,13 +560,6 @@ def polyhaven_download(out_root, size="8k", category_filter=DEFAULT_POLYHAVEN_CA
                     aid = future_to_asset[future]
                     try:
                         files_count = future.result()
-                        # Check if adding this would exceed the limit
-                        if max_files and total_files_downloaded + files_count > max_files:
-                            tqdm.write(f"[PolyHaven] Would exceed max files limit ({max_files}), skipping {aid}")
-                            del future_to_asset[future]
-                            pbar.update(1)
-                            continue
-
                         total_files_downloaded += files_count
                     except Exception as e:
                         tqdm.write(f"Error downloading PolyHaven asset {aid}: {e}")
@@ -525,11 +572,7 @@ def polyhaven_download(out_root, size="8k", category_filter=DEFAULT_POLYHAVEN_CA
                 aid = future_to_asset[future]
                 try:
                     files_count = future.result()
-                    # Only count if we haven't exceeded the limit
-                    if not max_files or total_files_downloaded + files_count <= max_files:
-                        total_files_downloaded += files_count
-                    else:
-                        tqdm.write(f"[PolyHaven] Skipping {aid} - would exceed max files limit ({max_files})")
+                    total_files_downloaded += files_count
                 except Exception as e:
                     tqdm.write(f"Error downloading PolyHaven asset {aid}: {e}")
                 pbar.update(1)
@@ -537,8 +580,61 @@ def polyhaven_download(out_root, size="8k", category_filter=DEFAULT_POLYHAVEN_CA
     return total_files_downloaded
 
 
-def run_scraper(out="data/scraped-assets", provider="both", max_assets=None, max_files=None, size="2K"):
-    """Run the texture scraper for specified providers."""
+def polyhaven_hdri_download(out_root, size="8k", category_filter=("indoor", "artificial light"), max_assets=None, user_agent=DEFAULT_USER_AGENT):
+    """Download indoor lighting HDRI files from PolyHaven."""
+    headers = {"User-Agent": user_agent}
+    total_files_downloaded = 0
+    hdri_counter = 0  # Sequential counter for naming
+
+    items = fetch_polyhaven_hdri_assets(headers, category_filter, max_assets)
+    tqdm.write(f"PolyHaven-HDRIs: {len(items)} indoor lighting HDRIs found")
+
+    # Parallel download with progress bar
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        # Submit download tasks one by one, checking file limit
+        future_to_asset = {}
+        items_list = list(items)
+
+        with tqdm(total=len(items_list), desc="Downloading PolyHaven HDRIs") as pbar:
+            for aid, meta in items_list:
+                # Submit download task with current counter
+                future = executor.submit(download_polyhaven_hdri_asset, aid, size, out_root, headers, hdri_counter)
+                future_to_asset[future] = (aid, hdri_counter)
+                hdri_counter += 1  # Increment counter for next asset
+
+                # Process completed downloads and check limits
+                completed_futures = [f for f in future_to_asset.keys() if f.done()]
+                for future in completed_futures:
+                    aid, counter = future_to_asset[future]
+                    try:
+                        success = future.result()
+                        if success:
+                            total_files_downloaded += 1
+                        else:
+                            tqdm.write(f"[PolyHaven-HDRI] Failed to download {aid}")
+                    except Exception as e:
+                        tqdm.write(f"Error downloading PolyHaven HDRI asset {aid}: {e}")
+
+                    del future_to_asset[future]
+                    pbar.update(1)
+
+            # Process any remaining completed futures
+            for future in as_completed(future_to_asset.keys()):
+                aid, counter = future_to_asset[future]
+                try:
+                    success = future.result()
+                    if success:
+                        total_files_downloaded += 1
+                    else:
+                        tqdm.write(f"[PolyHaven-HDRI] Failed to download {aid}")
+                except Exception as e:
+                    tqdm.write(f"Error downloading PolyHaven HDRI asset {aid}: {e}")
+                pbar.update(1)
+
+    return total_files_downloaded
+
+
+def run_scraper(out="data/scraped-assets", provider="both", max_materials: int=1, max_hdris: int=1, size="1K"):
     shutil.rmtree(out, ignore_errors=True)
 
     # Get resolution configuration
@@ -558,15 +654,10 @@ def run_scraper(out="data/scraped-assets", provider="both", max_assets=None, max
         files_downloaded = ambientcg_download(
             out,
             size_preference=ambientcg_sizes,
-            max_per_asset=max_assets,
-            max_files=max_files - total_files_downloaded if max_files else None,
+            max_per_asset=max_materials,
             keywords=FLOOR_KEYWORDS
         )
         total_files_downloaded += files_downloaded or 0
-
-        if max_files and total_files_downloaded >= max_files:
-            tqdm.write(f"Reached max files limit ({max_files}), stopping...")
-            return
 
     if provider in ("polyhaven", "both"):
         tqdm.write(f"Starting PolyHaven download (size: {size})...")
@@ -574,27 +665,36 @@ def run_scraper(out="data/scraped-assets", provider="both", max_assets=None, max
             out,
             size=polyhaven_size,
             category_filter=DEFAULT_POLYHAVEN_CATEGORIES,
-            max_assets=max_assets,
-            max_files=max_files - total_files_downloaded if max_files else None,
+            max_assets=max_materials,
             user_agent=DEFAULT_USER_AGENT
         )
         total_files_downloaded += files_downloaded or 0
 
-    if max_files:
-        tqdm.write(f"Total files downloaded: {total_files_downloaded}")
+    if provider in ("hdris", "both"):
+        tqdm.write(f"Starting PolyHaven HDRI download (size: {size})...")
+        files_downloaded = polyhaven_hdri_download(
+            out,
+            size=polyhaven_size,
+            category_filter=("indoor", "artificial light"),
+            max_assets=max_hdris,
+            user_agent=DEFAULT_USER_AGENT
+        )
+        total_files_downloaded += files_downloaded or 0
+
 
 def main():
     """Main entry point for the texture scraper."""
     parser = argparse.ArgumentParser(
-        description="Download floor-like PBR textures from AmbientCG and PolyHaven.",
+        description="Download floor-like PBR textures and indoor lighting HDRIs from AmbientCG and PolyHaven.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
-Examples:
-  python -m src.scraper                           # Download from both providers (2K default)
-  python -m src.scraper --size 1K --max-files 50  # 1K textures, limit to 50 total files
-  python -m src.scraper --provider ambientcg --max 10  # Only AmbientCG, limit 10 assets
-  python -m src.scraper --size 4K --out my_textures/    # 4K textures to custom directory
-        """
+ Examples:
+   python -m src.scraper                           # Download materials from both providers (2K default)
+   python -m src.scraper --size 1K --max-files 50  # 1K textures, limit to 50 total files
+   python -m src.scraper --provider ambientcg --max 10  # Only AmbientCG materials, limit 10 assets
+   python -m src.scraper --provider hdris --max 20      # Download 20 indoor lighting HDRIs
+   python -m src.scraper --size 4K --out my_assets/      # 4K assets to custom directory
+         """
     )
 
     parser.add_argument(
@@ -604,9 +704,9 @@ Examples:
     )
     parser.add_argument(
         "--provider", "-p",
-        choices=["ambientcg", "polyhaven", "both"],
+        choices=["ambientcg", "polyhaven", "hdris", "both"],
         default="both",
-        help="Texture provider(s) to use"
+        help="Provider(s) to use: ambientcg (materials), polyhaven (materials), hdris (HDRIs), both (materials from both providers)"
     )
     parser.add_argument(
         "--max", "-m",

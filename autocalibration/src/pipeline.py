@@ -21,14 +21,15 @@ def main(argv=None):
     parser.add_argument("--dino-out", default="data/dino-features", help="Output dir for DINO-like features")
     parser.add_argument("--sp-out", default="data/superpoint-features", help="Output dir for SuperPoint-like features")
 
-    num_assets = 100
-    num_scenes = 3000
+    max_materials = 300
+    max_hdris = 100
+    num_scenes = 20000
 
     args = parser.parse_args(argv)
 
     print("Running: Scraping textures")
     from scraper import run_scraper
-    # run_scraper(max_assets=num_assets)
+    run_scraper(max_materials=max_materials, max_hdris=max_hdris)
     print("Completed: Scraping textures")
 
     output_dir = "data/dataset"
@@ -36,16 +37,17 @@ def main(argv=None):
         f"blender -b -P src/blender_render.py -- --num-scenes {num_scenes} --output-dir {output_dir} --keep-rigidbody --save-blend",
         "Rendering images"
     )
-
-    # run_command(
-    #     f"python src/preprocess.py",
-    #     "Preprocessing images",
-    # )
+    exit(0)
 
     run_command(
-        f"python src/train.py",
-        "Training model",
+        f"python src/preprocess.py",
+        "Preprocessing images",
     )
+
+    # run_command(
+    #     f"python src/train.py",
+    #     "Training model",
+    # )
 
     print("Pipeline completed successfully!")
 
