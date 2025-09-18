@@ -17,6 +17,8 @@ parser.add_argument('--num-scenes', type=int, default=1, help='Number of scenes 
 parser.add_argument('--output-dir', default=os.path.join(os.path.dirname(__file__), "..", "data", "dataset"), help='Output directory for dataset')
 parser.add_argument('--keep-rigidbody', action='store_true', help='Keep rigid body components after sim for inspection')
 parser.add_argument('--save-blend', action='store_true', help='Save a .blend file per scene for inspection')
+parser.add_argument('--asset-seed', type=int, default=0,
+                    help='Seed for epochal reshuffles of textures/HDRIs')
 args = parser.parse_args(sys.argv[sys.argv.index('--') + 1:] if '--' in sys.argv else [])
 
 # Set up basic scene
@@ -34,33 +36,24 @@ scene.render.resolution_percentage = 100
 # Create output directory
 os.makedirs(args.output_dir, exist_ok=True)
 
-# Function to get random floor texture from scraped dataset
-def get_random_floor_texture():
-    """Get a random floor texture from the scraped dataset."""
+def _collect_floor_texture_sets():
+    """Collect all candidate floor texture sets with a stable, deterministic order."""
     scraped_dir = os.path.join(os.path.dirname(__file__), "..", "data", "scraped-assets")
     if not os.path.exists(scraped_dir):
-        print(f"Warning: {scraped_dir} not found, using default textures")
-        return {
-            "basecolor": "textures/floor/albedo.jpg",
-            "roughness": "textures/floor/roughness.jpg",
-            "normal": "textures/floor/normal.jpg",
-            "displacement": "textures/floor/height.exr",
-            "ao": "textures/floor/ao.jpg"
-        }
+        return []
 
-    # Find all available textures
     texture_sets = []
     for provider_dir in ["AmbientCG", "PolyHaven"]:
         provider_path = os.path.join(scraped_dir, provider_dir)
         if os.path.exists(provider_path):
-            for asset_dir in os.listdir(provider_path):
+            # Sort directories to ensure stable order across platforms
+            for asset_dir in sorted(os.listdir(provider_path)):
                 asset_path = os.path.join(provider_path, asset_dir)
                 if os.path.isdir(asset_path):
                     # Find the size directory (1K, 2K, etc.)
-                    for size_dir in os.listdir(asset_path):
+                    for size_dir in sorted(os.listdir(asset_path)):
                         size_path = os.path.join(asset_path, size_dir)
                         if os.path.isdir(size_path):
-                            # Check if canonical textures exist
                             basecolor = os.path.join(size_path, "basecolor.jpg")
                             roughness = os.path.join(size_path, "roughness.jpg")
                             normal = os.path.join(size_path, "normal.jpg")
@@ -76,35 +69,90 @@ def get_random_floor_texture():
                                     "ao": ao if os.path.exists(ao) else None
                                 })
 
-    if not texture_sets:
-        print("Warning: No texture sets found, using defaults")
-        return {
-            "basecolor": "textures/floor/albedo.jpg",
-            "roughness": "textures/floor/roughness.jpg",
-            "normal": "textures/floor/normal.jpg",
-            "displacement": "textures/floor/height.exr",
-            "ao": "textures/floor/ao.jpg"
-        }
-
-    return random.choice(texture_sets)
+    # Sort by basecolor path for absolute determinism
+    texture_sets.sort(key=lambda s: s.get("basecolor") or "")
+    return texture_sets
 
 
-def get_random_hdri():
+def _collect_hdri_files():
+    """Collect all HDRI file paths with a stable, deterministic order."""
     hdri_dir = os.path.join(os.path.dirname(__file__), "..", "data", "scraped-assets", "hdris")
     if not os.path.exists(hdri_dir):
-        print(f"Warning: {hdri_dir} not found, using default background")
-        return None
+        return []
 
-    # Find all HDRI files (common formats) - flat directory structure
     hdri_files = []
-    for ext in [".hdr", ".exr", ".png", ".jpg", ".jpeg"]:
+    for ext in [".exr", ".hdr", ".png", ".jpg", ".jpeg"]:
         hdri_files.extend(glob.glob(os.path.join(hdri_dir, f"*{ext}")))
+    # Ensure stable ordering
+    hdri_files = sorted(set(hdri_files))
+    return hdri_files
 
-    if not hdri_files:
+
+# Precompute available assets and build selectors
+_FALLBACK_TEXTURE = {
+    "basecolor": "textures/floor/albedo.jpg",
+    "roughness": "textures/floor/roughness.jpg",
+    "normal": "textures/floor/normal.jpg",
+    "displacement": "textures/floor/height.exr",
+    "ao": "textures/floor/ao.jpg"
+}
+
+_FLOOR_TEXTURE_SETS = _collect_floor_texture_sets()
+_HDRI_FILES = _collect_hdri_files()
+
+# Epochal cycling state (reshuffle orders at each wrap)
+_asset_rng = random.Random(args.asset_seed)
+
+_floor_order = list(range(len(_FLOOR_TEXTURE_SETS)))
+_floor_idx = 0
+_floor_passes = 0  # count completed passes
+
+_hdri_order = list(range(len(_HDRI_FILES)))
+_hdri_idx = 0
+_hdri_passes = 0
+
+
+def get_next_floor_texture():
+    """Select the next floor texture set with epochal reshuffle."""
+    if not _FLOOR_TEXTURE_SETS:
+        # No scraped assets; use bundled fallback
+        print("Warning: scraped-assets not found or empty, using default floor textures")
+        return dict(_FALLBACK_TEXTURE)
+
+    # Cycle with epochal reshuffle
+    global _floor_idx, _floor_passes, _floor_order
+    n = len(_FLOOR_TEXTURE_SETS)
+    if n == 0:
+        return dict(_FALLBACK_TEXTURE)
+    sel = _FLOOR_TEXTURE_SETS[_floor_order[_floor_idx]]
+    _floor_idx += 1
+    if _floor_idx >= n:
+        _floor_idx = 0
+        _floor_passes += 1
+        # After the first full pass, reshuffle the order to avoid long-term sync
+        if _floor_passes >= 1:
+            _asset_rng.shuffle(_floor_order)
+    return sel
+
+
+def get_next_hdri():
+    """Select the next HDRI path with epochal reshuffle."""
+    if not _HDRI_FILES:
         print("Warning: No HDRI files found, using default background")
         return None
-
-    return random.choice(hdri_files)
+    # Cycle with epochal reshuffle
+    global _hdri_idx, _hdri_passes, _hdri_order
+    n = len(_HDRI_FILES)
+    if n == 0:
+        return None
+    sel = _HDRI_FILES[_hdri_order[_hdri_idx]]
+    _hdri_idx += 1
+    if _hdri_idx >= n:
+        _hdri_idx = 0
+        _hdri_passes += 1
+        if _hdri_passes >= 1:
+            _asset_rng.shuffle(_hdri_order)
+    return sel
 
 def assign_floor_material(floor, floor_textures):
     """Create and assign a repeating textured material to the given floor object."""
@@ -496,8 +544,8 @@ for scene_idx in range(args.num_scenes):
     floor = bpy.context.active_object
     floor.name = "Floor"
 
-    # Get random floor texture and assign material
-    floor_textures = get_random_floor_texture()
+    # Get floor texture (epochal cycle with reshuffle) and assign material
+    floor_textures = get_next_floor_texture()
     assign_floor_material(floor, floor_textures)
 
     # Load random objects
@@ -542,8 +590,8 @@ for scene_idx in range(args.num_scenes):
         if node.type != 'OUTPUT_WORLD':
             world.node_tree.nodes.remove(node)
 
-    # Get random HDRI
-    hdri_path = get_random_hdri()
+    # Get HDRI (epochal cycle with reshuffle)
+    hdri_path = get_next_hdri()
 
     if hdri_path:
         # Set up HDRI background
@@ -632,6 +680,11 @@ for scene_idx in range(args.num_scenes):
     pos_out.format.file_format = 'OPEN_EXR'
     pos_out.format.color_depth = '32'
     pos_out.format.exr_codec = 'ZIP'
+    # Ensure the file slot respects the node's format settings
+    try:
+        pos_out.file_slots[0].use_node_format = True
+    except Exception:
+        pass
     # Connect Position pass
     tree.links.new(rl.outputs.get('Position'), pos_out.inputs[0])
 
@@ -645,13 +698,40 @@ for scene_idx in range(args.num_scenes):
 
         # Configure compositor output for this camera BEFORE rendering so it triggers on the first render
         pos_out.base_path = position_dir
+        # Use scene index as prefix; Blender appends frame number implicitly
         pos_out.file_slots[0].path = f"{scene_idx:04d}"
+
+        # Clean up any stale outputs from previous runs for this scene index
+        try:
+            for stale in glob.glob(os.path.join(position_dir, f"{scene_idx:04d}*.exr")):
+                try:
+                    os.remove(stale)
+                except Exception:
+                    pass
+        except Exception:
+            pass
 
         # Single render: saves RGB via render settings and Position via compositor simultaneously
         scene.render.image_settings.file_format = 'PNG'
         scene.render.filepath = os.path.join(cam_dir, f'{scene_idx:04d}.png')
         bpy.ops.render.render(write_still=True)
-        os.rename(os.path.join(position_dir, f'{scene_idx:04d}{frame_end:04d}.exr'), os.path.join(position_dir, f'{scene_idx:04d}.exr'))
+
+        # Robustly find the compositor-written EXR and rename to a stable name
+        try:
+            exr_candidates = sorted(glob.glob(os.path.join(position_dir, f"{scene_idx:04d}*.exr")))
+            if not exr_candidates:
+                raise FileNotFoundError(f"No EXR written to {position_dir} for scene {scene_idx}")
+            latest = exr_candidates[-1]
+            target = os.path.join(position_dir, f'{scene_idx:04d}.exr')
+            # If a file already exists at target, replace it
+            if os.path.exists(target):
+                try:
+                    os.remove(target)
+                except Exception:
+                    pass
+            os.rename(latest, target)
+        except Exception as e:
+            print(f"Warning: Could not finalize Position EXR for camera {i} scene {scene_idx}: {e}")
 
         cam_meta = {
             'scene_id': scene_idx,

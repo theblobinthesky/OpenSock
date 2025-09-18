@@ -145,7 +145,7 @@ def calculate_optimal_lookup_table(hists: list, const_band_size: int):
         error_on_this_height = sum_error - max_error
         total_sum = error_on_this_height + sum_over_rest
 
-        if (a < total_sum or j <= i) and y > 0:
+        if (a < total_sum or j <= i) and i > 0:
             # In case j <= i you can only go diagonally: Enforce this case.
 
             # Notice how a unique i->j mapping does not introduce any error.

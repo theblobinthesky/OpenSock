@@ -23,18 +23,18 @@ def main(argv=None):
 
     max_materials = 300
     max_hdris = 100
-    num_scenes = 20000
+    num_scenes = 5000
 
     args = parser.parse_args(argv)
 
     print("Running: Scraping textures")
     from scraper import run_scraper
-    run_scraper(max_materials=max_materials, max_hdris=max_hdris)
+    # run_scraper(max_materials=max_materials, max_hdris=max_hdris)
     print("Completed: Scraping textures")
 
     output_dir = "data/dataset"
     run_command(
-        f"blender -b -P src/blender_render.py -- --num-scenes {num_scenes} --output-dir {output_dir} --keep-rigidbody --save-blend",
+        f"blender -b -P src/blender_render.py -- --num-scenes {num_scenes} --output-dir {output_dir} --keep-rigidbody", # --save-blend",
         "Rendering images"
     )
     exit(0)
