@@ -4,7 +4,7 @@
 #include <vector>
 #include <cstring>
 
-ItemSettings NpyDataDecoder::probeFromMemory(uint8_t *inputData, const size_t inputSize) {
+ProbeResult NpyDataDecoder::probeFromMemory(uint8_t *inputData, const size_t inputSize) {
     if (inputSize < 12) throw std::runtime_error("NPY too small");
 
     size_t word_size = 0;
@@ -26,14 +26,15 @@ ItemSettings NpyDataDecoder::probeFromMemory(uint8_t *inputData, const size_t in
         shape.push_back(static_cast<uint32_t>(d));
     }
 
-    return ItemSettings{
+    return ProbeResult{
         .format = ItemFormat::FLOAT,
-        .numBytes = 4,
+        .bytesPerItem = 4,
         .shape = std::move(shape),
+        .extension = "npy"
     };
 }
 
-uint8_t *NpyDataDecoder::loadFromMemory(const ItemSettings &settings,
+uint8_t *NpyDataDecoder::loadFromMemory(const ProbeResult &settings,
                                         uint8_t *inputData, const size_t inputSize,
                                         BumpAllocator<uint8_t *> &output) {
     if (inputSize < 12) throw std::runtime_error("NPY too small");

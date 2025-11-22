@@ -232,8 +232,8 @@ if __name__ == "__main__":
     dm_per_ch = []
     avg_perc_change = 0.0
 
+    hists = [[extract_channel_hist(image, bbox, channel) for bbox in bboxes] for channel in range(3)]
     for channel in range(3):
-        hists = [[extract_channel_hist(image, bbox, channel) for bbox in bboxes] for channel in range(3)]
         dynamic_matrix, lut = calculate_optimal_lookup_table(hists[channel], const_band_size=const_band_size)
 
         mapped_image = np.zeros((image.shape[0], image.shape[1]), dtype=np.uint8)

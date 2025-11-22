@@ -9,15 +9,19 @@ public:
 
     std::vector<ItemKey> getItemKeys() override;
 
-    std::vector<Sample> getSamples() override;
+    std::vector<std::vector<std::string>> getEntries() override;
 
     void loadFile(uint8_t *&data, size_t &size) override;
+
+    bool preInitDataset(bool forceInvalidation) override;
+
+    void initDataset() override;
 
 private:
     std::string rootDirectory;
     std::vector<ItemKey> itemKeys;
-    std::vector<Sample> samples;
+    std::vector<std::vector<std::string> > entries;
+    bool initRequired;
 };
-
 
 #endif

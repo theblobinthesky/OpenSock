@@ -1,8 +1,9 @@
 #include "FlatDataSource.h"
+#include <random>
 
 namespace fs = std::filesystem;
 
-/*static std::vector<std::string> listAllDirectories(const std::string &directoryPath) {
+static std::vector<std::string> listAllDirectories(const std::string &directoryPath) {
     std::vector<std::string> paths;
 
     for (const fs::directory_entry &entry: fs::directory_iterator(directoryPath)) {
@@ -12,26 +13,162 @@ namespace fs = std::filesystem;
     }
 
     return paths;
-}*/
+}
 
-FlatDataSource::FlatDataSource(std::string _rootDirectory)
-    : rootDirectory(std::move(_rootDirectory)) {
-    for (const std::string &key: keys) {
-        itemKeys.push_back({
-            .keyName = key,
-            .spatialHint = SpatialHint::POINTS
-        });
+static std::vector<std::string> listAllFiles(const std::string &directoryPath) {
+    std::vector<std::string> paths;
+
+    for (const std::filesystem::directory_entry &entry:
+         std::filesystem::recursive_directory_iterator(
+             directoryPath)) {
+        paths.push_back(entry.path());
     }
 
-    std::vector<Sample> samples;
+    return paths;
+}
+
+static std::vector<ProbeResult> probeAllSubDirs(const std::string &rootDirectory,
+                                                  const std::vector<std::string> &subDirs) {
+    std::vector<ProbeResult> probeResults;
+
+    for (const std::string &subDir: subDirs) {
+        bool foundFile = false;
+        for (const fs::directory_entry &entry: fs::directory_iterator(std::format("{}/{}", rootDirectory, subDir))) {
+            if (entry.is_regular_file()) {
+                foundFile = true;
+                const std::string ext = entry.path().extension().string();
+
+                break;
+            }
+        }
+
+        if (!foundFile) {
+            throw std::invalid_argument(std::format("Subdirectory {} is empty.", subDir));
+        }
+    }
+
+    return probeResults;
+}
+
+std::string replaceAll(std::string str, const std::string &from,
+                       const std::string &to) {
+    size_t pos = 0;
+    while ((pos = str.find(from, pos)) != std::string::npos) {
+        str = str.replace(pos, from.size(), to);
+    }
+    return str;
+}
+
+FlatDataSource::FlatDataSource(std::string _rootDirectory)
+    : rootDirectory(std::move(_rootDirectory)), initRequired(false) {
+    if (rootDirectory.empty()) {
+        throw std::runtime_error("Cannot instantiate a dataset with an empty root directory name.");
+    }
+
+    if (rootDirectory.ends_with('/')) {
+        rootDirectory.erase(rootDirectory.end() - 1);
+    }
+
+    initRequired = !fs::exists(rootDirectory);
 }
 
 std::vector<ItemKey> FlatDataSource::getItemKeys() {
     return itemKeys;
 }
 
-std::vector<Sample> FlatDataSource::getSamples() {
+std::vector<std::vector<std::string>> FlatDataSource::getEntries() {
+    return entries;
 }
 
 void FlatDataSource::loadFile(uint8_t *&data, size_t &size) {
+}
+
+bool FlatDataSource::preInitDataset(const bool forceInvalidation) {
+    const bool ret = forceInvalidation || initRequired;
+    if (ret) {
+        fs::remove_all(rootDirectory);
+    }
+
+    return ret;
+}
+
+void FlatDataSource::initDataset() {
+    const auto subDirs = listAllDirectories(rootDirectory);
+
+    if (subDirs.empty()) {
+        throw std::runtime_error(
+            "Cannot instantiate a dataset with not subdirectories.");
+    }
+
+    const auto files = listAllFiles(
+        std::format("{}/{}", rootDirectory, subDirs[0]) // TODO: Convention is no / in concat
+    );
+    const auto probeResults = probeAllSubDirs(rootDirectory, subDirs);
+
+    for (const auto &file: files) {
+        auto &e0 = probeResults[0].extension;
+        auto &s0 = subDirs[0];
+
+        std::vector paths = {file};
+        bool erroneousEntry = false;
+
+        if (!file.ends_with(e0)) {
+            LOG_DEBUG(
+                "Got erroneous dataset with anchor path '{}' that does not end on '{}'!",
+                file.c_str(), e0.c_str());
+            continue;
+        }
+
+        for (size_t s = 1; s < subDirs.size(); s++) {
+            auto &eS = probeResults[s].extension;
+            auto &sS = subDirs[s];
+
+            std::string newFile(file);
+            newFile = replaceAll(newFile, s0, sS);
+            newFile = replaceAll(newFile, e0, eS);
+
+            if (!fs::exists(newFile)) {
+                LOG_DEBUG("Could not find '{}'", newFile.c_str());
+                erroneousEntry = true;
+                break;
+            }
+
+            paths.push_back(std::move(newFile));
+        }
+
+        if (erroneousEntry) {
+            LOG_DEBUG("Got erroneous dataset with anchor path '{}'!", file.c_str());
+        } else {
+            entries.push_back(std::move(paths));
+        }
+    }
+
+    if (entries.empty()) {
+        throw std::runtime_error("Cannot instantiate an empty dataset.");
+    }
+
+    for (auto &item: entries) {
+        for (auto &subPath: item) {
+            if (subPath.size() >= rootDirectory.size()) {
+                if (std::memcmp(subPath.data(), rootDirectory.data(), rootDirectory.size()) == 0) {
+                    subPath.erase(0, rootDirectory.size());
+                }
+
+                if (const std::string path = std::format("{}{}", rootDirectory, subPath); !fs::exists(path)) {
+                    throw std::runtime_error(std::format("Path does not exist: '{}'.", path));
+                }
+            }
+        }
+    }
+
+    auto rnd = std::default_random_engine{0};
+    std::ranges::shuffle(entries, rnd);
+
+    for (size_t i = 0; i < subDirs.size(); i++) {
+        itemKeys.push_back({
+            .keyName = subDirs[i],
+            .spatialHint = SpatialHint::XXX,
+            .probeResult = probeResults[i]
+        });
+    }
 }

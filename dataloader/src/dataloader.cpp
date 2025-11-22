@@ -1,6 +1,5 @@
 #include "dataloader.h"
 #include "utils.h"
-#include "datadecoder.h"
 #include <filesystem>
 #include <dlpack/dlpack.h>
 
@@ -11,9 +10,10 @@ std::mutex DataLoader::concurrencyMutex;
 
 size_t getOutputBatchMemorySize(const BatchedDataset &batchedDataset, const size_t batchSize) {
     size_t outputBatchMemorySize = 0;
-    for (const Head &head: batchedDataset.getDataset().getHeads()) {
-        uint64_t itemMemorySize = head.getBytesPerItem();
-        for (const auto dim: head.getShape()) {
+    for (const ItemKey &itemKey: batchedDataset.getDataset().getDataSource()->getItemKeys()) {
+        const ProbeResult &probe = itemKey.probeResult;
+        uint64_t itemMemorySize = probe.bytesPerItem;
+        for (const auto dim: probe.shape) {
             itemMemorySize *= dim;
         }
 
@@ -85,14 +85,15 @@ py::dict DataLoader::getNextBatch() {
               datasetStartingOffset, ResourcePool::get().getGenIdx());
 
     py::dict pyBatch;
-    const auto &heads = batchedDataset.getDataset().getHeads();
-    for (size_t i = 0; i < heads.size(); i++) {
-        const Head &head = heads[i];
+    const auto &itemKeys = batchedDataset.getDataset().getDataSource()->getItemKeys();
+    for (size_t i = 0; i < itemKeys.size(); i++) {
+        const ItemKey &itemKey = itemKeys[i];
+        const ProbeResult &probe = itemKey.probeResult;
         uint8_t *gpuAllocation = gpuAllocations[i];
         const Fence fence = fences[i];
         ResourcePool::get().getAllocator()->handOff(gpuAllocation);
 
-        const std::vector<uint32_t> &shape = head.getShape();
+        const std::vector<uint32_t> &shape = probe.shape;
         const int ndim = static_cast<int>(shape.size()) + 1;
 
         auto *const shapeArr = new int64_t[ndim]{};
@@ -102,7 +103,7 @@ py::dict DataLoader::getNextBatch() {
         }
 
         uint8_t itemCode;
-        switch (head.getItemFormat()) {
+        switch (probe.format) {
             case ItemFormat::FLOAT: itemCode = kDLFloat;
                 break;
             case ItemFormat::UINT: itemCode = kDLUInt;
@@ -123,7 +124,7 @@ py::dict DataLoader::getNextBatch() {
                 .ndim = ndim,
                 .dtype = {
                     .code = itemCode,
-                    .bits = static_cast<uint8_t>(8 * head.getBytesPerItem()), //NOLINT(readability-magic-numbers)
+                    .bits = static_cast<uint8_t>(8 * probe.bytesPerItem), //NOLINT(readability-magic-numbers)
                     .lanes = 1
                 },
                 .shape = shapeArr,
@@ -138,8 +139,7 @@ py::dict DataLoader::getNextBatch() {
         auto *wrapper = new DLWrapper(fence, deviceType, deviceId, dlManagedTensor);
         dlManagedTensor->manager_ctx = wrapper;
 
-        // Lifetime is explicit; no refcount acquire needed.
-        pyBatch[head.getDictName().c_str()] = py::cast(wrapper, py::return_value_policy::reference);
+        pyBatch[itemKey.keyName.c_str()] = py::cast(wrapper, py::return_value_policy::reference);
     }
 
     return pyBatch;

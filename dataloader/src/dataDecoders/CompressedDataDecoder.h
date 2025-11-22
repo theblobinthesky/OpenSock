@@ -1,13 +1,16 @@
-//
-// Created by workstation on 8/27/25.
-//
-
 #ifndef VERSION_COMPRESSEDDATADECODER_H
 #define VERSION_COMPRESSEDDATADECODER_H
 
+#include "dataio.h"
 
-class CompressedDataDecoder {
+class CompressedDataDecoder final : public IDataDecoder {
+public:
+    ProbeResult probeFromMemory(uint8_t *inputData, size_t inputSize) override;
+
+    uint8_t *loadFromMemory(const ProbeResult &settings,
+                            uint8_t *inputData, size_t inputSize, BumpAllocator<uint8_t *> &output) override;
+
+    std::string getExtension() override;
 };
 
-
-#endif //VERSION_COMPRESSEDDATADECODER_H
+#endif

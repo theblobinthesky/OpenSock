@@ -81,7 +81,7 @@ python_add_library(_core MODULE
         src/dataDecoders/ExrDataDecoder.cpp
         src/dataDecoders/NpyDataDecoder.cpp
         src/dataDecoders/CompressedDataDecoder.cpp
-        src/dataAugmenter/ResizeDataAugmenter.cpp
+        src/dataAugmenter/Resize.cpp
         src/dataAugmenter/RandomResizedCrop.cpp
         src/dataAugmenter/Pad.cpp
         WITH_SOABI

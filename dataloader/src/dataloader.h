@@ -1,5 +1,6 @@
 #ifndef DATALOADER_H
 #define DATALOADER_H
+
 #include "dataio.h"
 #include "resource.h"
 #include <atomic>

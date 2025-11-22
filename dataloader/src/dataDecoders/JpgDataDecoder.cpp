@@ -41,18 +41,19 @@ void readJpg(const uint8_t *inputData, const size_t inputSize,
     jpeg_destroy_decompress(&comprInfo);
 }
 
-ItemSettings JpgDataDecoder::probeFromMemory(uint8_t *inputData, const size_t inputSize) {
+ProbeResult JpgDataDecoder::probeFromMemory(uint8_t *inputData, const size_t inputSize) {
     jpeg_decompress_struct comprInfo = {};
     readJpg(inputData, inputSize, comprInfo, nullptr);
 
     return {
         .format = ItemFormat::UINT,
-        .numBytes = 1,
-        .shape = std::vector<uint32_t>{comprInfo.output_height, comprInfo.output_width, 3}
+        .bytesPerItem = 1,
+        .shape = std::vector<uint32_t>{comprInfo.output_height, comprInfo.output_width, 3},
+        .extension = "jpg"
     };
 }
 
-uint8_t *JpgDataDecoder::loadFromMemory(const ItemSettings &settings,
+uint8_t *JpgDataDecoder::loadFromMemory(const ProbeResult &settings,
                                         uint8_t *inputData, const size_t inputSize, BumpAllocator<uint8_t *> &output) {
     uint8_t *outputData = output.allocate(settings.getShapeSize());
     jpeg_decompress_struct comprInfo = {};

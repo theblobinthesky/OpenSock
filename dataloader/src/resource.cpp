@@ -1,7 +1,6 @@
 #include "resource.h"
 #include <format>
 
-#include "datadecoder.h"
 #include "dataio.h"
 
 MirroredAllocator::MirroredAllocator(HostAndGpuDeviceInterface *device) : device(device) {
@@ -342,13 +341,12 @@ void ResourcePool::threadMain(const size_t threadIdx, const std::atomic_uint32_t
 
 
         const auto [startingOffset, batchPaths] = dl->batchedDataset.getNextInFlightBatch();
-        const std::vector<Head> &heads = dl->batchedDataset.getDataset().getHeads();
-
+        const std::vector<ItemKey> &itemKeys = dl->batchedDataset.getDataset().getDataSource()->getItemKeys();
 
         // For each head, load all batch items into one contigous cpu array.
         std::vector<CpuAllocation> hostAllocations;
         temporaryAllocator.reset();
-        for (size_t headIdx = 0; headIdx < heads.size(); headIdx++) {
+        for (size_t i = 0; i < itemKeys.size(); i++) {
             hostAllocations.push_back(
                 loadFilesFromHeadIntoContigousBatch(temporaryAllocator, batchPaths, heads, headIdx)
             );
@@ -394,8 +392,8 @@ void ResourcePool::threadMain(const size_t threadIdx, const std::atomic_uint32_t
         std::memcpy(allocations.getArena().host, temporaryAllocator.getArena(), dl->outputBatchMemorySize);
         std::vector<uint8_t *> gpuAllocations;
         std::vector<Fence> fences;
-        for (size_t headIdx = 0; headIdx < heads.size(); headIdx++) {
-            const CpuAllocation &nonPinnedCpuAllocation = hostAllocations[headIdx];
+        for (size_t itemKeyIdx = 0; itemKeyIdx < itemKeys.size(); itemKeyIdx++) {
+            const CpuAllocation &nonPinnedCpuAllocation = hostAllocations[itemKeyIdx];
             const auto &[host, gpu, _] = allocations.allocate(nonPinnedCpuAllocation.batchBufferSize);
 
             // Start async upload to gpu memory as soon as possible.

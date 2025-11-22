@@ -4,6 +4,11 @@
 #include "resource.h"
 #include <pybind11/numpy.h>
 
+#include "dataAugmenter/Pad.h"
+#include "dataAugmenter/RandomResizedCrop.h"
+#include "dataAugmenter/Resize.h"
+#include "dataSources/FlatDataSource.h"
+
 #define STRINGIFY(x) #x
 #define MACRO_STRINGIFY(x) STRINGIFY(x)
 namespace py = pybind11;
@@ -29,43 +34,17 @@ PYBIND11_MODULE(_core, m) {
         DataSet
     )pbdoc";
 
-    py::enum_<FileType>(m, "FileType")
-            .value("JPG", FileType::JPG)
-            .value("PNG", FileType::PNG)
-            .value("EXR", FileType::EXR)
-            .value("NPY", FileType::NPY)
-            .value("COMPRESSED", FileType::COMPRESSED)
-            .export_values();
-
     py::enum_<ItemFormat>(m, "ItemFormat")
             .value("FLOAT", ItemFormat::FLOAT)
             .value("UINT", ItemFormat::UINT)
             .export_values();
 
-    py::class_<Head>(m, "Head")
-            .def(py::init<const FileType, std::string, std::vector<uint32_t> >())
-            .def("getExt", &Head::getExt)
-            .def("getDictName", &Head::getDictName)
-            .def("getShape", &Head::getShape)
-            .def("getShapeSize", &Head::getShapeSize)
-            .def("getFilesType", &Head::getFilesType)
-            .def("getItemFormat", &Head::getItemFormat)
-            .def("getBytesPerItem", &Head::getBytesPerItem);
-
     py::class_<Dataset>(m, "Dataset")
-            .def(py::init<std::string, std::vector<Head>,
-                std::vector<std::string>,
+            .def(py::init<IDataSource *,
+                std::vector<IDataTransformAugmentation<2> *>,
                 const pybind11::function &,
                 bool>())
-
-            .def(py::init<std::string, std::vector<Head>,
-                std::vector<std::vector<std::string> >
-            >())
-
-            .def("splitTrainValidationTest", &Dataset::splitTrainValidationTest)
-            .def("getRootDir", &Dataset::getRootDir)
-            .def("getHeads", &Dataset::getHeads)
-            .def("getEntries", &Dataset::getEntries);
+            .def("splitTrainValidationTest", &Dataset::splitTrainValidationTest);
 
     py::class_<BatchedDataset>(m, "BatchedDataset")
             .def(py::init<const Dataset &, size_t>())
@@ -130,6 +109,11 @@ PYBIND11_MODULE(_core, m) {
                 return {dtype, shape, data->data(), capsule};
             });
 
+    py::class_<FlatDataSource>(m, "FlatDataSource").def(py::init<std::string>());
+    py::class_<Pad>(m, "Pad").def(py::init<>());
+    py::class_<RandomResizedCrop>(m, "RandomResizedCrop").def(py::init<>());
+    py::class_<Resize>(m, "Resize").def(py::init<>());
+
     // Expose explicit shutdown for the global resource pool.
     m.def("shutdown_resource_pool", [] { ResourcePool::get().shutdown(); });
 
@@ -137,7 +121,7 @@ PYBIND11_MODULE(_core, m) {
     try {
         const py::module_ atexit = py::module_::import("atexit");
         atexit.attr("register")(py::cpp_function([]() {
-            LOG_DEBUG("atexit has been called");
+            LOG_DEBUG_FUN("atexit", "atexit has been called");
             ResourcePool::get().shutdown();
         }));
     } catch (const std::exception &e) {

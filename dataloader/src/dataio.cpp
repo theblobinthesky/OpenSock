@@ -3,234 +3,30 @@
 #include <vector>
 #include <filesystem>
 #include <format>
-#include <random>
 #include <utils.h>
 
-namespace fs = std::filesystem;
+#include "dataDecoders/CompressedDataDecoder.h"
+#include "dataDecoders/ExrDataDecoder.h"
+#include "dataDecoders/JpgDataDecoder.h"
+#include "dataDecoders/NpyDataDecoder.h"
+#include "dataDecoders/PngDataDecoder.h"
 
-
-Head::Head(
-    const FileType _filesType,
-    std::string _dictName,
-    std::vector<uint32_t> _shape
-) : directoryType(DirectoryType::UNPACKED_IN_FILES),
-    filesType(_filesType),
-    dictName(std::move(_dictName)), shape(std::move(_shape)) {
-    for (const auto dim: shape) {
-        if (dim == 0) {
-            throw std::invalid_argument(
-                "Dimensions need to be strictly positive.");
-        }
-    }
-
-    if (shape.empty()) {
-        throw std::invalid_argument(
-            "Tensors have at least 1 dimension.");
-    }
-
-    switch (filesType) {
-        case FileType::JPG:
-        case FileType::PNG:
-        case FileType::EXR: {
-            if (shape.size() != 3) {
-                throw std::invalid_argument(
-                    "Jpeg images have shape (h, w, 3).");
-            }
-
-            if (shape[2] != 3) {
-                throw std::invalid_argument(
-                    "Jpeg images must have RGB channels.");
-            }
-        }
-        break;
-        default: break;
-    }
-}
-
-std::string Head::getExt() const {
-    switch (filesType) {
-        case FileType::EXR: return "exr";
-        case FileType::JPG: return "jpg";
-        case FileType::PNG: return "png";
-        case FileType::NPY: return "npy";
-        case FileType::COMPRESSED: return "compressed";
-        default: return "";
-    }
-}
-
-std::string Head::getDictName() const {
-    return dictName;
-}
-
-const std::vector<uint32_t> &Head::getShape() const {
-    return shape;
-}
-
-size_t Head::getShapeSize() const {
-    size_t totalSize = 1;
-    for (const auto dim: shape) {
-        totalSize *= dim;
-    }
-
-    return totalSize;
-}
-
-FileType Head::getFilesType() const {
-    return filesType;
-}
-
-ItemFormat Head::getItemFormat() const {
-    switch (filesType) {
-        case FileType::JPG:
-        case FileType::PNG:
-            return ItemFormat::UINT; // uint8
-        case FileType::EXR:
-        case FileType::NPY:
-        case FileType::COMPRESSED:
-            return ItemFormat::FLOAT; // float32
-        default:
-            throw std::runtime_error("Item format not available for file type.");
-    }
-}
-
-int32_t Head::getBytesPerItem() const {
-    switch (filesType) {
-        case FileType::JPG:
-        case FileType::PNG:
-            return 1; // uint8
-        case FileType::EXR:
-        case FileType::NPY:
-        case FileType::COMPRESSED:
-            return 4; // float32
-        default:
-            throw std::runtime_error("Bytes per item not available for file type.");
-    }
-}
-
-std::string replaceAll(std::string str, const std::string &from,
-                       const std::string &to) {
-    size_t pos = 0;
-    while ((pos = str.find(from, pos)) != std::string::npos) {
-        str = str.replace(pos, from.size(), to);
-    }
-    return str;
-}
-
-void initRootDir(std::string &rootDir) {
-    if (rootDir.empty()) {
-        throw std::runtime_error("Cannot instantiate a dataset with an empty root directory.");
-    }
-
-    if (rootDir.ends_with('/')) {
-        rootDir.erase(rootDir.end() - 1);
-    }
-}
-
-Dataset::Dataset(std::string _rootDir, std::vector<Head> _heads,
-                 std::vector<std::string> _subDirs,
+Dataset::Dataset(IDataSource *_dataSource,
+                 std::vector<IDataTransformAugmentation<2> *> _dataAugmentations,
                  const pybind11::function &createDatasetFunction,
                  const bool isVirtualDataset
-) : rootDir(std::move(_rootDir)), heads(std::move(_heads)), subDirs(std::move(_subDirs)), entries({}) {
-    initRootDir(rootDir);
+) : dataSource(_dataSource), dataAugmentations(std::move(_dataAugmentations)) {
+    extToDataDecoder["jpg"] = new JpgDataDecoder();
+    extToDataDecoder["png"] = new PngDataDecoder();
+    extToDataDecoder["npy"] = new NpyDataDecoder();
+    extToDataDecoder["exr"] = new ExrDataDecoder();
+    extToDataDecoder["compressed"] = new CompressedDataDecoder();
 
-    if (subDirs.empty()) {
-        throw std::runtime_error(
-            "Cannot instantiate a dataset with not subdirectories.");
-    }
-
-    if (!fs::exists(rootDir) || (existsEnvVar(INVALID_DS_ENV_VAR) && isVirtualDataset)) {
-        fs::remove_all(rootDir);
+    if (dataSource->preInitDataset(existsEnvVar(INVALID_DS_ENV_VAR) && isVirtualDataset)) {
         createDatasetFunction();
     }
 
-    auto files = listAllFiles(
-        std::format("{}/{}", rootDir, subDirs[0]) // TODO: Convention is no / in concat
-    );
-
-    for (const auto &file: files) {
-        auto &h0 = heads[0];
-        auto &s0 = subDirs[0];
-
-        std::vector paths = {file};
-        bool erroneousEntry = false;
-
-        if (!file.ends_with(h0.getExt())) {
-            LOG_DEBUG(
-                "Got erroneous dataset with anchor path '{}' that does not end on '{}'!",
-                file.c_str(), h0.getExt().c_str());
-            continue;
-        }
-
-        for (size_t s = 1; s < subDirs.size(); s++) {
-            auto &hS = heads[s];
-            auto &sS = subDirs[s];
-
-            std::string newFile(file);
-            newFile = replaceAll(newFile, s0, sS);
-            newFile = replaceAll(newFile, h0.getExt(), hS.getExt());
-
-            if (!fs::exists(newFile)) {
-                LOG_DEBUG("Could not find '{}'", newFile.c_str());
-                erroneousEntry = true;
-                break;
-            }
-
-            paths.push_back(std::move(newFile));
-        }
-
-        if (erroneousEntry) {
-            LOG_DEBUG("Got erroneous dataset with anchor path '{}'!", file.c_str());
-        } else {
-            entries.push_back(std::move(paths));
-        }
-    }
-
-    init();
-}
-
-Dataset::Dataset(std::string _rootDir, std::vector<Head> _heads,
-                 std::vector<std::vector<std::string> > _entries
-) : rootDir(std::move(_rootDir)), heads(std::move(_heads)), subDirs({}), entries(std::move(_entries)) {
-    initRootDir(rootDir);
-
-    if (entries.empty()) {
-        throw std::runtime_error(
-            "Cannot instantiate a dataset with an empty list of entries.");
-    }
-
-    const size_t lastSize = entries[0].size();
-    for (size_t i = 1; i < entries.size(); i++) {
-        if (entries[i].size() != lastSize) {
-            throw std::runtime_error("Entries are not of consistent size.");
-        }
-    }
-
-    init();
-}
-
-void Dataset::init() {
-    if (entries.empty()) {
-        throw std::runtime_error("Cannot instantiate an empty dataset.");
-    }
-
-    // Remove root directory, if necessary.
-    for (auto &item: entries) {
-        for (auto &subPath: item) {
-            if (subPath.size() >= rootDir.size()) {
-                if (std::memcmp(subPath.data(), rootDir.data(), rootDir.size()) == 0) {
-                    subPath.erase(0, rootDir.size());
-                }
-
-                if (const std::string path = std::format("{}{}", rootDir, subPath); !fs::exists(path)) {
-                    throw std::runtime_error(
-                        std::format("Path does not exist: '{}'.", path));
-                }
-            }
-        }
-    }
-
-    auto rnd = std::default_random_engine{0};
-    std::ranges::shuffle(entries, rnd);
+    dataSource->initDataset();
 }
 
 std::tuple<Dataset, Dataset, Dataset> Dataset::splitTrainValidationTest(
@@ -259,16 +55,17 @@ std::tuple<Dataset, Dataset, Dataset> Dataset::splitTrainValidationTest(
     );
 }
 
-const std::string &Dataset::getRootDir() const {
-    return rootDir;
+IDataSource *Dataset::getDataSource() const {
+    return dataSource;
 }
 
-const std::vector<Head> &Dataset::getHeads() const {
-    return heads;
+IDataDecoder *getDataDecoderByExtension(const std::string &ext) const {
+
 }
 
-const std::vector<std::vector<std::string> > &Dataset::getEntries() const {
-    return entries;
+std::vector<IDataTransformAugmentation<2> *> Dataset::getDataTransformAugmentations() const {
+    return dataAugmentations;
+
 }
 
 BatchedDataset::BatchedDataset(const Dataset &dataset, const size_t batchSize) : dataset(dataset),
@@ -281,6 +78,8 @@ BatchedDataset::BatchedDataset(const Dataset &&dataset, const size_t batchSize) 
 
 DatasetBatch BatchedDataset::getNextInFlightBatch() {
     std::unique_lock lock(mutex);
+    IDataSource *source = dataset.getDataSource();
+    const auto &entries = source->getEntries();
 
     std::vector<std::vector<std::string> > batchPaths;
 
@@ -288,8 +87,8 @@ DatasetBatch BatchedDataset::getNextInFlightBatch() {
     for (size_t i = offset; i < offset + batchSize; i++) {
         std::vector<std::string> entry;
 
-        for (auto subPath: dataset.getEntries()[i % dataset.getEntries().size()]) {
-            entry.push_back(std::format("{}{}", dataset.getRootDir(), subPath));
+        for (const auto& subPath: entries[i % entries.size()]) {
+            entry.push_back(subPath);
         }
 
         batchPaths.push_back(std::move(entry));
@@ -344,5 +143,5 @@ const std::atomic_int32_t &BatchedDataset::getLastWaitingBatch() const {
 }
 
 size_t BatchedDataset::getNumberOfBatches() const {
-    return (dataset.getEntries().size() + batchSize - 1) / batchSize;
+    return (dataset.getDataSource()->getEntries().size() + batchSize - 1) / batchSize;
 }

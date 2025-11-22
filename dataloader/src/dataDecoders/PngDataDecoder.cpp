@@ -20,7 +20,7 @@ void pngReadFromMemory(png_structp pngPtr, png_bytep outBytes, png_size_t bytesT
     reader->offset += bytesToRead;
 }
 
-ItemSettings PngDataDecoder::probeFromMemory(uint8_t *inputData, const size_t inputSize) {
+ProbeResult PngDataDecoder::probeFromMemory(uint8_t *inputData, const size_t inputSize) {
     if (inputSize < 8 || png_sig_cmp(inputData, 0, 8)) {
         throw std::runtime_error("Invalid PNG signature");
     }
@@ -61,14 +61,15 @@ ItemSettings PngDataDecoder::probeFromMemory(uint8_t *inputData, const size_t in
 
     png_destroy_read_struct(&png, &info, nullptr);
 
-    return ItemSettings{
+    return ProbeResult{
         .format = ItemFormat::UINT,
-        .numBytes = 1,
-        .shape = std::vector<uint32_t>{height, width, 3}
+        .bytesPerItem = 1,
+        .shape = std::vector<uint32_t>{height, width, 3},
+        .extension = "png"
     };
 }
 
-uint8_t *PngDataDecoder::loadFromMemory(const ItemSettings &settings,
+uint8_t *PngDataDecoder::loadFromMemory(const ProbeResult &settings,
                                         uint8_t *inputData, const size_t inputSize,
                                         BumpAllocator<uint8_t *> &output) {
     if (inputSize < 8 || png_sig_cmp(inputData, 0, 8)) {

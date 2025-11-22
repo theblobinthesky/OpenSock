@@ -6,7 +6,12 @@ from .native_api import shutdown_resource_pool
 
 __all__ = [
     "__doc__", "__version__",
-    "FileType", "Head", "Dataset", "BatchedDataset", "DataLoader",
+    "Dataset", "BatchedDataset", "DataLoader",
     "Codec", "CompressorOptions", "Compressor", "Decompressor",
+
+    "FlatDataSource",
+    "JpgDataDecoder", "PngDataDecoder", "NpyDataDecoder", "ExrDataDecoder", "CompressedDataDecoder",
+    "Pad", "RandomResizedCrop", "Resize",
+
     "shutdown_resource_pool",
 ]

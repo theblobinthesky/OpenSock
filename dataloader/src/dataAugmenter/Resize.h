@@ -2,7 +2,7 @@
 #define VERSION_RESIZEDATAAUGMENTER_H
 
 
-class ResizeDataAugmenter {
+class Resize {
 };
 
 

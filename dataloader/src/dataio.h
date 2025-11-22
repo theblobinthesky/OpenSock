@@ -16,29 +16,9 @@ struct CpuAllocation {
 };
 
 enum class SpatialHint : uint8_t {
-    NONE,
-    RASTER,
-    POINTS
-};
-
-struct ItemKey {
-    std::string keyName;
-    SpatialHint spatialHint;
-};
-
-struct Sample {
-    std::string sampleName;
-};
-
-class IDataSource {
-public:
-    virtual ~IDataSource() = default;
-
-    virtual std::vector<ItemKey> getItemKeys() = 0;
-
-    virtual std::vector<Sample> getSamples() = 0;
-
-    virtual void loadFile(uint8_t *&data, size_t &size) = 0;
+    XXX,
+    C_XXX,
+    XXX_C
 };
 
 enum class ItemFormat {
@@ -46,10 +26,11 @@ enum class ItemFormat {
     FLOAT
 };
 
-struct ItemSettings {
+struct ProbeResult {
     ItemFormat format;
-    uint32_t numBytes;
+    uint32_t bytesPerItem;
     std::vector<uint32_t> shape;
+    std::string extension;
 
     [[nodiscard]] uint32_t getShapeSize() const {
         uint32_t size = 1;
@@ -60,13 +41,35 @@ struct ItemSettings {
     // TODO: dito. size_t batchBufferSize;
 };
 
+struct ItemKey {
+    std::string keyName;
+    SpatialHint spatialHint;
+    ProbeResult probeResult;
+};
+
+// These methods are not thread-safe.
+class IDataSource {
+public:
+    virtual ~IDataSource() = default;
+
+    virtual std::vector<ItemKey> getItemKeys() = 0;
+
+    virtual std::vector<std::vector<std::string>> getEntries() = 0;
+
+    virtual void loadFile(uint8_t *&data, size_t &size) = 0;
+
+    virtual bool preInitDataset(bool forceInvalidation) = 0;
+
+    virtual void initDataset() = 0;
+};
+
 class IDataDecoder {
 public:
     virtual ~IDataDecoder() = default;
 
-    virtual ItemSettings probeFromMemory(uint8_t *inputData, size_t inputSize) = 0;
+    virtual ProbeResult probeFromMemory(uint8_t *inputData, size_t inputSize) = 0;
 
-    virtual uint8_t *loadFromMemory(const ItemSettings &settings,
+    virtual uint8_t *loadFromMemory(const ProbeResult &settings,
                                     uint8_t *inputData, size_t inputSize, BumpAllocator<uint8_t *> &output) = 0;
 
     virtual std::string getExtension() = 0;
@@ -77,7 +80,7 @@ class IDataTransformAugmentation {
 public:
     virtual ~IDataTransformAugmentation() = default;
 
-    // Returns if the input shape is supported by this augmenter.
+    // Returns true if the input shape is supported by this augmentation.
     virtual bool augment(const std::vector<size_t> &inputShape,
                          std::vector<size_t> &outputShape,
                          double affine[D][D + 1]) = 0;
@@ -86,9 +89,8 @@ public:
 class IoResources {
     std::unordered_map<std::string, IDataSource> sources;
     std::unordered_map<std::string, IDataDecoder> decoders;
-    std::unordered_map<std::string, IDataTransformAugmentation> augmenters;
+    std::unordered_map<std::string, IDataTransformAugmentation<2> > augmenters;
 };
-
 
 struct DatasetBatch {
     int32_t startingOffset;
@@ -98,33 +100,25 @@ struct DatasetBatch {
 // TODO (acktschually necessary or true [lol]?): The dataset is threadsafe by-default and tracks in-flight batches.
 class Dataset {
 public:
-    Dataset(std::string _rootDir, std::vector<Head> _heads,
-            std::vector<std::string> _subDirs,
+    Dataset(IDataSource *_dataSource,
+            std::vector<IDataTransformAugmentation<2> *> _dataAugmentations,
+
             const pybind11::function &createDatasetFunction,
             bool isVirtualDataset
-    );
-
-    Dataset(std::string _rootDir, std::vector<Head> _heads,
-            std::vector<std::vector<std::string> > _entries
     );
 
     Dataset(const Dataset &other) = default;
 
     std::tuple<Dataset, Dataset, Dataset> splitTrainValidationTest(float trainPercentage, float validPercentage);
 
-    [[nodiscard]] const std::string &getRootDir() const;
-
-    [[nodiscard]] const std::vector<Head> &getHeads() const;
-
-    [[nodiscard]] const std::vector<std::vector<std::string> > &getEntries() const;
+    [[nodiscard]] IDataSource *getDataSource() const;
+    [[nodiscard]] IDataDecoder *getDataDecoderByExtension(const std::string &ext) const;
+    [[nodiscard]] std::vector<IDataTransformAugmentation<2> *> getDataTransformAugmentations() const;
 
 private:
-    void init();
-
-    std::string rootDir;
-    std::vector<Head> heads;
-    std::vector<std::string> subDirs;
-    std::vector<std::vector<std::string> > entries;
+    IDataSource *dataSource;
+    std::unordered_map<std::string, IDataDecoder *> extToDataDecoder;
+    std::vector<IDataTransformAugmentation<2> *> dataAugmentations;
 };
 
 class BatchedDataset {

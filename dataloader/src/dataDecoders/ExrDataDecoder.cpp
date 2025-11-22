@@ -5,6 +5,7 @@
 #include <OpenEXR/ImfChannelList.h>
 #include <OpenEXR/ImfHeader.h>
 #include <Imath/ImathBox.h>
+
 using namespace OPENEXR_IMF_NAMESPACE;
 using namespace IMATH_NAMESPACE;
 
@@ -108,18 +109,19 @@ CpuAllocation loadExrFiles(BumpAllocator<uint8_t *> &cpuAllocator,
     return batchAllocation;
 }
 
-ItemSettings ExrDataDecoder::probeFromMemory(uint8_t *inputData, const size_t inputSize) {
+ProbeResult ExrDataDecoder::probeFromMemory(uint8_t *inputData, const size_t inputSize) {
     uint32_t width, height;
     readExr(inputData, inputSize, width, height, nullptr);
 
     return {
-        .format = ItemFormat::UINT,
-        .numBytes = 1,
-        .shape = std::vector<uint32_t>{height, width, 3}
+        .format = ItemFormat::FLOAT,
+        .bytesPerItem = 4,
+        .shape = std::vector<uint32_t>{height, width, 3},
+        .extension = "exr"
     };
 }
 
-uint8_t *ExrDataDecoder::loadFromMemory(const ItemSettings &settings,
+uint8_t *ExrDataDecoder::loadFromMemory(const ProbeResult &settings,
                                         uint8_t *inputData, const size_t inputSize, BumpAllocator<uint8_t *> &output) {
     uint8_t *outputData = output.allocate(settings.getShapeSize());
     uint32_t width, height;
