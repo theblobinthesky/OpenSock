@@ -108,7 +108,7 @@ class DataLoader:
             if arr.dtype == jnp.uint8:
                 batch[key] = arr.astype(jnp.float32) / 255.0
 
-        return self.dataset.post_process_fn(batch)
+        return batch
 
 
 class Codec(Enum):

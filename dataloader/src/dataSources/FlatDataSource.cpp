@@ -65,6 +65,7 @@ static std::vector<ProbeResult> probeAllSubDirs(const std::string &rootDirectory
 
                 size_t inputSize;
                 uint8_t *inputData = loadFileStoopid(entry.path().string(), inputSize);
+                std::printf("path: %s, inputSize: %lu, inputData: %hhu\n", entry.path().c_str(), inputSize, inputData[0]);
                 probeResults.push_back(dataDecoder->probeFromMemory(inputData, inputSize));
                 delete[] inputData; // TODO: Delete this once the switch to overlappedio is complete.
                 break;
@@ -129,22 +130,22 @@ std::vector<std::vector<std::string> > FlatDataSource::getEntries() {
 CpuAllocation FlatDataSource::loadItemSliceIntoContigousBatch(BumpAllocator<uint8_t *> alloc,
                                                               const std::vector<std::vector<std::string> > &batchPaths,
                                                               const size_t itemKeysIdx) {
-    const auto &itemKey = itemKeys[itemKeysIdx];
+    /*const auto &itemKey = itemKeys[itemKeysIdx];
     IDataDecoder *decoder = DecoderRegister::getInstance().getDataDecoderByExtension(itemKey.probeResult.extension);
     uint8_t *startOfBuffer = alloc.getCurrent();
 
     for (const auto &batchPath: batchPaths) {
         const std::string &path = batchPath[itemKeysIdx];
 
-        size_t inputSize;
-        uint8_t *inputData = loadFileStoopid(path, inputSize);
-        decoder->loadFromMemory(itemKey.probeResult, inputData, inputSize, alloc);
-        delete[] inputData; // TODO: Delete this once the switch to overlappedio is complete.
-    }
+        // size_t inputSize;
+        // uint8_t *inputData = loadFileStoopid(path, inputSize);
+        // decoder->loadFromMemory(itemKey.probeResult, inputData, inputSize, alloc);
+        // delete[] inputData; // TODO: Delete this once the switch to overlappedio is complete.
+    }*/
 
     return {
         .batchBuffer = {
-            .uint8 = startOfBuffer
+            .uint8 = alloc.getCurrent() // startOfBuffer
         },
     };
 }

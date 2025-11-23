@@ -45,10 +45,14 @@ ProbeResult JpgDataDecoder::probeFromMemory(uint8_t *inputData, const size_t inp
     jpeg_decompress_struct comprInfo = {};
     readJpg(inputData, inputSize, comprInfo, nullptr);
 
+    if (comprInfo.image_height == 0 || comprInfo.image_width == 0) {
+        throw std::runtime_error("Jpg output dimensions have to be nonzero.");
+    }
+
     return {
         .format = ItemFormat::UINT,
         .bytesPerItem = 1,
-        .shape = std::vector<uint32_t>{comprInfo.output_height, comprInfo.output_width, 3},
+        .shape = std::vector<uint32_t>{comprInfo.image_height, comprInfo.image_width, 3},
         .extension = "jpg"
     };
 }

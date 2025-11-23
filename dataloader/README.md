@@ -1,3 +1,8 @@
+How-to use:
+Install all the packages using uv and activate the virtual environment.
+```make install-debug```
+```pytest tests/```
+
 Memory bandwidth utilization in GB/s on RTX 4080 system:
 - JAX (default): 7.25
 - CUDA (pinned): 19.41
@@ -11,6 +16,7 @@ TODO (important improvements for production use):
 - Dataset refactor with probing/autodiscovery
 - Probing should happen after the augmentations have been applied... Idk??
 - Implement data augmentations and make sure the sizes are correct etc.
+- Look at any race conditions chadgpt might have produced during the last refactor
 
 Fixed:
 - Fix all sensible clang-tidy warnings

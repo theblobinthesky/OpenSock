@@ -343,6 +343,7 @@ void ResourcePool::threadMain(const size_t threadIdx, const std::atomic_uint32_t
         const auto [startingOffset, batchPaths] = dl->batchedDataset.getNextInFlightBatch();
         auto &dataset = dl->batchedDataset.getDataset();
         const std::vector<ItemKey> &itemKeys = dataset.getDataSource()->getItemKeys();
+        LOG_DEBUG("itemKeys.siez() {}", itemKeys.size());
 
         // For each head, load all batch items into one contigous cpu array.
         std::vector<CpuAllocation> hostAllocations;

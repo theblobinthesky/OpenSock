@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.28.0)
 set(CMAKE_GENERATOR Ninja)
 set(CMAKE_CXX_STANDARD 20)
-set(CMAKE_CXX_FLAGS_DEBUG "-g3 -O0 -fno-omit-frame-pointer -mavx2 -mf16c -Wno-unused-variable")
+set(CMAKE_CXX_FLAGS_DEBUG "-g3 -O0 -fno-omit-frame-pointer -mavx2 -mf16c")
 set(CMAKE_CXX_FLAGS_RELEASE "-O3 -DNDEBUG -ffast-math -mavx2 -mf16c")
 
 project(
@@ -39,7 +39,7 @@ add_library(bitshuffle_core STATIC
         ${BITSHUFFLE_CORE}/src/iochain.c
 )
 target_include_directories(bitshuffle_core PUBLIC ${BITSHUFFLE_CORE}/src)
-target_compile_options(bitshuffle_core PRIVATE -O3 -Wall -Wextra -Wno-unused-parameter -mavx2)
+target_compile_options(bitshuffle_core PRIVATE -O3 -Wall -Wextra -Wno-unused-parameter -Wno-unused-but-set-variable -mavx2)
 set_target_properties(bitshuffle_core PROPERTIES
         C_STANDARD 99
         C_STANDARD_REQUIRED YES
