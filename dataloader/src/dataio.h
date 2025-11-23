@@ -38,7 +38,9 @@ struct ProbeResult {
         return size;
     }
 
-    // TODO: dito. size_t batchBufferSize;
+    [[nodiscard]] uint32_t getBufferSize() const {
+        return bytesPerItem * getShapeSize();
+    }
 };
 
 struct ItemKey {
@@ -56,7 +58,7 @@ public:
 
     virtual std::vector<std::vector<std::string> > getEntries() = 0;
 
-    virtual CpuAllocation loadFilesIntoContigousBatch(BumpAllocator<uint8_t *> alloc,
+    virtual CpuAllocation loadItemSliceIntoContigousBatch(BumpAllocator<uint8_t *> alloc,
                                                       const std::vector<std::vector<std::string> > &batchPaths,
                                                       size_t itemKeysIdx) = 0;
 

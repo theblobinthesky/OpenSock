@@ -15,7 +15,7 @@ public:
 
     std::vector<std::vector<std::string> > getEntries() override;
 
-    void loadFilesIntoContigousBatch(BumpAllocator<uint8_t *> alloc,
+    CpuAllocation loadItemSliceIntoContigousBatch(BumpAllocator<uint8_t *> alloc,
                                      const std::vector<std::vector<std::string> > &batchPaths,
                                      size_t itemKeysIdx) override;
 
@@ -29,6 +29,7 @@ private:
     std::string rootDirectory;
     std::vector<ItemKey> itemKeys;
     std::vector<std::vector<std::string> > entries;
+    std::vector<uint8_t> memoryArena;
     bool initRequired;
 
     void initDatasetFromRootDirectory();

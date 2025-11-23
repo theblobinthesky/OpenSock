@@ -93,6 +93,10 @@ public:
         return arena;
     }
 
+    [[nodiscard]] T getCurrent() {
+        return arena + offset;
+    }
+
 private:
     T arena;
     size_t offset = 0;

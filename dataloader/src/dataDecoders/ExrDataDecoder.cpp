@@ -5,6 +5,8 @@
 #include <OpenEXR/ImfChannelList.h>
 #include <OpenEXR/ImfHeader.h>
 #include <Imath/ImathBox.h>
+#include <cstring>
+#include <stdexcept>
 
 using namespace OPENEXR_IMF_NAMESPACE;
 using namespace IMATH_NAMESPACE;
@@ -22,7 +24,7 @@ public:
 
         std::memcpy(c, inputData + pos, n);
         pos += n;
-        return pos != inputSize - 1;
+        return pos < inputSize;
     }
 
     uint64_t tellg() override {
@@ -30,6 +32,9 @@ public:
     }
 
     void seekg(const uint64_t _pos) override {
+        if (_pos > inputSize) {
+            throw std::runtime_error("EXR InputStream seek out of bounds.");
+        }
         pos = _pos;
     }
 
@@ -40,7 +45,7 @@ private:
 };
 
 void readExr(const uint8_t *inputData, const size_t inputSize,
-             uint32_t &width, uint32_t &height, uint8_t *outputData) {
+             uint32_t &width, uint32_t &height, float *outputData) {
     MemoryIStream stream(inputData, inputSize);
     InputFile file(stream);
     const Header &hdr = file.header();
@@ -53,6 +58,11 @@ void readExr(const uint8_t *inputData, const size_t inputSize,
 
     if (outputData == nullptr) {
         return;
+    }
+
+    const ChannelList &channels = hdr.channels();
+    if (!channels.findChannel("R") || !channels.findChannel("G") || !channels.findChannel("B")) {
+        throw std::runtime_error("EXR file missing required RGB channels.");
     }
 
     FrameBuffer fb;
@@ -77,38 +87,6 @@ void readExr(const uint8_t *inputData, const size_t inputSize,
     file.readPixels(dw.min.y, dw.max.y);
 }
 
-CpuAllocation loadExrFiles(BumpAllocator<uint8_t *> &cpuAllocator,
-                           const std::vector<std::vector<std::string> > &batchPaths,
-                           const std::vector<Head> &heads, const size_t headIdx) {
-    const Head &head = heads[headIdx];
-    const auto batchAllocation = getBatchAllocation(head, cpuAllocator, batchPaths.size(), 4);
-    const auto [shapeSize, batchBufferSize, batchBuffer] = batchAllocation;
-
-    const int outW = static_cast<int>(IMAGE_WIDTH(head));
-    const int outH = static_cast<int>(IMAGE_HEIGHT(head));
-
-    for (size_t j = 0; j < batchPaths.size(); ++j) {
-        const std::string &path = batchPaths[j][headIdx];
-
-        int inW;
-        int inH;
-        std::vector<float> rgb;
-        readExrRGBInterleaved(path, rgb, inW, inH);
-
-        float *out = batchBuffer.float32 + j * shapeSize;
-
-        if (inW == outW && inH == outH) {
-            // Same size: direct copy
-            std::memcpy(out, rgb.data(), static_cast<size_t>(outW) * outH * 3 * sizeof(float));
-        } else {
-            // Resize in linear space
-            resizeImageFloatRGB(rgb.data(), inW, inH, out, outW, outH);
-        }
-    }
-
-    return batchAllocation;
-}
-
 ProbeResult ExrDataDecoder::probeFromMemory(uint8_t *inputData, const size_t inputSize) {
     uint32_t width, height;
     readExr(inputData, inputSize, width, height, nullptr);
@@ -123,9 +101,15 @@ ProbeResult ExrDataDecoder::probeFromMemory(uint8_t *inputData, const size_t inp
 
 uint8_t *ExrDataDecoder::loadFromMemory(const ProbeResult &settings,
                                         uint8_t *inputData, const size_t inputSize, BumpAllocator<uint8_t *> &output) {
-    uint8_t *outputData = output.allocate(settings.getShapeSize());
+    const size_t bytesToWrite = static_cast<size_t>(settings.getShapeSize()) * settings.bytesPerItem;
+    uint8_t *outputData = output.allocate(bytesToWrite);
     uint32_t width, height;
-    readExr(inputData, inputSize, width, height, outputData);
+    readExr(inputData, inputSize, width, height, reinterpret_cast<float *>(outputData));
+
+    if (settings.shape.size() != 3 || settings.shape[2] != 3 ||
+        settings.shape[0] != height || settings.shape[1] != width) {
+        throw std::runtime_error("EXR file has inconsistent shape with the probed shape.");
+    }
 
     return outputData;
 }

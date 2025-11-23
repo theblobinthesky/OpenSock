@@ -9,6 +9,8 @@ TODO (important improvements for production use):
 - Fix last races and improve test suite
 - Support WebDataset
 - Dataset refactor with probing/autodiscovery
+- Probing should happen after the augmentations have been applied... Idk??
+- Implement data augmentations and make sure the sizes are correct etc.
 
 Fixed:
 - Fix all sensible clang-tidy warnings

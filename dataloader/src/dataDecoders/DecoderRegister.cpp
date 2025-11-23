@@ -5,6 +5,8 @@
 #include "dataDecoders/NpyDataDecoder.h"
 #include "dataDecoders/PngDataDecoder.h"
 
+DecoderRegister *DecoderRegister::instance;
+
 DecoderRegister &DecoderRegister::getInstance() {
     return *instance;
 }

@@ -29,6 +29,33 @@ static std::vector<std::string> listAllFiles(const std::string &directoryPath) {
     return paths;
 }
 
+// TODO: There should be a global buffer, with a certain number of prefetched items.
+// TODO: We will add this once the flatdatasource is switched to overlapped io.
+static uint8_t *loadFileStoopid(const std::string &path, size_t &inputSize) {
+    inputSize = 0;
+    FILE *f = fopen(path.c_str(), "rb");
+    if (!f) return nullptr;
+
+    fseek(f, 0, SEEK_END);
+    inputSize = ftell(f);
+    rewind(f);
+
+    uint8_t *buf = (uint8_t *) malloc(inputSize);
+    if (!buf) {
+        fclose(f);
+        return nullptr;
+    }
+
+    if (fread(buf, 1, inputSize, f) != inputSize) {
+        free(buf);
+        fclose(f);
+        return nullptr;
+    }
+
+    fclose(f);
+    return buf;
+}
+
 static std::vector<ProbeResult> probeAllSubDirs(const std::string &rootDirectory,
                                                 const std::vector<std::string> &subDirs) {
     std::vector<ProbeResult> probeResults;
@@ -45,7 +72,10 @@ static std::vector<ProbeResult> probeAllSubDirs(const std::string &rootDirectory
                     throw std::runtime_error(std::format("No data decoder registered for extension {}.", ext));
                 }
 
+                size_t inputSize;
+                uint8_t *inputData = loadFileStoopid(entry.path().string(), inputSize);
                 probeResults.push_back(dataDecoder->probeFromMemory(inputData, inputSize));
+                delete[] inputData; // TODO: Delete this once the switch to overlappedio is complete.
                 break;
             }
         }
@@ -101,9 +131,27 @@ std::vector<std::vector<std::string> > FlatDataSource::getEntries() {
     return entries;
 }
 
-void loadFilesIntoContigousBatch(BumpAllocator<uint8_t *> alloc,
-                                 const std::vector<std::vector<std::string> > &batchPaths,
-                                 size_t itemKeysIdx) {
+CpuAllocation FlatDataSource::loadItemSliceIntoContigousBatch(BumpAllocator<uint8_t *> alloc,
+                                                              const std::vector<std::vector<std::string> > &batchPaths,
+                                                              const size_t itemKeysIdx) {
+    const auto &itemKey = itemKeys[itemKeysIdx];
+    IDataDecoder *decoder = DecoderRegister::getInstance().getDataDecoderByExtension(itemKey.probeResult.extension);
+    uint8_t *startOfBuffer = alloc.getCurrent();
+
+    for (const auto &batchPath: batchPaths) {
+        const std::string &path = batchPath[itemKeysIdx];
+
+        size_t inputSize;
+        uint8_t *inputData = loadFileStoopid(path, inputSize);
+        decoder->loadFromMemory(itemKey.probeResult, inputData, inputSize, alloc);
+        delete[] inputData; // TODO: Delete this once the switch to overlappedio is complete.
+    }
+
+    return {
+        .batchBuffer = {
+            .uint8 = startOfBuffer
+        },
+    };
 }
 
 bool FlatDataSource::preInitDataset(const bool forceInvalidation) {

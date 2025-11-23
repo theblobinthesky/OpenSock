@@ -349,7 +349,7 @@ void ResourcePool::threadMain(const size_t threadIdx, const std::atomic_uint32_t
         temporaryAllocator.reset();
         for (size_t i = 0; i < itemKeys.size(); i++) {
             hostAllocations.push_back(
-                dataset.getDataSource()->loadFilesIntoContigousBatch(temporaryAllocator, batchPaths, i)
+                dataset.getDataSource()->loadItemSliceIntoContigousBatch(temporaryAllocator, batchPaths, i)
             );
         }
         DO_SHUTDOWN_OR_GENCHANGE_IF_NECESSARY()
@@ -394,12 +394,15 @@ void ResourcePool::threadMain(const size_t threadIdx, const std::atomic_uint32_t
         std::vector<uint8_t *> gpuAllocations;
         std::vector<Fence> fences;
         for (size_t itemKeyIdx = 0; itemKeyIdx < itemKeys.size(); itemKeyIdx++) {
-            const CpuAllocation &nonPinnedCpuAllocation = hostAllocations[itemKeyIdx];
-            const auto &[host, gpu, _] = allocations.allocate(nonPinnedCpuAllocation.batchBufferSize);
+            const auto &[batchBuffer] = hostAllocations[itemKeyIdx];
+            const size_t batchBufferSize = itemKeys[itemKeyIdx].probeResult.getBufferSize();
+            const auto &[host, gpu, _] = allocations.allocate(batchBufferSize);
 
             // Start async upload to gpu memory as soon as possible.
             // TODO: This also locked a mutex. Maybe this is still necessary?
-            device.copyFromHostToGpuMemory(host, gpu, nonPinnedCpuAllocation.batchBufferSize);
+
+            std::memcpy(host, batchBuffer.uint8, batchBufferSize); // TODO: Think about pinned memory availabilty. I think this is right, but recheck.
+            device.copyFromHostToGpuMemory(host, gpu, batchBufferSize);
             gpuAllocations.push_back(gpu);
             // TODO: This needs to be synchronized by mutex?
             fences.push_back(device.insertNextFenceIntoStream());
