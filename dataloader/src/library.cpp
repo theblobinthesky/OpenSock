@@ -3,6 +3,8 @@
 #include "compression.h"
 #include "resource.h"
 #include <pybind11/numpy.h>
+#include <pybind11/stl.h>
+#include <unordered_map>
 
 #include "dataAugmenter/Pad.h"
 #include "dataAugmenter/RandomResizedCrop.h"
@@ -40,10 +42,13 @@ PYBIND11_MODULE(_core, m) {
             .export_values();
 
     py::class_<Dataset>(m, "Dataset")
-            .def(py::init<IDataSource *,
-                std::vector<IDataTransformAugmentation<2> *>,
+            .def(py::init<std::shared_ptr<IDataSource>,
+                // TODO: std::vector<IDataTransformAugmentation<2> *>,
                 const pybind11::function &,
                 bool>())
+            .def("getEntries", [](const Dataset &self) {
+                return self.getDataSource()->getEntries();
+            })
             .def("splitTrainValidationTest", &Dataset::splitTrainValidationTest);
 
     py::class_<BatchedDataset>(m, "BatchedDataset")
@@ -109,7 +114,11 @@ PYBIND11_MODULE(_core, m) {
                 return {dtype, shape, data->data(), capsule};
             });
 
-    py::class_<FlatDataSource>(m, "FlatDataSource").def(py::init<std::string>());
+    py::class_<IDataSource, std::shared_ptr<IDataSource>>(m, "IDataSource");
+    py::class_<FlatDataSource, IDataSource, std::shared_ptr<FlatDataSource>>(m, "FlatDataSource")
+            .def(py::init<std::string, std::unordered_map<std::string, std::string> >(),
+                 py::arg("root_directory"),
+                 py::arg("subdir_to_dict") = std::unordered_map<std::string, std::string>{});
     py::class_<Pad>(m, "Pad").def(py::init<>());
     py::class_<RandomResizedCrop>(m, "RandomResizedCrop").def(py::init<>());
     py::class_<Resize>(m, "Resize").def(py::init<>());

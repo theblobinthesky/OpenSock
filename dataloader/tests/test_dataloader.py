@@ -65,7 +65,7 @@ def init_ds_fn():
 
 def get_dataset():
     root_dir, sub_dir = ensure_jpg_dataset()
-    return m.Dataset.from_subdirs(root_dir, [m.Head(m.FileType.JPG, "img", (HEIGHT, WIDTH, 3))], [sub_dir], init_ds_fn), root_dir
+    return m.Dataset.from_subdirs(root_dir, {sub_dir: "img"}, init_ds_fn), root_dir
 
 def get_dataloader(batch_size: int, num_threads: int, prefetch_size: int):
     ds, root_dir = get_dataset()
@@ -187,7 +187,7 @@ def test_no_duplicates_across_jpg_dataloaders(dl_cfg):
 
 def test_correctness_exr():
     download_file(EXR_DATASET_URL, EXR_DATASET_FILE)
-    ds = m.Dataset.from_subdirs("temp", [m.Head(m.FileType.EXR, "img", (1080, 1920, 3))], ["img"], init_ds_fn)
+    ds = m.Dataset.from_subdirs("temp", {"img": "img"}, init_ds_fn)
     dl = m.DataLoader(ds, 1, NUM_THREADS, PREFETCH_SIZE)
     img = dl.get_next_batch()['img'][0]
 
@@ -198,7 +198,7 @@ def test_correctness_exr():
 
 def test_correctness_png():
     download_file(PNG_DATASET_URL, PNG_DATASET_FILE)
-    ds = m.Dataset.from_subdirs("temp", [m.Head(m.FileType.PNG, "img", (191, 250, 3))], ["img"], init_ds_fn)
+    ds = m.Dataset.from_subdirs("temp", {"img": "img"}, init_ds_fn)
     dl = m.DataLoader(ds, 1, NUM_THREADS, PREFETCH_SIZE)
     img = dl.get_next_batch()['img'][0]
 
@@ -213,12 +213,11 @@ def test_correctness_npy(tmp_path):
 
     for i in range(16):
         testFile = tmp_path / "subdir" / f"file{i}"
-        np.save(testFile, np.ones((1, 3, 3, 4), dtype=np.float32))
+        np.save(testFile, np.ones((3, 3, 4), dtype=np.float32))
 
     ds = m.Dataset.from_subdirs(
         str(tmp_path), 
-        [m.Head(m.FileType.NPY, "np", (3, 3, 4))],
-        ["subdir"],
+        {"subdir": "np"},
         init_ds_fn
     )
 

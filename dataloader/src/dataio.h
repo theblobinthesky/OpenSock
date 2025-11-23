@@ -66,7 +66,8 @@ public:
 
     virtual void initDataset() = 0;
 
-    virtual IDataSource *splitIntoTwoDatasetsAB(size_t aNumEntries) = 0;
+    virtual void splitIntoTwoDataSources(size_t aNumEntries, std::shared_ptr<IDataSource> &dataSourceA,
+                                std::shared_ptr<IDataSource> &dataSourceB) = 0;
 };
 
 class IDataDecoder {
@@ -106,14 +107,14 @@ struct DatasetBatch {
 // TODO (acktschually necessary or true [lol]?): The dataset is threadsafe by-default and tracks in-flight batches.
 class Dataset {
 public:
-    Dataset(IDataSource *_dataSource,
-            std::vector<IDataTransformAugmentation<2> *> _dataAugmentations,
+    Dataset(std::shared_ptr<IDataSource> _dataSource,
+            // std::vector<IDataTransformAugmentation<2> *> _dataAugmentations,
 
             const pybind11::function &createDatasetFunction,
             bool isVirtualDataset
     );
 
-    Dataset(IDataSource *_dataSource, std::vector<IDataTransformAugmentation<2> *> _dataAugmentations);
+    Dataset(std::shared_ptr<IDataSource> _dataSource, std::vector<IDataTransformAugmentation<2> *> _dataAugmentations);
 
     Dataset(const Dataset &other) = default;
 
@@ -124,7 +125,7 @@ public:
     [[nodiscard]] std::vector<IDataTransformAugmentation<2> *> getDataTransformAugmentations() const;
 
 private:
-    IDataSource *dataSource;
+    std::shared_ptr<IDataSource> dataSource;
     std::vector<IDataTransformAugmentation<2> *> dataAugmentations;
 };
 

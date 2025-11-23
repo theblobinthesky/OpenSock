@@ -8,6 +8,9 @@
 DecoderRegister *DecoderRegister::instance;
 
 DecoderRegister &DecoderRegister::getInstance() {
+    if (instance == nullptr) {
+        instance = new DecoderRegister();
+    }
     return *instance;
 }
 

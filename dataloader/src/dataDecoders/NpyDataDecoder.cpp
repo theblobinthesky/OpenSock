@@ -8,16 +8,16 @@
 ProbeResult NpyDataDecoder::probeFromMemory(uint8_t *inputData, const size_t inputSize) {
     if (inputSize < 12) throw std::runtime_error("NPY too small");
 
-    size_t word_size = 0;
+    size_t wordSize = 0;
     std::vector<size_t> shp;
     bool fortran = false;
-    cnpy::parse_npy_header(inputData, word_size, shp, fortran);
+    cnpy::parse_npy_header(inputData, wordSize, shp, fortran);
 
     if (fortran) {
         throw std::runtime_error("NPY fortran_order True not supported");
     }
-    if (word_size != 4) {
-        throw std::runtime_error("NPY word size not float32 (4 bytes)");
+    if (wordSize != 4) {
+        throw std::runtime_error(std::format("NPY word size is {} not 4 bytes", wordSize));
     }
 
     std::vector<uint32_t> shape;

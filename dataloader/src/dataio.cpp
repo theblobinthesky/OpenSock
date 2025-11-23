@@ -5,12 +5,12 @@
 #include <format>
 #include <utils.h>
 
-Dataset::Dataset(IDataSource *_dataSource,
-                 std::vector<IDataTransformAugmentation<2> *> _dataAugmentations,
+Dataset::Dataset(std::shared_ptr<IDataSource> _dataSource,
+                 // TODO: std::vector<IDataTransformAugmentation<2> *> _dataAugmentations,
                  const pybind11::function &createDatasetFunction,
                  const bool isVirtualDataset
-) : dataSource(_dataSource), dataAugmentations(std::move(_dataAugmentations)) {
-
+) : dataSource(std::move(_dataSource)) // TODO: , dataAugmentations(std::move(_dataAugmentations))
+{
     if (dataSource->preInitDataset(existsEnvVar(INVALID_DS_ENV_VAR) && isVirtualDataset)) {
         createDatasetFunction();
     }
@@ -18,9 +18,9 @@ Dataset::Dataset(IDataSource *_dataSource,
     dataSource->initDataset();
 }
 
-Dataset::Dataset(IDataSource *_dataSource, std::vector<IDataTransformAugmentation<2> *> _dataAugmentations)
-    : dataSource(_dataSource), dataAugmentations(std::move(_dataAugmentations)) {
-
+Dataset::Dataset(std::shared_ptr<IDataSource> _dataSource,
+                 std::vector<IDataTransformAugmentation<2> *> _dataAugmentations)
+    : dataSource(std::move(_dataSource)), dataAugmentations(std::move(_dataAugmentations)) {
     dataSource->initDataset();
 }
 
@@ -40,9 +40,11 @@ std::tuple<Dataset, Dataset, Dataset> Dataset::splitTrainValidationTest(
             "Violated #train examples + #validation examples <= #all examples.");
     }
 
-    IDataSource *trainSource = dataSource->splitIntoTwoDatasetsAB(numTrain);
-    IDataSource *validSource = dataSource->splitIntoTwoDatasetsAB(numValid);
-    IDataSource *testSource = dataSource;
+    std::shared_ptr<IDataSource> trainSource;
+    std::shared_ptr<IDataSource> validSource;
+    std::shared_ptr<IDataSource> testSource;
+    dataSource->splitIntoTwoDataSources(numTrain, trainSource, validSource);
+    validSource->splitIntoTwoDataSources(numValid, validSource, testSource);
 
     return std::make_tuple<>(
         Dataset(trainSource, dataAugmentations),
@@ -52,7 +54,7 @@ std::tuple<Dataset, Dataset, Dataset> Dataset::splitTrainValidationTest(
 }
 
 IDataSource *Dataset::getDataSource() const {
-    return dataSource;
+    return dataSource.get();
 }
 
 std::vector<IDataTransformAugmentation<2> *> Dataset::getDataTransformAugmentations() const {

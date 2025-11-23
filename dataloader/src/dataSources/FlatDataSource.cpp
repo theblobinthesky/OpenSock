@@ -1,21 +1,12 @@
 #include "FlatDataSource.h"
+#include <algorithm>
 #include <random>
+#include <algorithm>
+#include <ranges>
 
 #include "dataDecoders/DecoderRegister.h"
 
 namespace fs = std::filesystem;
-
-static std::vector<std::string> listAllDirectories(const std::string &directoryPath) {
-    std::vector<std::string> paths;
-
-    for (const fs::directory_entry &entry: fs::directory_iterator(directoryPath)) {
-        if (entry.is_directory()) {
-            paths.push_back(entry.path());
-        }
-    }
-
-    return paths;
-}
 
 static std::vector<std::string> listAllFiles(const std::string &directoryPath) {
     std::vector<std::string> paths;
@@ -66,7 +57,7 @@ static std::vector<ProbeResult> probeAllSubDirs(const std::string &rootDirectory
         for (const fs::directory_entry &entry: fs::directory_iterator(std::format("{}/{}", rootDirectory, subDir))) {
             if (entry.is_regular_file()) {
                 foundFile = true;
-                const std::string ext = entry.path().extension().string();
+                const std::string ext = entry.path().extension().string().substr(1);
                 IDataDecoder *dataDecoder = dReg.getDataDecoderByExtension(ext);
                 if (dataDecoder == nullptr) {
                     throw std::runtime_error(std::format("No data decoder registered for extension {}.", ext));
@@ -90,6 +81,10 @@ static std::vector<ProbeResult> probeAllSubDirs(const std::string &rootDirectory
 
 std::string replaceAll(std::string str, const std::string &from,
                        const std::string &to) {
+    if (from == to) {
+        return str;
+    }
+
     size_t pos = 0;
     while ((pos = str.find(from, pos)) != std::string::npos) {
         str = str.replace(pos, from.size(), to);
@@ -109,14 +104,14 @@ std::string validateRootDirectory(std::string rootDirectory) {
     return rootDirectory;
 }
 
-FlatDataSource::FlatDataSource(std::string _rootDirectory)
-    : rootDirectory(std::move(_rootDirectory)), initRequired(false) {
+FlatDataSource::FlatDataSource(std::string _rootDirectory,
+                               std::unordered_map<std::string, std::string> _subdirToDictName)
+    : rootDirectory(std::move(_rootDirectory)), subdirToDictName(std::move(_subdirToDictName)), initRequired(false) {
     rootDirectory = validateRootDirectory(rootDirectory);
     initRequired = !fs::exists(rootDirectory);
 }
 
-FlatDataSource::FlatDataSource(std::string _rootDirectory,
-                               std::vector<ItemKey> _itemKeys,
+FlatDataSource::FlatDataSource(std::string _rootDirectory, std::vector<ItemKey> _itemKeys,
                                std::vector<std::vector<std::string> > _entries)
     : rootDirectory(std::move(_rootDirectory)), itemKeys(std::move(_itemKeys)), entries(std::move(_entries)),
       initRequired(false) {
@@ -170,20 +165,24 @@ void FlatDataSource::initDataset() {
     verifyDatasetIsConsistent();
 }
 
-IDataSource *FlatDataSource::splitIntoTwoDatasetsAB(const size_t aNumEntries) {
+void FlatDataSource::splitIntoTwoDataSources(const size_t aNumEntries, std::shared_ptr<IDataSource> &dataSourceA, std::shared_ptr<IDataSource> &dataSourceB) {
     if (aNumEntries > entries.size()) {
         throw std::runtime_error("Data source can only be split into two smaller sources.");
     }
 
     const std::vector aEntries(entries.begin(), entries.begin() + static_cast<int>(aNumEntries));
-    const auto aSource = new FlatDataSource(rootDirectory, itemKeys, aEntries);
-    entries = std::vector(entries.begin() + static_cast<int>(aNumEntries), entries.end());
+    const std::vector bEntries(entries.begin() + static_cast<int>(aNumEntries), entries.end());
 
-    return aSource;
+    dataSourceA = std::make_shared<FlatDataSource>(rootDirectory, itemKeys, aEntries);
+    dataSourceB = std::make_shared<FlatDataSource>(rootDirectory, itemKeys, bEntries);
 }
 
 void FlatDataSource::initDatasetFromRootDirectory() {
-    const auto subDirs = listAllDirectories(rootDirectory);
+    std::vector<std::string> subDirs;
+    subDirs.reserve(subdirToDictName.size());
+    for (const auto &keys: subdirToDictName | std::views::keys) {
+        subDirs.push_back(keys);
+    }
 
     if (subDirs.empty()) {
         throw std::runtime_error(
@@ -237,8 +236,9 @@ void FlatDataSource::initDatasetFromRootDirectory() {
     std::ranges::shuffle(entries, rnd);
 
     for (size_t i = 0; i < subDirs.size(); i++) {
+        const std::string dictName = subdirToDictName.find(subDirs[i])->second;
         itemKeys.push_back({
-            .keyName = subDirs[i],
+            .keyName = dictName,
             .spatialHint = SpatialHint::XXX,
             .probeResult = probeResults[i]
         });

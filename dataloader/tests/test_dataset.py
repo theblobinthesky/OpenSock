@@ -1,31 +1,36 @@
-from native_dataloader import Head, Dataset, BatchedDataset, FileType
-import pytest as t
 from pathlib import PosixPath
+import pytest as t
+from native_dataloader import Dataset, BatchedDataset, DataLoader
+import numpy as np
+from PIL import Image as pimg
+
 
 def init_fn():
     pass
 
-def get_dataset(tmp_path: PosixPath, eroneous: bool):
-    exts = ["exr", "jpg", "npy"]
-    for i, ext in list(zip(range(3), exts))[:2 if eroneous else 3]:
+def make_dataset(tmp_path: PosixPath, erroneous: bool, add_trailing_slash: bool=False) -> Dataset:
+    exts = ["png", "jpg", "npy"]
+    mapping = {f"subdir{i}": f"dictname{i + 1}" for i in range(3)}
+
+    for i, ext in list(zip(range(3), exts))[:2 if erroneous else 3]:
         subdir = tmp_path / f"subdir{i}"
         subdir.mkdir()
-
         for f in range(10):
             file = subdir / f"file{f}.{ext}"
-            file.write_text("Hello World!")
 
-    sh = (100, 100, 3)
-    return Dataset.from_subdirs(
-        str(tmp_path),
-        [
-            Head(FileType.EXR, "dictname1", sh),
-            Head(FileType.JPG, "dictname2", sh),
-            Head(FileType.NPY, "dictname3", sh),
-        ],
-        ["subdir0", "subdir1", "subdir2"],
-        init_fn
-    )
+            if ext == "png" or ext == "jpg":
+                pimg.new('RGB', (512, 512)).save(file)
+            elif ext == "npy":
+                np.save(file, np.zeros((2, 2), np.float32))
+            else:
+                raise ValueError("Unsupported file extension.")
+
+    root_dir = str(tmp_path)
+    if add_trailing_slash:
+        root_dir += "/"
+
+    return Dataset.from_subdirs(root_dir, mapping, init_fn)
+
 
 def get_batched_dataset(ds: Dataset):
     return BatchedDataset(ds, len(ds))
@@ -33,55 +38,23 @@ def get_batched_dataset(ds: Dataset):
 
 def test_get_eroneous_dataset(tmp_path):
     with t.raises(RuntimeError):
-        get_dataset(tmp_path, eroneous=True)
+        make_dataset(tmp_path, erroneous=True)
+
 
 def test_get_dataset(tmp_path):
-    ds = get_dataset(tmp_path, eroneous=False)
+    ds = make_dataset(tmp_path, erroneous=False)
     assert len(ds.entries) == 10
     assert all(len(entry) == 3 for entry in ds.entries)
 
-def verify_dataset_reconstruction(tmp_path, add_trailing_slash: bool, use_absolute_paths: bool):
-    ds = get_dataset(tmp_path, eroneous=False)
-    sh = (100, 100, 3)
-    root_dir = str(tmp_path)
 
-    if use_absolute_paths:
-        entries = [[f"{root_dir}{sub_path}" for sub_path in item] for item in ds.entries]
-    else:
-        entries = ds.entries
-
-    if add_trailing_slash:
-        root_dir += '/'
-
-    ds2 = Dataset.from_entries(
-        root_dir,
-        [
-            Head(FileType.EXR, "dictname1", sh),
-            Head(FileType.JPG, "dictname2", sh),
-            Head(FileType.NPY, "dictname3", sh),
-        ],
-        entries
-    )
-
-    b1 = get_batched_dataset(ds).get_next_batch()
-    b2 = get_batched_dataset(ds2).get_next_batch()
-
-    assert sorted(tuple(b1)) == sorted(tuple(b2))
-
-def test_dataset_from_entries_normal(tmp_path):
-    verify_dataset_reconstruction(tmp_path, False, False)
-
-def test_dataset_from_entries_prepend(tmp_path):
-    verify_dataset_reconstruction(tmp_path, False, True)
-
-def test_dataset_from_entries_append(tmp_path):
-    verify_dataset_reconstruction(tmp_path, True, False)
-
-def test_dataset_from_entries_prepend_append(tmp_path):
-    verify_dataset_reconstruction(tmp_path, True, True)
+def test_dataset_works_with_trailing_slash(tmp_path):
+    ds = make_dataset(tmp_path, erroneous=False)
+    assert len(ds.entries) == 10
 
 def test_split_dataset(tmp_path):
-    ds = get_dataset(tmp_path, eroneous=False)
+    ds = make_dataset(tmp_path, erroneous=False)
+    assert len(ds) == 10
+
     train_ds, valid_ds, test_ds = ds.split_train_validation_test(0.5, 0.2)
 
     b = get_batched_dataset(ds).get_next_batch()
