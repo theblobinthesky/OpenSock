@@ -54,13 +54,17 @@ public:
 
     virtual std::vector<ItemKey> getItemKeys() = 0;
 
-    virtual std::vector<std::vector<std::string>> getEntries() = 0;
+    virtual std::vector<std::vector<std::string> > getEntries() = 0;
 
-    virtual void loadFile(uint8_t *&data, size_t &size) = 0;
+    virtual CpuAllocation loadFilesIntoContigousBatch(BumpAllocator<uint8_t *> alloc,
+                                                      const std::vector<std::vector<std::string> > &batchPaths,
+                                                      size_t itemKeysIdx) = 0;
 
     virtual bool preInitDataset(bool forceInvalidation) = 0;
 
     virtual void initDataset() = 0;
+
+    virtual IDataSource *splitIntoTwoDatasetsAB(size_t aNumEntries) = 0;
 };
 
 class IDataDecoder {
@@ -107,17 +111,18 @@ public:
             bool isVirtualDataset
     );
 
+    Dataset(IDataSource *_dataSource, std::vector<IDataTransformAugmentation<2> *> _dataAugmentations);
+
     Dataset(const Dataset &other) = default;
 
-    std::tuple<Dataset, Dataset, Dataset> splitTrainValidationTest(float trainPercentage, float validPercentage);
+    [[nodiscard]] std::tuple<Dataset, Dataset, Dataset> splitTrainValidationTest(float trainPercentage, float validPercentage) const;
 
     [[nodiscard]] IDataSource *getDataSource() const;
-    [[nodiscard]] IDataDecoder *getDataDecoderByExtension(const std::string &ext) const;
+
     [[nodiscard]] std::vector<IDataTransformAugmentation<2> *> getDataTransformAugmentations() const;
 
 private:
     IDataSource *dataSource;
-    std::unordered_map<std::string, IDataDecoder *> extToDataDecoder;
     std::vector<IDataTransformAugmentation<2> *> dataAugmentations;
 };
 

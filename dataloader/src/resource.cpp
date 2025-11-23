@@ -341,14 +341,15 @@ void ResourcePool::threadMain(const size_t threadIdx, const std::atomic_uint32_t
 
 
         const auto [startingOffset, batchPaths] = dl->batchedDataset.getNextInFlightBatch();
-        const std::vector<ItemKey> &itemKeys = dl->batchedDataset.getDataset().getDataSource()->getItemKeys();
+        auto &dataset = dl->batchedDataset.getDataset();
+        const std::vector<ItemKey> &itemKeys = dataset.getDataSource()->getItemKeys();
 
         // For each head, load all batch items into one contigous cpu array.
         std::vector<CpuAllocation> hostAllocations;
         temporaryAllocator.reset();
         for (size_t i = 0; i < itemKeys.size(); i++) {
             hostAllocations.push_back(
-                loadFilesFromHeadIntoContigousBatch(temporaryAllocator, batchPaths, heads, headIdx)
+                dataset.getDataSource()->loadFilesIntoContigousBatch(temporaryAllocator, batchPaths, i)
             );
         }
         DO_SHUTDOWN_OR_GENCHANGE_IF_NECESSARY()

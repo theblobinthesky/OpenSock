@@ -1,6 +1,8 @@
 #include "FlatDataSource.h"
 #include <random>
 
+#include "dataDecoders/DecoderRegister.h"
+
 namespace fs = std::filesystem;
 
 static std::vector<std::string> listAllDirectories(const std::string &directoryPath) {
@@ -28,8 +30,9 @@ static std::vector<std::string> listAllFiles(const std::string &directoryPath) {
 }
 
 static std::vector<ProbeResult> probeAllSubDirs(const std::string &rootDirectory,
-                                                  const std::vector<std::string> &subDirs) {
+                                                const std::vector<std::string> &subDirs) {
     std::vector<ProbeResult> probeResults;
+    DecoderRegister &dReg = DecoderRegister::getInstance();
 
     for (const std::string &subDir: subDirs) {
         bool foundFile = false;
@@ -37,7 +40,12 @@ static std::vector<ProbeResult> probeAllSubDirs(const std::string &rootDirectory
             if (entry.is_regular_file()) {
                 foundFile = true;
                 const std::string ext = entry.path().extension().string();
+                IDataDecoder *dataDecoder = dReg.getDataDecoderByExtension(ext);
+                if (dataDecoder == nullptr) {
+                    throw std::runtime_error(std::format("No data decoder registered for extension {}.", ext));
+                }
 
+                probeResults.push_back(dataDecoder->probeFromMemory(inputData, inputSize));
                 break;
             }
         }
@@ -59,8 +67,7 @@ std::string replaceAll(std::string str, const std::string &from,
     return str;
 }
 
-FlatDataSource::FlatDataSource(std::string _rootDirectory)
-    : rootDirectory(std::move(_rootDirectory)), initRequired(false) {
+std::string validateRootDirectory(std::string rootDirectory) {
     if (rootDirectory.empty()) {
         throw std::runtime_error("Cannot instantiate a dataset with an empty root directory name.");
     }
@@ -69,18 +76,34 @@ FlatDataSource::FlatDataSource(std::string _rootDirectory)
         rootDirectory.erase(rootDirectory.end() - 1);
     }
 
+    return rootDirectory;
+}
+
+FlatDataSource::FlatDataSource(std::string _rootDirectory)
+    : rootDirectory(std::move(_rootDirectory)), initRequired(false) {
+    rootDirectory = validateRootDirectory(rootDirectory);
     initRequired = !fs::exists(rootDirectory);
+}
+
+FlatDataSource::FlatDataSource(std::string _rootDirectory,
+                               std::vector<ItemKey> _itemKeys,
+                               std::vector<std::vector<std::string> > _entries)
+    : rootDirectory(std::move(_rootDirectory)), itemKeys(std::move(_itemKeys)), entries(std::move(_entries)),
+      initRequired(false) {
+    rootDirectory = validateRootDirectory(rootDirectory);
 }
 
 std::vector<ItemKey> FlatDataSource::getItemKeys() {
     return itemKeys;
 }
 
-std::vector<std::vector<std::string>> FlatDataSource::getEntries() {
+std::vector<std::vector<std::string> > FlatDataSource::getEntries() {
     return entries;
 }
 
-void FlatDataSource::loadFile(uint8_t *&data, size_t &size) {
+void loadFilesIntoContigousBatch(BumpAllocator<uint8_t *> alloc,
+                                 const std::vector<std::vector<std::string> > &batchPaths,
+                                 size_t itemKeysIdx) {
 }
 
 bool FlatDataSource::preInitDataset(const bool forceInvalidation) {
@@ -93,6 +116,25 @@ bool FlatDataSource::preInitDataset(const bool forceInvalidation) {
 }
 
 void FlatDataSource::initDataset() {
+    if (entries.empty()) {
+        initDatasetFromRootDirectory();
+    }
+    verifyDatasetIsConsistent();
+}
+
+IDataSource *FlatDataSource::splitIntoTwoDatasetsAB(const size_t aNumEntries) {
+    if (aNumEntries > entries.size()) {
+        throw std::runtime_error("Data source can only be split into two smaller sources.");
+    }
+
+    const std::vector aEntries(entries.begin(), entries.begin() + static_cast<int>(aNumEntries));
+    const auto aSource = new FlatDataSource(rootDirectory, itemKeys, aEntries);
+    entries = std::vector(entries.begin() + static_cast<int>(aNumEntries), entries.end());
+
+    return aSource;
+}
+
+void FlatDataSource::initDatasetFromRootDirectory() {
     const auto subDirs = listAllDirectories(rootDirectory);
 
     if (subDirs.empty()) {
@@ -143,11 +185,28 @@ void FlatDataSource::initDataset() {
         }
     }
 
+    auto rnd = std::default_random_engine{0};
+    std::ranges::shuffle(entries, rnd);
+
+    for (size_t i = 0; i < subDirs.size(); i++) {
+        itemKeys.push_back({
+            .keyName = subDirs[i],
+            .spatialHint = SpatialHint::XXX,
+            .probeResult = probeResults[i]
+        });
+    }
+}
+
+void FlatDataSource::verifyDatasetIsConsistent() {
     if (entries.empty()) {
         throw std::runtime_error("Cannot instantiate an empty dataset.");
     }
 
     for (auto &item: entries) {
+        if (item.size() != itemKeys.size()) {
+            throw std::runtime_error("All batch items have to have exactly as many entries as the item keys.");
+        }
+
         for (auto &subPath: item) {
             if (subPath.size() >= rootDirectory.size()) {
                 if (std::memcmp(subPath.data(), rootDirectory.data(), rootDirectory.size()) == 0) {
@@ -159,16 +218,5 @@ void FlatDataSource::initDataset() {
                 }
             }
         }
-    }
-
-    auto rnd = std::default_random_engine{0};
-    std::ranges::shuffle(entries, rnd);
-
-    for (size_t i = 0; i < subDirs.size(); i++) {
-        itemKeys.push_back({
-            .keyName = subDirs[i],
-            .spatialHint = SpatialHint::XXX,
-            .probeResult = probeResults[i]
-        });
     }
 }

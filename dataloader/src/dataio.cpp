@@ -5,22 +5,11 @@
 #include <format>
 #include <utils.h>
 
-#include "dataDecoders/CompressedDataDecoder.h"
-#include "dataDecoders/ExrDataDecoder.h"
-#include "dataDecoders/JpgDataDecoder.h"
-#include "dataDecoders/NpyDataDecoder.h"
-#include "dataDecoders/PngDataDecoder.h"
-
 Dataset::Dataset(IDataSource *_dataSource,
                  std::vector<IDataTransformAugmentation<2> *> _dataAugmentations,
                  const pybind11::function &createDatasetFunction,
                  const bool isVirtualDataset
 ) : dataSource(_dataSource), dataAugmentations(std::move(_dataAugmentations)) {
-    extToDataDecoder["jpg"] = new JpgDataDecoder();
-    extToDataDecoder["png"] = new PngDataDecoder();
-    extToDataDecoder["npy"] = new NpyDataDecoder();
-    extToDataDecoder["exr"] = new ExrDataDecoder();
-    extToDataDecoder["compressed"] = new CompressedDataDecoder();
 
     if (dataSource->preInitDataset(existsEnvVar(INVALID_DS_ENV_VAR) && isVirtualDataset)) {
         createDatasetFunction();
@@ -29,29 +18,36 @@ Dataset::Dataset(IDataSource *_dataSource,
     dataSource->initDataset();
 }
 
+Dataset::Dataset(IDataSource *_dataSource, std::vector<IDataTransformAugmentation<2> *> _dataAugmentations)
+    : dataSource(_dataSource), dataAugmentations(std::move(_dataAugmentations)) {
+
+    dataSource->initDataset();
+}
+
 std::tuple<Dataset, Dataset, Dataset> Dataset::splitTrainValidationTest(
-    const float trainPercentage, const float validPercentage) {
+    const float trainPercentage, const float validPercentage) const {
     if (trainPercentage <= 0.0f || validPercentage <= 0.0f) {
         throw std::runtime_error(
             "Train and validation set must contain more than 0% of elements.");
     }
 
-    const int numTrain = static_cast<int>(std::round(trainPercentage * static_cast<float>(entries.size())));
-    const int numValid = static_cast<int>(std::round(validPercentage * static_cast<float>(entries.size())));
+    const size_t numEntries = dataSource->getEntries().size();
+    const int numTrain = static_cast<int>(std::round(trainPercentage * static_cast<float>(numEntries)));
+    const int numValid = static_cast<int>(std::round(validPercentage * static_cast<float>(numEntries)));
 
-    if (numTrain + numValid > static_cast<int>(entries.size())) {
+    if (numTrain + numValid > static_cast<int>(numEntries)) {
         throw std::runtime_error(
             "Violated #train examples + #validation examples <= #all examples.");
     }
 
-    const std::vector trainEntries(entries.begin(), entries.begin() + numTrain);
-    const std::vector validEntries(entries.begin() + numTrain, entries.begin() + numTrain + numValid);
-    const std::vector testEntries(entries.begin() + numTrain + numValid, entries.end());
+    IDataSource *trainSource = dataSource->splitIntoTwoDatasetsAB(numTrain);
+    IDataSource *validSource = dataSource->splitIntoTwoDatasetsAB(numValid);
+    IDataSource *testSource = dataSource;
 
     return std::make_tuple<>(
-        Dataset(rootDir + "", std::vector(heads), trainEntries),
-        Dataset(rootDir + "", std::vector(heads), validEntries),
-        Dataset(rootDir + "", std::vector(heads), testEntries)
+        Dataset(trainSource, dataAugmentations),
+        Dataset(validSource, dataAugmentations),
+        Dataset(testSource, dataAugmentations)
     );
 }
 
@@ -59,13 +55,8 @@ IDataSource *Dataset::getDataSource() const {
     return dataSource;
 }
 
-IDataDecoder *getDataDecoderByExtension(const std::string &ext) const {
-
-}
-
 std::vector<IDataTransformAugmentation<2> *> Dataset::getDataTransformAugmentations() const {
     return dataAugmentations;
-
 }
 
 BatchedDataset::BatchedDataset(const Dataset &dataset, const size_t batchSize) : dataset(dataset),
@@ -87,7 +78,7 @@ DatasetBatch BatchedDataset::getNextInFlightBatch() {
     for (size_t i = offset; i < offset + batchSize; i++) {
         std::vector<std::string> entry;
 
-        for (const auto& subPath: entries[i % entries.size()]) {
+        for (const auto &subPath: entries[i % entries.size()]) {
             entry.push_back(subPath);
         }
 

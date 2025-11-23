@@ -76,6 +76,7 @@ python_add_library(_core MODULE
         src/compression.cpp
         src/dataSources/FlatDataSource.cpp
         src/dataSources/WebDatasetDataSource.cpp
+        src/dataDecoders/DecoderRegister.cpp
         src/dataDecoders/JpgDataDecoder.cpp
         src/dataDecoders/PngDataDecoder.cpp
         src/dataDecoders/ExrDataDecoder.cpp

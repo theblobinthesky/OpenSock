@@ -1,5 +1,6 @@
 #include "NpyDataDecoder.h"
 #include "cnpy.h"
+#include <cstddef>
 #include <stdexcept>
 #include <vector>
 #include <cstring>
