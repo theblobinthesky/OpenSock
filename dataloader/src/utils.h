@@ -5,6 +5,8 @@
 #include <functional>
 #include <semaphore>
 #include <string>
+#include <random>
+#include <chrono>
 #include "spdlog/spdlog.h"
 
 #ifdef ENABLE_DEBUG_PRINT
@@ -126,5 +128,17 @@ struct Fence {
 struct ConsumerStream {
     uint64_t id;
 };
+
+enum class ItemFormat {
+    UINT,
+    FLOAT
+};
+
+double randomUniformDoubleBetween01(const uint64_t seed, const uint64_t subSeed) {
+    std::default_random_engine engine;
+    engine.seed(seed + subSeed * 0xffff);
+    std::uniform_real_distribution<> uniform;
+    return uniform(engine);
+}
 
 #endif

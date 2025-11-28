@@ -6,7 +6,7 @@
 #define VERSION_RANDOMRESIZEDCROP_H
 
 
-class RandomResizedCrop {
+class RandomCropAugmentation {
 };
 
 

@@ -6,9 +6,9 @@
 #include <pybind11/stl.h>
 #include <unordered_map>
 
-#include "dataAugmenter/Pad.h"
-#include "dataAugmenter/RandomResizedCrop.h"
-#include "dataAugmenter/Resize.h"
+#include "dataAugmenter/PadAugmentation.h"
+#include "dataAugmenter/RandomCropAugmentation.h"
+#include "dataAugmenter/ResizeAugmentation.h"
 #include "dataSources/FlatDataSource.h"
 
 #define STRINGIFY(x) #x
@@ -119,9 +119,9 @@ PYBIND11_MODULE(_core, m) {
             .def(py::init<std::string, std::unordered_map<std::string, std::string> >(),
                  py::arg("root_directory"),
                  py::arg("subdir_to_dict") = std::unordered_map<std::string, std::string>{});
-    py::class_<Pad>(m, "Pad").def(py::init<>());
-    py::class_<RandomResizedCrop>(m, "RandomResizedCrop").def(py::init<>());
-    py::class_<Resize>(m, "Resize").def(py::init<>());
+    py::class_<PadAugmentation>(m, "Pad").def(py::init<>());
+    py::class_<RandomCropAugmentation>(m, "RandomResizedCrop").def(py::init<>());
+    py::class_<ResizeAugmentation>(m, "Resize").def(py::init<>());
 
     // Expose explicit shutdown for the global resource pool.
     m.def("shutdown_resource_pool", [] { ResourcePool::get().shutdown(); });

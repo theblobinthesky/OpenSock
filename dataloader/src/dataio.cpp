@@ -5,12 +5,28 @@
 #include <format>
 #include <utils.h>
 
+bool checkTransformOperatesOnStandardNDShape(const std::vector<size_t> &inputShape,
+                                             std::vector<size_t> &outputShape, size_t n) {
+    if (inputShape.size() != 3 || outputShape.size() != 3) {
+        return false;
+    }
+
+    if (inputShape[2] != n) {
+        return false;
+    }
+
+    if (!std::equal(inputShape.begin(), inputShape.end(), outputShape.begin())) {
+        return false;
+    }
+
+    return true;
+}
+
 Dataset::Dataset(std::shared_ptr<IDataSource> _dataSource,
-                 // TODO: std::vector<IDataTransformAugmentation<2> *> _dataAugmentations,
+                 std::vector<IDataTransformAugmentation *> _dataAugmentations,
                  const pybind11::function &createDatasetFunction,
                  const bool isVirtualDataset
-) : dataSource(std::move(_dataSource)) // TODO: , dataAugmentations(std::move(_dataAugmentations))
-{
+) : dataSource(std::move(_dataSource)), dataAugmentations(std::move(_dataAugmentations)) {
     if (dataSource->preInitDataset(existsEnvVar(INVALID_DS_ENV_VAR) && isVirtualDataset)) {
         createDatasetFunction();
     }
@@ -19,7 +35,7 @@ Dataset::Dataset(std::shared_ptr<IDataSource> _dataSource,
 }
 
 Dataset::Dataset(std::shared_ptr<IDataSource> _dataSource,
-                 std::vector<IDataTransformAugmentation<2> *> _dataAugmentations)
+                 std::vector<IDataTransformAugmentation *> _dataAugmentations)
     : dataSource(std::move(_dataSource)), dataAugmentations(std::move(_dataAugmentations)) {
     dataSource->initDataset();
 }
@@ -57,7 +73,12 @@ IDataSource *Dataset::getDataSource() const {
     return dataSource.get();
 }
 
-std::vector<IDataTransformAugmentation<2> *> Dataset::getDataTransformAugmentations() const {
+std::vector<IDataTransformAugmentation < 2> *
+
+
+
+>
+Dataset::getDataTransformAugmentations() const {
     return dataAugmentations;
 }
 

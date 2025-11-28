@@ -1,4 +1,4 @@
-#include "Resize.h"
+#include "ResizeAugmentation.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -30,4 +30,21 @@ void resizeImage(const ImageData &image, unsigned char *outputBuffer,
                             static_cast<int>(outputWidth),
                             static_cast<int>(outputHeight),
                             static_cast<int>(outputWidth) * 3, STBIR_RGB);
+}
+
+bool ResizeAugmentation::augment(const std::vector<size_t> &inputShape,
+                     std::vector<size_t> &outputShape,
+                     double affine[2][2 + 1]) {
+    if (!checkTransformOperatesOnStandardNDShape(inputShape, outputShape, 2)) {
+        return false;
+    }
+
+    affine[0][0] = 0;
+    affine[0][1] = 0;
+    affine[0][2] = 0;
+    affine[1][0] = 0;
+    affine[1][1] = 0;
+    affine[1][2] = 0;
+
+    return true;
 }

@@ -6,7 +6,7 @@
 #define VERSION_PAD_H
 
 
-class Pad {
+class PadAugmentation {
 };
 
 

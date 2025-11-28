@@ -7,23 +7,13 @@
 #include <pybind11/stl.h>
 
 #include "utils.h"
+#include "dataAugmenter/DataAugmentation.h"
 
 struct CpuAllocation {
     union {
         uint8_t *uint8;
         float *float32;
     } batchBuffer;
-};
-
-enum class SpatialHint : uint8_t {
-    XXX,
-    C_XXX,
-    XXX_C
-};
-
-enum class ItemFormat {
-    UINT,
-    FLOAT
 };
 
 struct ProbeResult {
@@ -59,15 +49,15 @@ public:
     virtual std::vector<std::vector<std::string> > getEntries() = 0;
 
     virtual CpuAllocation loadItemSliceIntoContigousBatch(BumpAllocator<uint8_t *> alloc,
-                                                      const std::vector<std::vector<std::string> > &batchPaths,
-                                                      size_t itemKeysIdx) = 0;
+                                                          const std::vector<std::vector<std::string> > &batchPaths,
+                                                          size_t itemKeysIdx) = 0;
 
     virtual bool preInitDataset(bool forceInvalidation) = 0;
 
     virtual void initDataset() = 0;
 
     virtual void splitIntoTwoDataSources(size_t aNumEntries, std::shared_ptr<IDataSource> &dataSourceA,
-                                std::shared_ptr<IDataSource> &dataSourceB) = 0;
+                                         std::shared_ptr<IDataSource> &dataSourceB) = 0;
 };
 
 class IDataDecoder {
@@ -82,21 +72,10 @@ public:
     virtual std::string getExtension() = 0;
 };
 
-template<size_t D>
-class IDataTransformAugmentation {
-public:
-    virtual ~IDataTransformAugmentation() = default;
-
-    // Returns true if the input shape is supported by this augmentation.
-    virtual bool augment(const std::vector<size_t> &inputShape,
-                         std::vector<size_t> &outputShape,
-                         double affine[D][D + 1]) = 0;
-};
-
 class IoResources {
     std::unordered_map<std::string, IDataSource> sources;
     std::unordered_map<std::string, IDataDecoder> decoders;
-    std::unordered_map<std::string, IDataTransformAugmentation<2> > augmenters;
+    std::unordered_map<std::string, IDataTransformAugmentation> augmenters;
 };
 
 struct DatasetBatch {
@@ -108,25 +87,26 @@ struct DatasetBatch {
 class Dataset {
 public:
     Dataset(std::shared_ptr<IDataSource> _dataSource,
-            // std::vector<IDataTransformAugmentation<2> *> _dataAugmentations,
+            std::vector<IDataTransformAugmentation *> _dataAugmentations,
 
             const pybind11::function &createDatasetFunction,
             bool isVirtualDataset
     );
 
-    Dataset(std::shared_ptr<IDataSource> _dataSource, std::vector<IDataTransformAugmentation<2> *> _dataAugmentations);
+    Dataset(std::shared_ptr<IDataSource> _dataSource, std::vector<IDataTransformAugmentation *> _dataAugmentations);
 
     Dataset(const Dataset &other) = default;
 
-    [[nodiscard]] std::tuple<Dataset, Dataset, Dataset> splitTrainValidationTest(float trainPercentage, float validPercentage) const;
+    [[nodiscard]] std::tuple<Dataset, Dataset, Dataset> splitTrainValidationTest(
+        float trainPercentage, float validPercentage) const;
 
     [[nodiscard]] IDataSource *getDataSource() const;
 
-    [[nodiscard]] std::vector<IDataTransformAugmentation<2> *> getDataTransformAugmentations() const;
+    [[nodiscard]] std::vector<IDataTransformAugmentation *> getDataTransformAugmentations() const;
 
 private:
     std::shared_ptr<IDataSource> dataSource;
-    std::vector<IDataTransformAugmentation<2> *> dataAugmentations;
+    std::vector<IDataTransformAugmentation *> dataAugmentations;
 };
 
 class BatchedDataset {
