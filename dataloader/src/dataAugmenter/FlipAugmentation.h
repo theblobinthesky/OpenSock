@@ -1,14 +1,14 @@
 #ifndef VERSION_FLIPAUGMENTATION_H
 #define VERSION_FLIPAUGMENTATION_H
 
-#include "dataAugmenter/DataAugmentation.h"
+#include "dataAugmenter/augmentation.h"
 
 struct FlipItemSettings {
     bool doesHorizontalFlip;
     bool doesVerticalFlip;
 };
 
-class FlipAugmentation final : public IDataTransformAugmentation {
+class FlipAugmentation final : public IDataAugmentation {
 public:
     FlipAugmentation(
         bool flipHorizontal, float horizontalFlipProbability,

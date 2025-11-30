@@ -82,7 +82,7 @@ python_add_library(_core MODULE
         src/dataDecoders/ExrDataDecoder.cpp
         src/dataDecoders/NpyDataDecoder.cpp
         src/dataDecoders/CompressedDataDecoder.cpp
-        src/dataAugmenter/DataAugmentation.cpp
+        src/dataAugmenter/augmentation.cpp
         src/dataAugmenter/ResizeAugmentation.cpp
         src/dataAugmenter/RandomCropAugmentation.cpp
         src/dataAugmenter/PadAugmentation.cpp

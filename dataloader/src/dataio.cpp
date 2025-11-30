@@ -23,7 +23,7 @@ bool checkTransformOperatesOnStandardNDShape(const std::vector<size_t> &inputSha
 }
 
 Dataset::Dataset(std::shared_ptr<IDataSource> _dataSource,
-                 std::vector<IDataTransformAugmentation *> _dataAugmentations,
+                 std::vector<IDataAugmentation *> _dataAugmentations,
                  const pybind11::function &createDatasetFunction,
                  const bool isVirtualDataset
 ) : dataSource(std::move(_dataSource)), dataAugmentations(std::move(_dataAugmentations)) {
@@ -35,7 +35,7 @@ Dataset::Dataset(std::shared_ptr<IDataSource> _dataSource,
 }
 
 Dataset::Dataset(std::shared_ptr<IDataSource> _dataSource,
-                 std::vector<IDataTransformAugmentation *> _dataAugmentations)
+                 std::vector<IDataAugmentation *> _dataAugmentations)
     : dataSource(std::move(_dataSource)), dataAugmentations(std::move(_dataAugmentations)) {
     dataSource->initDataset();
 }
@@ -73,7 +73,7 @@ IDataSource *Dataset::getDataSource() const {
     return dataSource.get();
 }
 
-std::vector<IDataTransformAugmentation < 2> *
+std::vector<IDataAugmentation < 2> *
 
 
 

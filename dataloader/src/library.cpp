@@ -114,14 +114,15 @@ PYBIND11_MODULE(_core, m) {
                 return {dtype, shape, data->data(), capsule};
             });
 
-    py::class_<IDataSource, std::shared_ptr<IDataSource>>(m, "IDataSource");
-    py::class_<FlatDataSource, IDataSource, std::shared_ptr<FlatDataSource>>(m, "FlatDataSource")
+    py::class_<IDataSource, std::shared_ptr<IDataSource> >(m, "IDataSource");
+    py::class_<FlatDataSource, IDataSource, std::shared_ptr<FlatDataSource> >(m, "FlatDataSource")
             .def(py::init<std::string, std::unordered_map<std::string, std::string> >(),
                  py::arg("root_directory"),
                  py::arg("subdir_to_dict") = std::unordered_map<std::string, std::string>{});
-    py::class_<PadAugmentation>(m, "Pad").def(py::init<>());
-    py::class_<RandomCropAugmentation>(m, "RandomResizedCrop").def(py::init<>());
-    py::class_<ResizeAugmentation>(m, "Resize").def(py::init<>());
+
+    py::class_<PadAugmentation>(m, "PadAugmentation").def(py::init<>());
+    py::class_<RandomCropAugmentation>(m, "RandomCropAugmentation").def(py::init<>());
+    py::class_<ResizeAugmentation>(m, "ResizeAugmentation").def(py::init<>());
 
     // Expose explicit shutdown for the global resource pool.
     m.def("shutdown_resource_pool", [] { ResourcePool::get().shutdown(); });

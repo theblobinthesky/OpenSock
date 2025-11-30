@@ -7,7 +7,7 @@
 #include <pybind11/stl.h>
 
 #include "utils.h"
-#include "dataAugmenter/DataAugmentation.h"
+#include "dataAugmenter/augmentation.h"
 
 struct CpuAllocation {
     union {
@@ -31,6 +31,13 @@ struct ProbeResult {
     [[nodiscard]] uint32_t getBufferSize() const {
         return bytesPerItem * getShapeSize();
     }
+};
+
+enum class SpatialHint : uint8_t {
+    XXX,
+    // TODO: THIS IS BAD. THEY SHOULD BE CALLED POINTS; RASTER instead as you don't actually want the memory layout to change!!!!!!!!!!
+    C_XXX,
+    XXX_C
 };
 
 struct ItemKey {
@@ -75,7 +82,7 @@ public:
 class IoResources {
     std::unordered_map<std::string, IDataSource> sources;
     std::unordered_map<std::string, IDataDecoder> decoders;
-    std::unordered_map<std::string, IDataTransformAugmentation> augmenters;
+    std::unordered_map<std::string, IDataAugmentation> augmenters;
 };
 
 struct DatasetBatch {
@@ -87,13 +94,13 @@ struct DatasetBatch {
 class Dataset {
 public:
     Dataset(std::shared_ptr<IDataSource> _dataSource,
-            std::vector<IDataTransformAugmentation *> _dataAugmentations,
+            std::vector<IDataAugmentation *> _dataAugmentations,
 
             const pybind11::function &createDatasetFunction,
             bool isVirtualDataset
     );
 
-    Dataset(std::shared_ptr<IDataSource> _dataSource, std::vector<IDataTransformAugmentation *> _dataAugmentations);
+    Dataset(std::shared_ptr<IDataSource> _dataSource, std::vector<IDataAugmentation *> _dataAugmentations);
 
     Dataset(const Dataset &other) = default;
 
@@ -102,11 +109,11 @@ public:
 
     [[nodiscard]] IDataSource *getDataSource() const;
 
-    [[nodiscard]] std::vector<IDataTransformAugmentation *> getDataTransformAugmentations() const;
+    [[nodiscard]] std::vector<IDataAugmentation *> getDataTransformAugmentations() const;
 
 private:
     std::shared_ptr<IDataSource> dataSource;
-    std::vector<IDataTransformAugmentation *> dataAugmentations;
+    std::vector<IDataAugmentation *> dataAugmentations;
 };
 
 class BatchedDataset {
