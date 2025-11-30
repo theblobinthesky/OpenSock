@@ -70,7 +70,7 @@
   "errors.upload.duplicate": "Keine neuen Bilder hochgeladen. Wenn du dasselbe Foto wiederverwendet hast, mache bitte ein neues (Duplikate werden übersprungen).",
   "upload.low_res_hint": "Für bessere Ergebnisse bitte eine höhere Auflösung verwenden, wenn möglich.",
   "collect.name_help": "Wenn du möchtest, können wir diesen Namen später in den Credits aufführen.",
-  "collect.handle_help": "",
+  "collect.handle_help": "Für Credits (z. B. @name auf Insta, X etc.). Leer lassen, um anonym zu bleiben.",
   "recap.start": "Start",
   "errors.upload.at_limit": "Du hast das Bildlimit erreicht. Bitte jetzt übermitteln.",
   "errors.consent_required": "Bitte stimme der Einwilligung zu",

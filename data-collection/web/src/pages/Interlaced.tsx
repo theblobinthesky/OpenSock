@@ -383,7 +383,11 @@ export default function Interlaced() {
   const canProceed = step.required ? uploadedThisStep > 0 : true
 
   return (
+<<<<<<< HEAD
     <div className="grid gap-4 p-4 mb-16 max-w-3xl mx-auto w-full overflow-x-hidden bg-slate-50 rounded-2xl shadow-inner ring-1 ring-slate-200">
+=======
+    <div className="grid gap-4 p-4 max-w-3xl mx-auto w-full overflow-x-hidden bg-slate-50 rounded-2xl shadow-inner ring-1 ring-slate-200">
+>>>>>>> origin/main
       {/* Progress indicator (track with markers) */}
       {(() => {
         return (
@@ -403,7 +407,11 @@ export default function Interlaced() {
                       </div>
                       {i < steps.length - 1 && (
                         <div className="relative w-5 h-1 rounded bg-gray-200 overflow-hidden">
+<<<<<<< HEAD
                           <div className={`absolute left-0 top-0 h-full bg-green-400 transition-all duration-500 ${i<stepIdx? 'w-full' : i===stepIdx ? 'w-0' : 'w-0'}`}></div>
+=======
+                          <div className={`absolute left-0 top-0 h-full bg-green-400 transition-all duration-500 ${i<stepIdx? 'w-full' : i===stepIdx ? 'w-1/2' : 'w-0'}`}></div>
+>>>>>>> origin/main
                         </div>
                       )}
                     </div>
@@ -421,7 +429,10 @@ export default function Interlaced() {
           <span className="w-7 h-7 rounded-full bg-gray-200 flex items-center justify-center mt-0.5"><img src="/icons/info.svg" alt="info" className="w-4 h-4" /></span>
           <span className="leading-5">
             <div className="font-medium text-gray-800">{infoText}</div>
+<<<<<<< HEAD
             <div className="text-[12px] mt-0.5 text-gray-700">{i18n.t('guidance.best')}</div>
+=======
+>>>>>>> origin/main
             <div className="text-[12px] mt-0.5 text-gray-600">{i18n.t('note.no_zoom')}</div>
             <div className="text-[12px] mt-0.5 text-gray-600">{mode==='MIXED_UNIQUES' ? i18n.t('rules.mixed') : i18n.t('rules.same')}</div>
           </span>
@@ -519,6 +530,7 @@ export default function Interlaced() {
         </button>
         <button className="flex-1 inline-flex items-center justify-center gap-2 px-5 py-3 rounded-md text-white bg-brand-600 hover:bg-brand-700 disabled:opacity-50"
           onClick={onNext} disabled={busy || (!canProceed)}>
+<<<<<<< HEAD
            {stepIdx===steps.length-1 ? (
              <>
                <img src="/icons/send.svg" alt="Submit" className="w-5 h-5" />
@@ -530,6 +542,19 @@ export default function Interlaced() {
                <img src="/icons/chevron-right.svg" alt="Next" className="w-5 h-5" />
              </>
            )}
+=======
+          {stepIdx===steps.length-1 ? (
+            <>
+              <img src="/icons/send.svg" alt="Submit" className="w-5 h-5" />
+              {i18n.t('finalize')}
+            </>
+          ) : (
+            <>
+              {i18n.t('slides.next')}
+              <img src="/icons/chevron-right.svg" alt="Next" className="w-5 h-5" />
+            </>
+          )}
+>>>>>>> origin/main
         </button>
             </div>
           </div>

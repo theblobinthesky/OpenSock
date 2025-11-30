@@ -70,7 +70,7 @@
   "errors.upload.duplicate": "No new images uploaded. If you re-used the same photo, please take a fresh one (duplicates are skipped).",
   "upload.low_res_hint": "For better results, use higher resolution if possible.",
   "collect.name_help": "If you want, we can list this name in credits later.",
-  "collect.handle_help": "",
+  "collect.handle_help": "For credits (e.g. @name on Insta., X, etc.). Leave blank to stay anonymous.",
   "recap.start": "Start",
   "errors.upload.at_limit": "You have reached the image limit. Please submit now.",
   "errors.consent_required": "Please accept consent",
