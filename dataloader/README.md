@@ -17,12 +17,27 @@ TODO (important improvements for production use):
 - Probing should happen after the augmentations have been applied... Idk??
 - Implement data augmentations and make sure the sizes are correct etc.
 - Look at any race conditions chadgpt might have produced during the last refactor
+- Fix regression where subdir order does not matter.
 
 Fixed:
 - Fix all sensible clang-tidy warnings
 - Write tests for different prefetch size, thread size configurations
 - Deal with parallel dataloaders (as that doesn't really make much sense)
 - Replace existing build system with something much faster and easier to debug
+
+TODO:
+- make pipeline work; only bilinear resize for now
+- overlapped i/o
+- trainign with synthetic data
+- tests for slow drives with custom fuse filesystem
+- think about multithreading
+- apply more sanitizers
+- document full pipeline for calib, train, inference, post-process
+- perf counters (with python apis)
+- benchmark has to document theoretical max values for all pipline stages
+- solve for ground plane like in zhang method, masks have to be respected
+- autotune option for dataloader (i.e. minimize #threads while keeping within an inch of max throughput.)
+- proper memory arenas everywhere
 
 
 Test results for the compressor:
