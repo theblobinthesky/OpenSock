@@ -1,4 +1,6 @@
 cmake_minimum_required(VERSION 3.28.0)
+set(VECTOR_EXTENSIONS "AVX2" CACHE STRING "Vector instruction set to use")
+
 set(CMAKE_GENERATOR Ninja)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_FLAGS_DEBUG "-g3 -O0 -fno-omit-frame-pointer -mavx2 -mf16c")
@@ -65,7 +67,6 @@ set(SPDLOG_BUILD_SHARED OFF CACHE BOOL "" FORCE)
 set(SPDLOG_BUILD_PIC ON CACHE BOOL "" FORCE)
 add_subdirectory("${SPDLOG_SUBMODULE_DIR}" EXCLUDE_FROM_ALL) # EXCLUDE_FROM_ALL means it doesn't compile unless the lib is linked into the program.
 
-
 # Build the python library.
 python_add_library(_core MODULE
         src/dataloader.cpp
@@ -74,6 +75,9 @@ python_add_library(_core MODULE
         src/library.cpp
         src/dataio.cpp
         src/compression.cpp
+        src/vectorisation/NoVectorisation.cpp
+        src/vectorisation/SSEVectorisation.cpp
+        src/vectorisation/AVX2Vectorisation.cpp
         src/dataSources/FlatDataSource.cpp
         src/dataSources/WebDatasetDataSource.cpp
         src/dataDecoders/DecoderRegister.cpp
@@ -109,6 +113,8 @@ target_compile_options(_core PRIVATE -fvisibility=hidden -Wall -Wextra -Wpedanti
 target_compile_definitions(_core PRIVATE VERSION_INFO=${PROJECT_VERSION})
 target_compile_definitions(_core PRIVATE PLATFORM_LINUX)
 target_compile_definitions(_core PRIVATE $<$<CONFIG:Debug>: ENABLE_DEBUG_PRINT=1>)
+target_compile_definitions(_core PRIVATE SIMD_SSE)
+target_compile_definitions(_core PRIVATE SIMD_AVX2)
 
 # Set logging level based on build type.
 target_compile_definitions(_core PRIVATE
@@ -117,5 +123,40 @@ target_compile_definitions(_core PRIVATE
 )
 
 target_link_options(_core PRIVATE -fuse-ld=mold)
+
+
+# Vectorisation:
+include(CheckCXXSourceCompiles)
+set(SSE41_FLAG "-mavx2")    # Hardcoded for clang.
+set(AVX2_FLAG "-sse4.1")    # Hardcoded for clang.
+
+set(CMAKE_REQUIRED_FLAGS "${SSE41_FLAG}")
+check_cxx_source_compiles("
+    #include <smmintrin.h>
+    int main() {
+        __m128i a = _mm_setzero_si128();
+        return 0;
+    }" CAN_COMPILE_SSE41)
+
+set(CMAKE_REQUIRED_FLAGS "${AVX2_FLAG}")
+check_cxx_source_compiles("
+    #include <immintrin.h>
+    int main() {
+        __m256i a = _mm256_setzero_si256();
+        return 0;
+    }" CAN_COMPILE_AVX2)
+
+if(CAN_COMPILE_SSE41 AND NOT CAN_COMPILE_AVX2 AND VECTOR_EXTENSIONS STREQUAL "SSE41")
+    MESSAGE(STATUS "Enabling SSE4.1.")
+    target_compile_options(_core PRIVATE -msse4.1)
+    target_compile_definitions(_core PRIVATE HAS_SSE)
+elseif(CAN_COMPILE_AVX2 AND VECTOR_EXTENSIONS STREQUAL "AVX2")
+    MESSAGE(STATUS "Enabling AVX2.")
+    target_compile_options(_core PRIVATE -mavx2)
+    target_compile_definitions(_core PRIVATE HAS_AVX2)
+else()
+    MESSAGE(STATUS "Disabling vectorisation.")
+    target_compile_definitions(_core PRIVATE NO_VECTORISATION)
+endif()
 
 install(TARGETS _core DESTINATION native_dataloader)

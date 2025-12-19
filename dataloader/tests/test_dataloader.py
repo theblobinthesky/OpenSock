@@ -33,7 +33,6 @@ DL_CONFIGS = [
 ]
 NUM_THREADS, PREFETCH_SIZE = 16, 4
 
-# Pytest fixture to parameterize tests over thread/prefetch configurations.
 @pytest.fixture(params=DL_CONFIGS, ids=lambda p: f"threads={p[0]},prefetch={p[1]}")
 def dl_cfg(request):
     num_threads, prefetch_size = request.param

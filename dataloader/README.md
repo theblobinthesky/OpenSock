@@ -24,11 +24,12 @@ Fixed:
 - Write tests for different prefetch size, thread size configurations
 - Deal with parallel dataloaders (as that doesn't really make much sense)
 - Replace existing build system with something much faster and easier to debug
+- llm code context
 
 TODO:
 - make pipeline work; only bilinear resize for now
 - overlapped i/o
-- trainign with synthetic data
+- training with synthetic data
 - tests for slow drives with custom fuse filesystem
 - think about multithreading
 - apply more sanitizers
@@ -38,6 +39,10 @@ TODO:
 - solve for ground plane like in zhang method, masks have to be respected
 - autotune option for dataloader (i.e. minimize #threads while keeping within an inch of max throughput.)
 - proper memory arenas everywhere
+- ensure easy setup with uv
+- vectorisation api
+- tests for augmentations
+- add all tests
 
 
 Test results for the compressor:

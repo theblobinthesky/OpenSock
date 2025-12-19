@@ -6,6 +6,7 @@
 #include <pybind11/stl.h>
 #include <unordered_map>
 
+#include "dataAugmenter/FlipAugmentation.h"
 #include "dataAugmenter/PadAugmentation.h"
 #include "dataAugmenter/RandomCropAugmentation.h"
 #include "dataAugmenter/ResizeAugmentation.h"
@@ -120,9 +121,11 @@ PYBIND11_MODULE(_core, m) {
                  py::arg("root_directory"),
                  py::arg("subdir_to_dict") = std::unordered_map<std::string, std::string>{});
 
+    py::class_<FlipAugmentation>(m, "FlipAugmentation").def(py::init<bool, float, bool, float>());
     py::class_<PadAugmentation>(m, "PadAugmentation").def(py::init<>());
     py::class_<RandomCropAugmentation>(m, "RandomCropAugmentation").def(py::init<>());
     py::class_<ResizeAugmentation>(m, "ResizeAugmentation").def(py::init<>());
+
 
     // Expose explicit shutdown for the global resource pool.
     m.def("shutdown_resource_pool", [] { ResourcePool::get().shutdown(); });
