@@ -17,7 +17,7 @@ public:
 
     virtual bool isOutputShapeStaticExceptForBatch() = 0;
 
-    virtual DataOutputSchema getDataOutputSchema(const std::vector<uint32_t> &inputShape, uint64_t itemSeed) = 0;
+    virtual DataOutputSchema getDataOutputSchema(const std::vector<uint32_t> &inputShape, uint64_t itemSeed) const = 0;
 
     // TODO: I don't love the manual free api here, but we'll go with it for now.
     virtual void freeItemSettings(void *itemSettings) const = 0;
@@ -82,7 +82,7 @@ public:
     ) const;
 
 private:
-    std::vector<IDataAugmentation *> dataAugmentations;
+    std::vector<IDataAugmentation *> dataAugs;
     uint8_t *buffer1, *buffer2;
     uint32_t maximumRequiredBufferSize;
 

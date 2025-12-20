@@ -11,7 +11,7 @@ bool FlipAugmentation::isOutputShapeStaticExceptForBatch() {
     return false;
 }
 
-DataOutputSchema FlipAugmentation::getDataOutputSchema(const std::vector<uint32_t> &inputShape, uint64_t itemSeed) {
+DataOutputSchema FlipAugmentation::getDataOutputSchema(const std::vector<uint32_t> &inputShape, const uint64_t itemSeed) const {
     std::vector<uint32_t> outputShape;
     if (isInputShapeBHWN(inputShape, 2)) {
         outputShape = inputShape;

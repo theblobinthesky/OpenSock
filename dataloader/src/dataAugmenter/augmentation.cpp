@@ -37,11 +37,11 @@ DataAugmentationPipe::DataAugmentationPipe(
     std::vector<IDataAugmentation *> _dataAugmentations,
     const std::vector<uint32_t> &maxInputShape,
     const uint32_t maxBytesPerElement
-) : dataAugmentations(std::move(_dataAugmentations)), buffer1(nullptr), buffer2(nullptr) {
+) : dataAugs(std::move(_dataAugmentations)), buffer1(nullptr), buffer2(nullptr) {
     if (!isOutputShapeStatic()) {
         throw std::runtime_error("Augmentation pipe needs to output a static shape.");
     }
-    maximumRequiredBufferSize = calcMaxRequiredBufferSize(dataAugmentations, maxInputShape, maxBytesPerElement);
+    maximumRequiredBufferSize = calcMaxRequiredBufferSize(dataAugs, maxInputShape, maxBytesPerElement);
 }
 
 size_t DataAugmentationPipe::getMaximumRequiredBufferSize() const {
@@ -58,7 +58,7 @@ DataProcessingSchema DataAugmentationPipe::getProcessingSchema(const std::vector
     std::vector<uint32_t> lastShape = inputShape;
     std::vector<void *> itemSettingsList;
 
-    for (const auto dataAugmentation: dataAugmentations) {
+    for (const auto dataAugmentation: dataAugs) {
         const auto [outputShape, itemSettings] = dataAugmentation->getDataOutputSchema(lastShape, itemSeed);
         lastShape = outputShape;
         itemSettingsList.push_back(itemSettings);
@@ -75,8 +75,27 @@ DataProcessingSchema DataAugmentationPipe::getProcessingSchema(const std::vector
 }
 
 void DataAugmentationPipe::freeProcessingSchema(const DataProcessingSchema &processingSchema) const {
-    for (size_t i = 0; i < dataAugmentations.size(); i++) {
-        dataAugmentations[i]->freeItemSettings(processingSchema.itemSettingsLists[i]);
+    for (size_t i = 0; i < dataAugs.size(); i++) {
+        dataAugs[i]->freeItemSettings(processingSchema.itemSettingsLists[i]);
+    }
+}
+
+template<typename Func>
+void dispatchInLoop(
+    const std::vector<IDataAugmentation *> &dataAugs,
+    uint8_t *__restrict__ buffer1, uint8_t *__restrict__ buffer2,
+    const uint8_t *__restrict__ inputData, uint8_t *__restrict__ outputData,
+    Func func
+) {
+    uint8_t *input = buffer1;
+    uint8_t *output = buffer2;
+
+    for (size_t i = 0; i < dataAugs.size(); i++) {
+        if (func(i, i == 0 ? inputData : input, i == dataAugs.size() - 1 ? outputData : output)) {
+            const auto tmp = input;
+            input = output;
+            output = tmp;
+        }
     }
 }
 
@@ -86,14 +105,12 @@ void DataAugmentationPipe::augmentWithPoints(
     const uint8_t *__restrict__ inputData, uint8_t *__restrict__ outputData,
     const std::vector<void *> &itemSettingsList
 ) const {
-    const uint8_t *input = inputData;
-    uint8_t *output = outputData;
-
-    for (size_t i = 0; i < dataAugmentations.size(); i++) {
-        const auto dataAugmentation = dataAugmentations[i];
-        void *itemSettings = itemSettingsList[i];
-        dataAugmentation->augmentWithPoints(shape, dtype, input, output, itemSettings);
-    }
+    dispatchInLoop(dataAugs, buffer1, buffer2, inputData, outputData,
+                   [&](const size_t i, const uint8_t *input, uint8_t *output) {
+                       const auto dataAugmentation = dataAugs[i];
+                       void *itemSettings = itemSettingsList[i];
+                       return dataAugmentation->augmentWithPoints(shape, dtype, input, output, itemSettings);
+                   });
 }
 
 void DataAugmentationPipe::augmentWithRaster(
@@ -103,18 +120,16 @@ void DataAugmentationPipe::augmentWithRaster(
     const uint8_t *__restrict__ inputData, uint8_t *__restrict__ outputData,
     const std::vector<void *> &itemSettingsList
 ) const {
-    const uint8_t *input = inputData;
-    uint8_t *output = outputData;
-
-    for (size_t i = 0; i < dataAugmentations.size(); i++) {
-        const auto dataAugmentation = dataAugmentations[i];
-        void *itemSettings = itemSettingsList[i];
-        dataAugmentation->augmentWithRaster(inputShape, outputShape, dtype, input, output, itemSettings);
-    }
+    dispatchInLoop(dataAugs, buffer1, buffer2, inputData, outputData,
+                   [&](const size_t i, const uint8_t *input, uint8_t *output) {
+                       const auto dataAug = dataAugs[i];
+                       void *itemSettings = itemSettingsList[i];
+                       return dataAug->augmentWithRaster(inputShape, outputShape, dtype, input, output, itemSettings);
+                   });
 }
 
 bool DataAugmentationPipe::isOutputShapeStatic() const {
-    for (IDataAugmentation *dataAugmentation: dataAugmentations) {
+    for (IDataAugmentation *dataAugmentation: dataAugs) {
         if (dataAugmentation->isOutputShapeStaticExceptForBatch()) {
             return true;
         }

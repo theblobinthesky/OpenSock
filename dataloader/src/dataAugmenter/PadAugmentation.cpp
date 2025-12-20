@@ -23,7 +23,7 @@ std::vector<uint32_t> getOutputShape(const std::vector<uint32_t> &inputShape, ui
     return outputShape;
 }
 
-DataOutputSchema PadAugmentation::getDataOutputSchema(const std::vector<uint32_t> &inputShape, uint64_t) {
+DataOutputSchema PadAugmentation::getDataOutputSchema(const std::vector<uint32_t> &inputShape, uint64_t) const {
     return {
         .outputShape = getOutputShape(inputShape, padHeight, padWidth),
         .itemSettings = nullptr

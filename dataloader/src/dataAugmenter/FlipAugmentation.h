@@ -17,7 +17,7 @@ public:
 
     bool isOutputShapeStaticExceptForBatch() override;
 
-    [[nodiscard]] DataOutputSchema getDataOutputSchema(const std::vector<uint32_t> &inputShape, uint64_t itemSeed) override;
+    [[nodiscard]] DataOutputSchema getDataOutputSchema(const std::vector<uint32_t> &inputShape, uint64_t itemSeed) const override;
 
     void freeItemSettings(void *itemSettings) const override;
 
