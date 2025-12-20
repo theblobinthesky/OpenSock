@@ -22,11 +22,11 @@ public:
     // TODO: I don't love the manual free api here, but we'll go with it for now.
     virtual void freeItemSettings(void *itemSettings) const = 0;
 
-    virtual std::vector<uint32_t> getMaximumOutputShapeGivenInputShapeIfSupported(const std::vector<uint32_t> &inputShape) = 0;
+    virtual std::vector<uint32_t> getMaxOutputShapeAxesIfSupported(const std::vector<uint32_t> &inputShape) = 0;
 
     // TODO: Make sure we use int rather than uint for the points....
     // Returns false if computation was skipped.
-    virtual bool augmentWithPoints(
+    [[nodiscard]] virtual bool augmentWithPoints(
         const std::vector<uint32_t> &shape,
         DType dtype,
         const uint8_t *__restrict__ inputData, uint8_t *__restrict__ outputData,
@@ -34,7 +34,7 @@ public:
     ) = 0;
 
     // Returns false if computation was skipped.
-    virtual bool augmentWithRaster(
+    [[nodiscard]] virtual bool augmentWithRaster(
         const std::vector<uint32_t> &inputShape,
         const std::vector<uint32_t> &outputShape,
         DType dtype,

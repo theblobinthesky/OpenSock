@@ -11,26 +11,36 @@ bool FlipAugmentation::isOutputShapeStaticExceptForBatch() {
     return false;
 }
 
-std::vector<size_t> FlipAugmentation::getOutputShapeIfSupported(const std::vector<size_t> &inputShape) {
-    if (!isInputShapeBHWN(inputShape, 2)) {
-        return std::vector<size_t>{};
+DataOutputSchema FlipAugmentation::getDataOutputSchema(const std::vector<uint32_t> &inputShape, uint64_t itemSeed) {
+    std::vector<uint32_t> outputShape;
+    if (isInputShapeBHWN(inputShape, 2)) {
+        outputShape = inputShape;
     }
-    return inputShape;
-}
 
-void *FlipAugmentation::getItemSettings(const uint64_t itemSeed) const {
     const bool doesFlipHorizontal = randomUniformDoubleBetween01(itemSeed, 0) <= horizontalFlipProbability;
     const bool doesFlipVertical = randomUniformDoubleBetween01(itemSeed, 1) <= verticalFlipProbability;
-    return new FlipItemSettings{.doesHorizontalFlip = doesFlipHorizontal, .doesVerticalFlip = doesFlipVertical};
+    auto *itemSettings = new FlipItemSettings{
+        .doesHorizontalFlip = doesFlipHorizontal,
+        .doesVerticalFlip = doesFlipVertical
+    };
+
+    return {
+        .outputShape = std::move(outputShape),
+        .itemSettings = itemSettings
+    };
 }
 
 void FlipAugmentation::freeItemSettings(void *itemSettings) const {
     delete static_cast<FlipItemSettings *>(itemSettings);
 }
 
+std::vector<uint32_t> FlipAugmentation::getMaxOutputShapeAxesIfSupported(const std::vector<uint32_t> &inputShape) {
+    return inputShape;
+}
+
 template<typename T>
 void flipPoints(
-    const std::vector<size_t> &shape,
+    const std::vector<uint32_t> &shape,
     const T *inputData, T *outputData,
     FlipItemSettings *itemSettings
 ) {
@@ -56,7 +66,7 @@ void flipPoints(
 }
 
 bool FlipAugmentation::augmentWithPoints(
-    const std::vector<size_t> &shape,
+    const std::vector<uint32_t> &shape,
     const DType dtype,
     const uint8_t *__restrict__ inputData, uint8_t *__restrict__ outputData,
     void *itemSettings
@@ -74,8 +84,8 @@ bool FlipAugmentation::augmentWithPoints(
 
 template<typename T>
 void flipRaster(
-    const std::vector<size_t> &inputShape,
-    const std::vector<size_t> &outputShape,
+    const std::vector<uint32_t> &inputShape,
+    const std::vector<uint32_t> &outputShape,
     const T *inputData, T *outputData,
     FlipItemSettings *itemSettings
 ) {
@@ -99,8 +109,8 @@ void flipRaster(
 }
 
 bool FlipAugmentation::augmentWithRaster(
-    const std::vector<size_t> &inputShape,
-    const std::vector<size_t> &outputShape,
+    const std::vector<uint32_t> &inputShape,
+    const std::vector<uint32_t> &outputShape,
     const DType dtype,
     const uint8_t *__restrict__ inputData, uint8_t *__restrict__ outputData,
     void *itemSettings

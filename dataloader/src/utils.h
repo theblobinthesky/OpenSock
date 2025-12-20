@@ -145,7 +145,6 @@ inline size_t getWidthByDType(const DType dtype) {
         case DType::UINT8:
             return 1;
         case DType::INT32:
-            return 4;
         case DType::FLOAT32:
             return 4;
         default:
@@ -165,13 +164,17 @@ inline size_t getWidthByDType(const DType dtype) {
     return static_cast<size_t>(rand * static_cast<double>(static_cast<int64_t>(maxExclusive) - 1));
 }
 
-[[nodiscard]] inline size_t getIdx(const size_t b, const size_t i, const size_t k, const std::vector<size_t> &shape) {
+[[nodiscard]] inline size_t randomUniformBetween(const uint64_t seed, const uint64_t subSeed, const size_t minInclusive, const size_t maxExclusive) {
+    return minInclusive + randomUniformSize(seed, subSeed, maxExclusive + 1 - minInclusive);
+}
+
+[[nodiscard]] inline size_t getIdx(const size_t b, const size_t i, const size_t k, const std::vector<uint32_t> &shape) {
     return b * shape[1] * shape[2]
            + i * shape[2]
            + k;
 }
 
-[[nodiscard]] inline size_t getIdx(const size_t b, const size_t i, const size_t j, const size_t k, const std::vector<size_t> &shape) {
+[[nodiscard]] inline size_t getIdx(const size_t b, const size_t i, const size_t j, const size_t k, const std::vector<uint32_t> &shape) {
     return b * shape[1] * shape[2] * shape[3]
            + i * shape[2] * shape[3]
            + j * shape[3]

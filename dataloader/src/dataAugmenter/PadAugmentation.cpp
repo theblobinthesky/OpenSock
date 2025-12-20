@@ -1,7 +1,7 @@
 #include "PadAugmentation.h"
 
 PadAugmentation::PadAugmentation(
-    const size_t padHeight, const size_t padWidth,
+    const uint32_t padHeight, const uint32_t padWidth,
     const PadSettings padSettings
 ) : padHeight(padHeight), padWidth(padWidth), padSettings(padSettings) {
 }
@@ -10,11 +10,31 @@ bool PadAugmentation::isOutputShapeStaticExceptForBatch() {
     return true;
 }
 
-std::vector<size_t> PadAugmentation::getOutputShapeIfSupported(const std::vector<size_t> &inputShape) {
-    if (inputShape.size() != 4 || padHeight > inputShape[1] || padWidth > inputShape[2]) {
-        return std::vector<size_t>{};
+std::vector<uint32_t> getOutputShape(const std::vector<uint32_t> &inputShape, uint32_t padHeight, uint32_t padWidth) {
+    std::vector<uint32_t> outputShape;
+    if (inputShape.size() == 4 && padHeight <= inputShape[1] && padWidth <= inputShape[2]) {
+        outputShape = {
+            inputShape[0],
+            padHeight,
+            padWidth,
+            inputShape[3]
+        };
     }
+    return outputShape;
+}
 
+DataOutputSchema PadAugmentation::getDataOutputSchema(const std::vector<uint32_t> &inputShape, uint64_t) {
+    return {
+        .outputShape = getOutputShape(inputShape, padHeight, padWidth),
+        .itemSettings = nullptr
+    };
+}
+
+void PadAugmentation::freeItemSettings(void *itemSettings) const {
+    // Nothing.
+}
+
+std::vector<uint32_t> PadAugmentation::getMaxOutputShapeAxesIfSupported(const std::vector<uint32_t> &inputShape) {
     return {
         inputShape[0],
         padHeight,
@@ -23,17 +43,8 @@ std::vector<size_t> PadAugmentation::getOutputShapeIfSupported(const std::vector
     };
 }
 
-void *PadAugmentation::getItemSettings(const uint64_t) const {
-    return nullptr;
-}
-
-void PadAugmentation::freeItemSettings(void *itemSettings) const {
-    // Nothing.
-}
-
 bool PadAugmentation::augmentWithPoints(
-    const std::vector<size_t> &,
-    const std::vector<size_t> &,
+    const std::vector<uint32_t> &,
     const DType,
     const uint8_t *__restrict__, uint8_t *__restrict__,
     void *
@@ -44,8 +55,8 @@ bool PadAugmentation::augmentWithPoints(
 
 template<typename T>
 void padRaster(
-    const std::vector<size_t> &inputShape,
-    const std::vector<size_t> &outputShape,
+    const std::vector<uint32_t> &inputShape,
+    const std::vector<uint32_t> &outputShape,
     const T *inputData, T *outputData,
     const PadSettings padSettings
 ) {
@@ -82,8 +93,8 @@ void padRaster(
 }
 
 bool PadAugmentation::augmentWithRaster(
-    const std::vector<size_t> &inputShape,
-    const std::vector<size_t> &outputShape,
+    const std::vector<uint32_t> &inputShape,
+    const std::vector<uint32_t> &outputShape,
     const DType dtype,
     const uint8_t *__restrict__ inputData, uint8_t *__restrict__ outputData,
     void *

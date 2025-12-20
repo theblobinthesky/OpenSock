@@ -17,22 +17,22 @@ public:
 
     bool isOutputShapeStaticExceptForBatch() override;
 
-    std::vector<size_t> getOutputShapeIfSupported(const std::vector<size_t> &inputShape) override;
-
-    [[nodiscard]] void *getItemSettings(const std::vector<size_t> &inputShape, uint64_t itemSeed) const override;
+    [[nodiscard]] DataOutputSchema getDataOutputSchema(const std::vector<uint32_t> &inputShape, uint64_t itemSeed) override;
 
     void freeItemSettings(void *itemSettings) const override;
 
+    std::vector<uint32_t> getMaxOutputShapeAxesIfSupported(const std::vector<uint32_t> &inputShape) override;
+
     bool augmentWithPoints(
-        const std::vector<size_t> &shape,
+        const std::vector<uint32_t> &shape,
         DType dtype,
         const uint8_t *__restrict__ inputData, uint8_t *__restrict__ outputData,
         void *itemSettings
     ) override;
 
     bool augmentWithRaster(
-        const std::vector<size_t> &inputShape,
-        const std::vector<size_t> &outputShape,
+        const std::vector<uint32_t> &inputShape,
+        const std::vector<uint32_t> &outputShape,
         DType dtype,
         const uint8_t *__restrict__ inputData, uint8_t *__restrict__ outputData,
         void *itemSettings

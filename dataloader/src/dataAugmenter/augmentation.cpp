@@ -22,7 +22,7 @@ uint32_t calcMaxRequiredBufferSize(
     uint32_t maxShapeSize = getShapeSize(maxAlongAllAxesInputShape);
     std::vector<uint32_t> lastMaxShape = maxAlongAllAxesInputShape;
     for (const auto dataAugmentation: dataAugmentations) {
-        lastMaxShape = dataAugmentation->getMaximumOutputShapeGivenInputShapeIfSupported(lastMaxShape);
+        lastMaxShape = dataAugmentation->getMaxOutputShapeAxesIfSupported(lastMaxShape);
         if (lastMaxShape.empty()) {
             throw std::runtime_error("Augmentation pipline does not support maximum input shape.");
         }

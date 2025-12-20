@@ -1,34 +1,48 @@
 #include "RandomCropAugmentation.h"
 
 RandomCropAugmentation::RandomCropAugmentation(
-    const size_t cropHeight, const size_t cropWidth
-) : cropHeight(cropHeight), cropWidth(cropWidth) {
-    if (cropHeight == 0 || cropWidth == 0) {
+    const uint32_t minCropHeight, const uint32_t minCropWidth,
+    const uint32_t maxCropHeight, const uint32_t maxCropWidth
+) : minCropHeight(minCropHeight), minCropWidth(minCropWidth),
+    maxCropHeight(maxCropHeight), maxCropWidth(maxCropHeight) {
+
+    if (minCropHeight > maxCropHeight || minCropWidth > maxCropWidth) {
+        throw std::runtime_error("Min crop dimensions must be smaller than max crop dimensions.");
+    }
+
+    if (maxCropHeight == 0 || maxCropWidth == 0) {
         throw std::runtime_error("Random crop augmentations needs nonzero crop-height and crop-width.");
     }
 }
 
 bool RandomCropAugmentation::isOutputShapeStaticExceptForBatch() {
-    return true;
+    return false;
 }
 
-std::vector<size_t> RandomCropAugmentation::getOutputShapeIfSupported(const std::vector<size_t> &inputShape) {
-    if (inputShape.size() != 4) {
-        return std::vector<size_t>{};
+DataOutputSchema RandomCropAugmentation::getDataOutputSchema(const std::vector<uint32_t> &inputShape, const uint64_t itemSeed) {
+    uint32_t cropHeight = randomUniformBetween(itemSeed, 0, minCropHeight, maxCropHeight);
+    uint32_t cropWidth = randomUniformBetween(itemSeed, 0, minCropWidth, maxCropWidth);
+
+    std::vector<uint32_t> outputShape;
+    if (inputShape.size() == 4) {
+        outputShape = {
+            inputShape[0],
+            cropHeight,
+            cropWidth,
+            inputShape[3]
+        };
     }
 
-    return {
-        inputShape[0],
-        cropHeight,
-        cropWidth,
-        inputShape[3]
+    auto *itemSettings = new RandomCropSettings{
+        .left = randomUniformSize(itemSeed, 2, inputShape[1] - cropHeight),
+        .top = randomUniformSize(itemSeed, 3, inputShape[2] - cropWidth),
+        .height = cropHeight,
+        .width = cropWidth
     };
-}
 
-void *RandomCropAugmentation::getItemSettings(const std::vector<size_t> &inputShape, const uint64_t itemSeed) const {
-    return new RandomCropSettings{
-        .left = randomUniformSize(itemSeed, 0, inputShape[1] - cropHeight),
-        .top = randomUniformSize(itemSeed, 1, inputShape[2] - cropWidth)
+    return {
+        .outputShape = std::move(outputShape),
+        .itemSettings = itemSettings
     };
 }
 
@@ -38,7 +52,7 @@ void RandomCropAugmentation::freeItemSettings(void *itemSettings) const {
 
 template<typename T>
 void randomCropPoints(
-    const std::vector<size_t> &shape,
+    const std::vector<uint32_t> &shape,
     const T *inputData, T *outputData,
     RandomCropSettings *itemSettings
 ) {
@@ -54,17 +68,15 @@ void randomCropPoints(
 }
 
 bool RandomCropAugmentation::augmentWithPoints(
-    const std::vector<size_t> &inputShape,
-    const std::vector<size_t> &,
+    const std::vector<uint32_t> &shape,
     const DType dtype,
     const uint8_t *__restrict__ inputData, uint8_t *__restrict__ outputData,
     void *itemSettings
 ) {
-    assert(inputShape[2] == 2);
+    assert(shape[2] == 2);
     dispatchWithType(dtype, inputData, outputData, [&](auto *input, auto *output) {
         randomCropPoints(
-            inputShape,
-            input, output,
+            shape, input, output,
             static_cast<RandomCropSettings *>(itemSettings)
         );
     });
@@ -74,14 +86,13 @@ bool RandomCropAugmentation::augmentWithPoints(
 
 template<typename T>
 void randomCropRaster(
-    const std::vector<size_t> &inputShape,
-    const std::vector<size_t> &outputShape,
+    const std::vector<uint32_t> &inputShape,
+    const std::vector<uint32_t> &outputShape,
     const T *inputData, T *outputData,
-    RandomCropSettings *itemSettings,
-    const size_t cropHeight, const size_t cropWidth
+    RandomCropSettings *itemSettings
 ) {
-    const size_t clampedHeight = std::min(inputShape[1], cropHeight);
-    const size_t clampedWidth = std::min(inputShape[2], cropWidth);
+    const size_t clampedHeight = std::min(inputShape[1], itemSettings->height);
+    const size_t clampedWidth = std::min(inputShape[2], itemSettings->width);
 
     for (size_t b = 0; b < outputShape[0]; b++) {
         for (size_t i = 0; i < clampedHeight; i++) {
@@ -96,8 +107,8 @@ void randomCropRaster(
 }
 
 bool RandomCropAugmentation::augmentWithRaster(
-    const std::vector<size_t> &inputShape,
-    const std::vector<size_t> &outputShape,
+    const std::vector<uint32_t> &inputShape,
+    const std::vector<uint32_t> &outputShape,
     const DType dtype,
     const uint8_t *__restrict__ inputData, uint8_t *__restrict__ outputData,
     void *itemSettings
@@ -106,8 +117,7 @@ bool RandomCropAugmentation::augmentWithRaster(
         randomCropRaster(
             inputShape, outputShape,
             input, output,
-            static_cast<RandomCropSettings *>(itemSettings),
-            cropHeight, cropWidth
+            static_cast<RandomCropSettings *>(itemSettings)
         );
     });
 
