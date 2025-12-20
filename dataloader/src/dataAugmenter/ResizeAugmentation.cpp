@@ -1,3 +1,4 @@
+#if false
 #include "ResizeAugmentation.h"
 
 #include <cstddef>
@@ -48,3 +49,4 @@ bool ResizeAugmentation::augment(const std::vector<size_t> &inputShape,
 
     return true;
 }
+#endif

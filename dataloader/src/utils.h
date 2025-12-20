@@ -134,11 +134,71 @@ enum class ItemFormat {
     FLOAT
 };
 
-double randomUniformDoubleBetween01(const uint64_t seed, const uint64_t subSeed) {
+enum class DType {
+    UINT8,
+    INT32,
+    FLOAT32
+};
+
+inline size_t getWidthByDType(const DType dtype) {
+    switch (dtype) {
+        case DType::UINT8:
+            return 1;
+        case DType::INT32:
+            return 4;
+        case DType::FLOAT32:
+            return 4;
+        default:
+            throw std::runtime_error("DType not supported.");
+    }
+}
+
+[[nodiscard]] inline double randomUniformDoubleBetween01(const uint64_t seed, const uint64_t subSeed) {
     std::default_random_engine engine;
     engine.seed(seed + subSeed * 0xffff);
     std::uniform_real_distribution<> uniform;
     return uniform(engine);
+}
+
+[[nodiscard]] inline size_t randomUniformSize(const uint64_t seed, const uint64_t subSeed, const size_t maxExclusive) {
+    const double rand = randomUniformDoubleBetween01(seed, subSeed);
+    return static_cast<size_t>(rand * static_cast<double>(static_cast<int64_t>(maxExclusive) - 1));
+}
+
+[[nodiscard]] inline size_t getIdx(const size_t b, const size_t i, const size_t k, const std::vector<size_t> &shape) {
+    return b * shape[1] * shape[2]
+           + i * shape[2]
+           + k;
+}
+
+[[nodiscard]] inline size_t getIdx(const size_t b, const size_t i, const size_t j, const size_t k, const std::vector<size_t> &shape) {
+    return b * shape[1] * shape[2] * shape[3]
+           + i * shape[2] * shape[3]
+           + j * shape[3]
+           + k;
+}
+
+[[nodiscard]] inline uint32_t getShapeSize(const std::vector<uint32_t>& shape) {
+    uint32_t size = 1;
+    for (const uint32_t dim: shape) size *= dim;
+    return size;
+}
+
+template <typename Func>
+void dispatchWithType(const DType dtype, const uint8_t *in, uint8_t *out, Func fun) {
+    switch (dtype) {
+        case DType::UINT8:
+            fun(in, out);
+            break;
+        case DType::INT32:
+            fun(reinterpret_cast<const int32_t *>(in), reinterpret_cast<int32_t *>(out));
+            break;
+        case DType::FLOAT32:
+            fun(reinterpret_cast<const float *>(in), reinterpret_cast<float *>(out));
+            break;
+        default:
+            throw std::runtime_error("Dtype unsupported in augmentation.");
+    }
 }
 
 #endif

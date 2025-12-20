@@ -15,7 +15,6 @@ TODO (important improvements for production use):
 - Support WebDataset
 - Dataset refactor with probing/autodiscovery
 - Probing should happen after the augmentations have been applied... Idk??
-- Implement data augmentations and make sure the sizes are correct etc.
 - Look at any race conditions chadgpt might have produced during the last refactor
 - Fix regression where subdir order does not matter.
 
@@ -26,23 +25,32 @@ Fixed:
 - Replace existing build system with something much faster and easier to debug
 - llm code context
 
-TODO:
-- make pipeline work; only bilinear resize for now
-- overlapped i/o
-- training with synthetic data
-- tests for slow drives with custom fuse filesystem
-- think about multithreading
-- apply more sanitizers
-- document full pipeline for calib, train, inference, post-process
-- perf counters (with python apis)
-- benchmark has to document theoretical max values for all pipline stages
-- solve for ground plane like in zhang method, masks have to be respected
-- autotune option for dataloader (i.e. minimize #threads while keeping within an inch of max throughput.)
-- proper memory arenas everywhere
-- ensure easy setup with uv
-- vectorisation api
-- tests for augmentations
-- add all tests
+Feature List (- not begun, w working, + solved):
+    I/O:
+    - tests for slow drives with custom fuse filesystem
+    - overlapped i/o
+
+    Application:
+    - training with synthetic data
+    - document full pipeline for calib, train, inference, post-process
+    - solve for ground plane like in zhang method, masks have to be respected
+
+    Benchmark/Perf.:
+    - perf counters (with python apis)
+    - benchmark has to document theoretical max values for all pipline stages
+    - autotune option for dataloader (i.e. minimize #threads while keeping within an inch of max throughput.)
+
+    Augmentations:
+    w make pipeline work; only bilinear resize for now
+    w vectorisation api
+    w tests for augmentations
+
+    Misc:
+    - ensure easy setup with uv
+    - apply more sanitizers
+    - proper memory arenas everywhere
+    - zero-copy augmentation output to pinned memory
+    - gemini suggestions...
 
 
 Test results for the compressor:

@@ -240,7 +240,7 @@ void FlatDataSource::initDatasetFromRootDirectory() {
         const std::string dictName = subdirToDictName.find(subDirs[i])->second;
         itemKeys.push_back({
             .keyName = dictName,
-            .spatialHint = SpatialHint::XXX,
+            .spatialHint = SpatialHint::NONE,
             .probeResult = probeResults[i]
         });
     }

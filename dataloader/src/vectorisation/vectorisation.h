@@ -1,14 +1,7 @@
 #ifndef VERSION_VECTORISATION_H
 #define VERSION_VECTORISATION_H
 
-class Range {
-};
-
+// TODO: No place where I can use this yet.
 struct WideRegister;
-
-WideRegister vadd_();
-WideRegister vadd_();
-WideRegister vadd_();
-WideRegister vadd_();
 
 #endif

@@ -7,7 +7,7 @@ FlipAugmentation::FlipAugmentation(
     flipVertical(flipVertical), verticalFlipProbability(verticalFlipProbability) {
 }
 
-bool FlipAugmentation::isOutputShapeStatic() {
+bool FlipAugmentation::isOutputShapeStaticExceptForBatch() {
     return false;
 }
 
@@ -29,62 +29,51 @@ void FlipAugmentation::freeItemSettings(void *itemSettings) const {
 }
 
 template<typename T>
-void augmentWithChannelFirstHelper(
-    const std::vector<size_t> &inputShape,
-    const std::vector<size_t> &outputShape,
+void flipPoints(
+    const std::vector<size_t> &shape,
     const T *inputData, T *outputData,
     FlipItemSettings *itemSettings
 ) {
     if (itemSettings->doesVerticalFlip) {
-        for (size_t i = 0; i < inputShape[0]; i++) {
-            for (size_t j = 0; j < inputShape[1]; j++) {
-                const size_t inpIdx = i * inputShape[1] * 2 + j * 2 + 0;
-                const size_t outIdx = (outputShape[0] - 1 - i) * inputShape[1] * 2 + j * 2 + 0;
+        for (size_t i = 0; i < shape[0]; i++) {
+            for (size_t j = 0; j < shape[1]; j++) {
+                const size_t inpIdx = i * shape[1] * 2 + j * 2 + 0;
+                const size_t outIdx = (shape[0] - 1 - i) * shape[1] * 2 + j * 2 + 0;
                 outputData[outIdx] = inputData[inpIdx];
             }
         }
     }
 
     if (itemSettings->doesHorizontalFlip) {
-        for (size_t i = 0; i < inputShape[0]; i++) {
-            for (size_t j = 0; j < inputShape[1]; j++) {
-                const size_t inpIdx = i * inputShape[1] * 2 + j * 2 + 0;
-                const size_t outIdx = i * inputShape[1] * 2 + (outputShape[1] - 1 - j) * 2 + 0;
+        for (size_t i = 0; i < shape[0]; i++) {
+            for (size_t j = 0; j < shape[1]; j++) {
+                const size_t inpIdx = i * shape[1] * 2 + j * 2 + 0;
+                const size_t outIdx = i * shape[1] * 2 + (shape[1] - 1 - j) * 2 + 0;
                 outputData[outIdx] = inputData[inpIdx];
             }
         }
     }
 }
 
-void FlipAugmentation::augmentWithChannelFirst(
-    const std::vector<size_t> &inputShape,
-    const std::vector<size_t> &outputShape,
-    const ItemFormat format,
+bool FlipAugmentation::augmentWithPoints(
+    const std::vector<size_t> &shape,
+    const DType dtype,
     const uint8_t *__restrict__ inputData, uint8_t *__restrict__ outputData,
     void *itemSettings
 ) {
-    switch (format) {
-        case ItemFormat::UINT:
-            augmentWithChannelFirstHelper<uint8_t>(
-                inputShape, outputShape,
-                inputData, outputData,
-                static_cast<FlipItemSettings *>(itemSettings)
-            );
-            break;
-        case ItemFormat::FLOAT:
-            augmentWithChannelFirstHelper<float>(
-                inputShape, outputShape,
-                reinterpret_cast<const float *>(inputData), reinterpret_cast<float *>(outputData),
-                static_cast<FlipItemSettings *>(itemSettings)
-            );
-            break;
-        default:
-            throw std::runtime_error("Item format unsupported in FlipAugmentation.");
-    }
+    dispatchWithType(dtype, inputData, outputData, [&](auto *input, auto *output) {
+        flipPoints(
+            shape,
+            input, output,
+            static_cast<FlipItemSettings *>(itemSettings)
+        );
+    });
+
+    return true;
 }
 
 template<typename T>
-void augmentWithChannelLastHelper(
+void flipRaster(
     const std::vector<size_t> &inputShape,
     const std::vector<size_t> &outputShape,
     const T *inputData, T *outputData,
@@ -109,29 +98,20 @@ void augmentWithChannelLastHelper(
     }
 }
 
-void FlipAugmentation::augmentWithChannelLast(
+bool FlipAugmentation::augmentWithRaster(
     const std::vector<size_t> &inputShape,
     const std::vector<size_t> &outputShape,
-    const ItemFormat format,
+    const DType dtype,
     const uint8_t *__restrict__ inputData, uint8_t *__restrict__ outputData,
     void *itemSettings
 ) {
-    switch (format) {
-        case ItemFormat::UINT:
-            augmentWithChannelLastHelper<uint8_t>(
-                inputShape, outputShape,
-                inputData, outputData,
-                static_cast<FlipItemSettings *>(itemSettings)
-            );
-            break;
-        case ItemFormat::FLOAT:
-            augmentWithChannelLastHelper<float>(
-                inputShape, outputShape,
-                reinterpret_cast<const float *>(inputData), reinterpret_cast<float *>(outputData),
-                static_cast<FlipItemSettings *>(itemSettings)
-            );
-            break;
-        default:
-            throw std::runtime_error("Item format unsupported in FlipAugmentation.");
-    }
+    dispatchWithType(dtype, inputData, outputData, [&](auto *input, auto *output) {
+        flipRaster(
+            inputShape, outputShape,
+            input, output,
+            static_cast<FlipItemSettings *>(itemSettings)
+        );
+    });
+
+    return true;
 }

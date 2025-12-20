@@ -301,10 +301,3 @@ def test_end_to_end_perf(benchmark):
     total_items = benchmark(fetch_loop)
     # Sanity check to keep benchmark from being optimized away
     assert total_items > 0
-
-# TODO: New tests
-# - data aug pipeline -> two white pixels are in the right place
-# - data aug pipeline test individual tests
-# - no data aug two differently sized images throw exception
-# - no data aug two similar sized images throw no exception
-# - data aug pipeline has to be static

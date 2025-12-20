@@ -15,26 +15,25 @@ public:
         bool flipVertical, float verticalFlipProbability
     );
 
-    bool isOutputShapeStatic() override;
+    bool isOutputShapeStaticExceptForBatch() override;
 
     std::vector<size_t> getOutputShapeIfSupported(const std::vector<size_t> &inputShape) override;
 
-    [[nodiscard]] void *getItemSettings(uint64_t itemSeed) const override;
+    [[nodiscard]] void *getItemSettings(const std::vector<size_t> &inputShape, uint64_t itemSeed) const override;
 
     void freeItemSettings(void *itemSettings) const override;
 
-    void augmentWithChannelFirst(
-        const std::vector<size_t> &inputShape,
-        const std::vector<size_t> &outputShape,
-        ItemFormat format,
+    bool augmentWithPoints(
+        const std::vector<size_t> &shape,
+        DType dtype,
         const uint8_t *__restrict__ inputData, uint8_t *__restrict__ outputData,
         void *itemSettings
     ) override;
 
-    void augmentWithChannelLast(
+    bool augmentWithRaster(
         const std::vector<size_t> &inputShape,
         const std::vector<size_t> &outputShape,
-        ItemFormat format,
+        DType dtype,
         const uint8_t *__restrict__ inputData, uint8_t *__restrict__ outputData,
         void *itemSettings
     ) override;

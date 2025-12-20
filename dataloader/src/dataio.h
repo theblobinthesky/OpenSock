@@ -34,10 +34,9 @@ struct ProbeResult {
 };
 
 enum class SpatialHint : uint8_t {
-    XXX,
-    // TODO: THIS IS BAD. THEY SHOULD BE CALLED POINTS; RASTER instead as you don't actually want the memory layout to change!!!!!!!!!!
-    C_XXX,
-    XXX_C
+    NONE,
+    RASTER,
+    POINTS
 };
 
 struct ItemKey {
