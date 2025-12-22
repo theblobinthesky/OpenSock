@@ -15,16 +15,20 @@ RandomCropAugmentation::RandomCropAugmentation(
     }
 }
 
-bool RandomCropAugmentation::isOutputShapeStaticExceptForBatch() {
-    return false;
+bool RandomCropAugmentation::isOutputShapeDetStaticExceptForBatchDim() {
+    return minCropHeight == maxCropHeight && minCropWidth == maxCropWidth;
 }
 
-DataOutputSchema RandomCropAugmentation::getDataOutputSchema(const std::vector<uint32_t> &inputShape, const uint64_t itemSeed) {
+static bool isInputShapeSupported(const std::vector<uint32_t> &inputShape) {
+    return inputShape.size() == 4;
+}
+
+DataOutputSchema RandomCropAugmentation::getDataOutputSchema(const std::vector<uint32_t> &inputShape, const uint64_t itemSeed) const {
     uint32_t cropHeight = randomUniformBetween(itemSeed, 0, minCropHeight, maxCropHeight);
     uint32_t cropWidth = randomUniformBetween(itemSeed, 0, minCropWidth, maxCropWidth);
 
     std::vector<uint32_t> outputShape;
-    if (inputShape.size() == 4) {
+    if (isInputShapeSupported(inputShape)) {
         outputShape = {
             inputShape[0],
             cropHeight,
@@ -34,10 +38,11 @@ DataOutputSchema RandomCropAugmentation::getDataOutputSchema(const std::vector<u
     }
 
     auto *itemSettings = new RandomCropSettings{
-        .left = randomUniformSize(itemSeed, 2, inputShape[1] - cropHeight),
-        .top = randomUniformSize(itemSeed, 3, inputShape[2] - cropWidth),
+        .top = randomUniformSize(itemSeed, 2, inputShape[1] - cropHeight),
+        .left = randomUniformSize(itemSeed, 3, inputShape[2] - cropWidth),
         .height = cropHeight,
-        .width = cropWidth
+        .width = cropWidth,
+        .skip = inputShape == outputShape
     };
 
     return {
@@ -50,6 +55,18 @@ void RandomCropAugmentation::freeItemSettings(void *itemSettings) const {
     delete static_cast<RandomCropSettings *>(itemSettings);
 }
 
+std::vector<uint32_t> RandomCropAugmentation::getMaxOutputShapeAxesIfSupported(const std::vector<uint32_t> &inputShape) const {
+    if (isInputShapeSupported(inputShape)) {
+        return {
+            inputShape[0],
+            maxCropHeight,
+            maxCropWidth,
+            inputShape[3]
+        };
+    }
+    return {};
+}
+
 template<typename T>
 void randomCropPoints(
     const std::vector<uint32_t> &shape,
@@ -58,16 +75,23 @@ void randomCropPoints(
 ) {
     for (size_t b = 0; b < shape[0]; b++) {
         for (size_t i = 0; i < shape[1]; i++) {
-            for (size_t k = 0; k < shape[2]; k++) {
-                const size_t idx = getIdx(b, i, 0, shape);
-                outputData[idx + 0] = inputData[idx + 0] - itemSettings->left;
-                outputData[idx + 1] = inputData[idx + 1] - itemSettings->top;
-            }
+            const size_t idx = getIdx(b, i, 0, shape);
+            outputData[idx + 0] = inputData[idx + 0] - itemSettings->top;
+            outputData[idx + 1] = inputData[idx + 1] - itemSettings->left;
         }
     }
 }
 
-bool RandomCropAugmentation::augmentWithPoints(
+static bool shouldBeSkipped(void *itemSettings) {
+    const auto settings = static_cast<RandomCropSettings *>(itemSettings);
+    return settings->skip;
+}
+
+bool RandomCropAugmentation::isAugmentWithPointsSkipped(const std::vector<uint32_t> &, DType, void *itemSettings) {
+    return shouldBeSkipped(itemSettings);
+}
+
+void RandomCropAugmentation::augmentWithPoints(
     const std::vector<uint32_t> &shape,
     const DType dtype,
     const uint8_t *__restrict__ inputData, uint8_t *__restrict__ outputData,
@@ -80,8 +104,6 @@ bool RandomCropAugmentation::augmentWithPoints(
             static_cast<RandomCropSettings *>(itemSettings)
         );
     });
-
-    return true;
 }
 
 template<typename T>
@@ -98,7 +120,7 @@ void randomCropRaster(
         for (size_t i = 0; i < clampedHeight; i++) {
             for (size_t j = 0; j < clampedWidth; j++) {
                 for (size_t k = 0; k < outputShape[3]; k++) {
-                    size_t inpIdx = getIdx(b, itemSettings->left + i, itemSettings->top + j, k, inputShape);
+                    size_t inpIdx = getIdx(b, itemSettings->top + i, itemSettings->left + j, k, inputShape);
                     outputData[getIdx(b, i, j, k, outputShape)] = inputData[inpIdx];
                 }
             }
@@ -106,7 +128,14 @@ void randomCropRaster(
     }
 }
 
-bool RandomCropAugmentation::augmentWithRaster(
+bool RandomCropAugmentation::isAugmentWithRasterSkipped(
+    const std::vector<uint32_t> &, const std::vector<uint32_t> &,
+    DType, void *itemSettings
+) {
+    return shouldBeSkipped(itemSettings);
+}
+
+void RandomCropAugmentation::augmentWithRaster(
     const std::vector<uint32_t> &inputShape,
     const std::vector<uint32_t> &outputShape,
     const DType dtype,
@@ -120,6 +149,4 @@ bool RandomCropAugmentation::augmentWithRaster(
             static_cast<RandomCropSettings *>(itemSettings)
         );
     });
-
-    return true;
 }

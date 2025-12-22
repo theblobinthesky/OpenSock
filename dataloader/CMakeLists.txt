@@ -94,6 +94,7 @@ python_add_library(_core MODULE
         WITH_SOABI
 )
 
+# Includes etc.
 target_include_directories(_core PRIVATE src/)
 target_include_directories(_core PRIVATE ${CUDAToolkit_INCLUDE_DIRS})
 target_include_directories(_core PRIVATE ${ZSTD_INCLUDE_DIRS})
@@ -159,4 +160,5 @@ else()
     target_compile_definitions(_core PRIVATE NO_VECTORISATION)
 endif()
 
+MESSAGE(STATUS "Destination: ${CMAKE_INSTALL_PREFIX}")
 install(TARGETS _core DESTINATION native_dataloader)

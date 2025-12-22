@@ -108,7 +108,7 @@ public:
 
     [[nodiscard]] IDataSource *getDataSource() const;
 
-    [[nodiscard]] std::vector<IDataAugmentation *> getDataTransformAugmentations() const;
+    [[nodiscard]] std::vector<IDataAugmentation *> getDataAugmentations() const;
 
 private:
     std::shared_ptr<IDataSource> dataSource;

@@ -41,9 +41,9 @@ Feature List (- not begun, w working, + solved):
     - autotune option for dataloader (i.e. minimize #threads while keeping within an inch of max throughput.)
 
     Augmentations:
-    w make pipeline work; only bilinear resize for now
-    w vectorisation api
-    w tests for augmentations
+    + make pipeline work; only bilinear resize for now
+    + vectorisation api
+    + tests for augmentations
 
     Misc:
     - ensure easy setup with uv

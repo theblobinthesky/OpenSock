@@ -1,7 +1,7 @@
 .PHONY: install-debug, install-release, publish, build-debug, build-release
 
 install-debug:
-	uv pip install -e . -Cbuild-dir=build/debug -Ccmake.args="--preset Debug"
+	uv pip install --no-build-isolation --config-settings=editable.rebuild=true -e . -Cbuild-dir=build/debug -Ccmake.args="--preset Debug"
 	cmake --preset Debug
 
 install-release:

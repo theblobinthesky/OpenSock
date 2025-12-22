@@ -73,12 +73,7 @@ IDataSource *Dataset::getDataSource() const {
     return dataSource.get();
 }
 
-std::vector<IDataAugmentation < 2> *
-
-
-
->
-Dataset::getDataTransformAugmentations() const {
+std::vector<IDataAugmentation *> Dataset::getDataAugmentations() const {
     return dataAugmentations;
 }
 

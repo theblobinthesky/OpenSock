@@ -25,6 +25,26 @@
 #define LOG_ERROR(...)
 #endif
 
+// TODO: Speed.
+template <typename T>
+std::string mapAndJoin(const std::vector<T>& vals, const char joinChar = ',') {
+    std::string ret;
+    for (size_t i = 0; i < vals.size(); i++){
+        const T& val = vals[i];
+        ret += std::to_string(val);
+        if (i < vals.size() - 1) {
+            ret += joinChar;
+            ret += " ";
+        }
+    }
+    return ret;
+}
+
+template <typename T>
+std::string formatVector(const std::vector<T>& vals, const char joinChar = ',') {
+    return "(" + mapAndJoin(vals, joinChar) + ")";
+}
+
 #define PREVENT_MOVE(ClassName) \
     ClassName &operator=(ClassName &&) = delete; \
     ClassName(ClassName &&) = delete;
@@ -203,5 +223,15 @@ void dispatchWithType(const DType dtype, const uint8_t *in, uint8_t *out, Func f
             throw std::runtime_error("Dtype unsupported in augmentation.");
     }
 }
+
+inline bool isUnsignedDType(const DType dtype) {
+    switch (dtype) {
+        case DType::UINT8:
+            return true;
+        default:
+            return false;
+    }
+}
+
 
 #endif
