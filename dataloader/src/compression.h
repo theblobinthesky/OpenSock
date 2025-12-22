@@ -63,14 +63,14 @@ struct CompressorSettings {
     uint64_t magic = MAGIC_NUMBER;
     uint16_t version = FILE_FORMAT_VERSION;
 
-    uint64_t flags;
-    Codec codec;
+    uint64_t flags{};
+    Codec codec = Codec::NONE;
 
-    uint32_t shape[MAX_SHAPE_SIZE];
-    uint32_t shapeSize;
-    uint32_t permutation[MAX_SHAPE_SIZE];
+    uint32_t shape[MAX_SHAPE_SIZE]{};
+    uint32_t shapeSize{};
+    uint32_t permutation[MAX_SHAPE_SIZE]{};
 
-    uint32_t compressedSize;
+    uint32_t compressedSize{};
 
     void setShape(const std::vector<uint32_t> &newShape) {
         shapeSize = newShape.size();
