@@ -113,7 +113,6 @@ private:
     const Shape maxInputShape;
     uint32_t maxNumPoints;
     uint32_t maxRequiredBufferSize;
-    Shape maxInputStrides;
     Shape staticOutputShape;
 
     [[nodiscard]] bool isOutputShapeStatic() const;

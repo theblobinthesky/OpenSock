@@ -119,8 +119,12 @@ DataProcessingSchema DataAugmentationPipe::getProcessingSchema(const Shapes &inp
         }
     }
 
+    const uint32_t batchSize = inputShapes.size();
+    Shape outputShapeWithBatch =  { batchSize };
+    outputShapeWithBatch.insert(outputShapeWithBatch.end(), outerOutputShape.begin(), outerOutputShape.end());
+
     return {
-        .outputShape = std::move(outerOutputShape), // All are required to be the same output shape.
+        .outputShape = std::move(outputShapeWithBatch), // All are required to be the same output shape.
         .itemPropsPerAug = std::move(itemPropsPerAug),
         .inputShapesPerAug = std::move(inputShapesPerAug),
         .outputShapesPerAug = std::move(outputShapesPerAug)
@@ -145,6 +149,8 @@ void dispatchInLoop(
     const uint32_t batchStride,
     SkipCheck skipCheck, Func func
 ) {
+    const auto outputShapeNoBatch = std::vector(outputShape.begin() + 1, outputShape.end());
+
     const size_t B = inputShapes.size();
     std::vector<uint8_t *> swapBuffers1(B);
     std::vector<uint8_t *> swapBuffers2(B);
@@ -186,7 +192,7 @@ void dispatchInLoop(
 
     for (size_t b = 0; b < B; b++) {
         if (outputBufferIsUntouchedForSlice[b]) {
-            if (inputShapes[b] != outputShape) {
+            if (inputShapes[b] != outputShapeNoBatch) {
                 throw std::runtime_error(std::format(
                     "Pipeline did not modify buffers, but input shape {} != output shape {}",
                     formatVector(inputShapes[b]), formatVector(outputShape)
@@ -194,7 +200,7 @@ void dispatchInLoop(
             }
             memcpy(
                 outputData + b * outputSize,
-                inputData + maxInputStrides[b],
+                inputData + b * outputSize,
                 getShapeSize(inputShapes[b]) * getWidthOfDType(dtype)
             );
         }
