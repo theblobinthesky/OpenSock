@@ -15,13 +15,17 @@ DEF_MAX_INPUT_SHAPE = [4, 128, 128, 3]
 DEF_MAX_NUM_POINTS = 128
 DEF_MAX_ITEM_SIZE = 4
 
+def def_get_processing_schema(pipe, shape, seed):
+    shapes = [list(shape[1:]) for _ in range(shape[0])]
+    return pipe.get_processing_schema(shapes, seed) # TODO: Mixed by batch!
+
 def get_():
     augmentations = [ResizeAugmentation(32, 32)]
     pipe = DataAugmentationPipe(augmentations, DEF_MAX_INPUT_SHAPE, DEF_MAX_NUM_POINTS, DEF_MAX_ITEM_SIZE)
 
     input_shape = [4, 32, 32, 3]
     seed = 123
-    output_shape, schema_capsule = pipe.get_processing_schema(input_shape, seed)
+    output_shape, schema_capsule = def_get_processing_schema(pipe, input_shape, seed)
 
     return pipe, output_shape, schema_capsule
 
@@ -95,11 +99,13 @@ class TestBasics:
     def test_augmentations_are_skipped(self, augs):
         input_shape = (4, 128, 128, 3)
         pipe = DataAugmentationPipe(augs, DEF_MAX_INPUT_SHAPE, DEF_MAX_NUM_POINTS, 8)
-        output_shape, schema_capsule = pipe.get_processing_schema(input_shape, 0)
+        output_shape, schema_capsule = def_get_processing_schema(pipe, input_shape, 0)
         input_array = gen_random(input_shape, np.float32)
         output_array = np.zeros(output_shape, dtype=np.float32)
         pipe.augment_raster(input_array, output_array, schema_capsule)
         assert np.all(input_array == output_array[:, :128, :128])
+
+    # TODO: Mixed by batch augmentations are skipped test.
 
 
 class TestAugmentationRules:
@@ -143,7 +149,7 @@ class TestRasterCorrectness:
 
         for item_seed in range(NUM_EXAMPLES):
             settings = aug.get_item_settings(input_shape, item_seed)
-            output_shape, schema_capsule = pipe.get_processing_schema(input_shape, item_seed)
+            output_shape, schema_capsule = def_get_processing_schema(pipe, input_shape, item_seed)
             input_array = gen_random(input_shape, dtype)
             output_array = np.zeros(output_shape, dtype=dtype)
             pipe.augment_raster(input_array, output_array, schema_capsule)
@@ -164,7 +170,7 @@ class TestRasterCorrectness:
 
         for item_seed in range(NUM_EXAMPLES):
             settings = aug.get_item_settings(input_shape, item_seed)
-            output_shape, schema_capsule = pipe.get_processing_schema(input_shape, item_seed)
+            output_shape, schema_capsule = def_get_processing_schema(pipe, input_shape, item_seed)
             input_array = gen_random(input_shape, dtype)
             output_array = np.zeros(output_shape, dtype=dtype)
             pipe.augment_raster(input_array, output_array, schema_capsule)
@@ -179,7 +185,7 @@ class TestRasterCorrectness:
         pipe = DataAugmentationPipe([ResizeAugmentation(48, 48)], DEF_MAX_INPUT_SHAPE, DEF_MAX_NUM_POINTS, 8)
 
         for item_seed in range(NUM_EXAMPLES):
-            output_shape, schema_capsule = pipe.get_processing_schema(input_shape, item_seed)
+            output_shape, schema_capsule = def_get_processing_schema(pipe, input_shape, item_seed)
             i, j = np.meshgrid(np.arange(128), np.arange(64), indexing='ij')
             part = np.stack([i, j, i + j], axis=-1)[np.newaxis, ...]
             input_array = np.repeat(part, B, axis=0).astype(dtype)
@@ -206,7 +212,7 @@ class TestPointCorrectness:
 
         for item_seed in range(NUM_EXAMPLES):
             settings = aug.get_item_settings(input_shape, item_seed)
-            _, schema_capsule = pipe.get_processing_schema(input_shape, item_seed)
+            _, schema_capsule = def_get_processing_schema(pipe, input_shape, item_seed)
             input_array = gen_random(points_shape, dtype)
             output_array = np.zeros(points_shape, dtype=dtype)
             pipe.augment_points(input_array, output_array, schema_capsule)
@@ -227,7 +233,7 @@ class TestPointCorrectness:
 
         for item_seed in range(NUM_EXAMPLES):
             settings = aug.get_item_settings(input_shape, item_seed)
-            _, schema_capsule = pipe.get_processing_schema(input_shape, item_seed)
+            _, schema_capsule = def_get_processing_schema(pipe, input_shape, item_seed)
             input_array = gen_random(points_shape, dtype)
             output_array = np.zeros(points_shape, dtype=dtype)
             pipe.augment_points(input_array, output_array, schema_capsule)
@@ -245,7 +251,7 @@ class TestPointCorrectness:
         pipe = DataAugmentationPipe([ResizeAugmentation(48, 48)], DEF_MAX_INPUT_SHAPE, DEF_MAX_NUM_POINTS, 8)
 
         for item_seed in range(NUM_EXAMPLES):
-            _, schema_capsule = pipe.get_processing_schema(input_shape, item_seed)
+            _, schema_capsule = def_get_processing_schema(pipe, input_shape, item_seed)
             input_array = gen_random(points_shape, dtype)
             output_array = np.zeros(points_shape, dtype=dtype)
             pipe.augment_points(input_array, output_array, schema_capsule)

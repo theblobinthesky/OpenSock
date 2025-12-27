@@ -4,7 +4,6 @@
 #include "resource.h"
 #include <pybind11/numpy.h>
 #include <pybind11/stl.h>
-#include <unordered_map>
 
 #include "dataAugmenter/FlipAugmentation.h"
 #include "dataAugmenter/PadAugmentation.h"
@@ -18,9 +17,10 @@
 namespace py = pybind11;
 
 void bindDatasetRelated(const py::module &m) {
-    py::enum_<ItemFormat>(m, "ItemFormat")
-            .value("FLOAT", ItemFormat::FLOAT)
-            .value("UINT", ItemFormat::UINT)
+    py::enum_<DType>(m, "DType")
+            .value("UINT8", DType::UINT8)
+            .value("INT32", DType::INT32)
+            .value("FLOAT32", DType::FLOAT32)
             .export_values();
 
     py::class_<Dataset>(m, "Dataset")
@@ -46,7 +46,7 @@ void bindDataloaderRelated(const py::module &m) {
 
     // TODO Comment(getNextBatch): Important convention is that memory of the last batch gets invalid when you call getNextBatch!
     py::class_<DataLoader, std::shared_ptr<DataLoader> >(m, "DataLoader")
-            .def(py::init<Dataset &, int, int, int>())
+            .def(py::init<Dataset &, int, int, int, DataAugmentationPipe &>())
             .def("getNextBatch", &DataLoader::getNextBatch)
             .def("__len__", [](const DataLoader &self) -> size_t {
                 return self.batchedDataset.getNumberOfBatches();
@@ -102,10 +102,13 @@ void bindCompressionRelated(const py::module &m) {
 }
 
 void bindDataSources(const py::module &m) {
+    py::class_<SubdirToDictname>(m, "SubdirToDictname")
+            .def(py::init<std::string, std::string>());
+
     py::class_<FlatDataSource, IDataSource, std::shared_ptr<FlatDataSource> >(m, "FlatDataSource")
-            .def(py::init<std::string, std::unordered_map<std::string, std::string> >(),
+            .def(py::init<std::string, std::vector<SubdirToDictname> >(),
                  py::arg("root_directory"),
-                 py::arg("subdir_to_dict") = std::unordered_map<std::string, std::string>{});
+                 py::arg("subdir_to_dict") = std::vector<SubdirToDictname>{});
 }
 
 DType getDType(const py::array &array) {
@@ -137,10 +140,10 @@ void bindAugmentations(const py::module &m) {
             .def("get_item_settings", [](const FlipAugmentation &self, const std::vector<uint32_t> &inputShape,
                                          const uint64_t itemSeed) {
                 const py::dict pyBatch;
-                const auto settings = static_cast<FlipItemSettings *>(self.getDataOutputSchema(inputShape, itemSeed).
-                    itemSettings);
-                pyBatch["does_horizontal_flip"] = settings->doesHorizontalFlip;
-                pyBatch["does_vertical_flip"] = settings->doesVerticalFlip;
+                const auto propPtr = self.getDataOutputSchema(inputShape, itemSeed).itemProp;
+                const auto prop = static_cast<FlipProp *>(propPtr);
+                pyBatch["does_horizontal_flip"] = prop->doesHorizontalFlip;
+                pyBatch["does_vertical_flip"] = prop->doesVerticalFlip;
                 return pyBatch;
             });
 
@@ -159,12 +162,12 @@ void bindAugmentations(const py::module &m) {
             .def("get_item_settings", [](const RandomCropAugmentation &self, const std::vector<uint32_t> &inputShape,
                                          const uint64_t itemSeed) {
                 const py::dict pyBatch;
-                const auto settings = static_cast<RandomCropSettings *>(self.getDataOutputSchema(inputShape, itemSeed).
-                    itemSettings);
-                pyBatch["left"] = settings->left;
-                pyBatch["top"] = settings->top;
-                pyBatch["height"] = settings->height;
-                pyBatch["width"] = settings->width;
+                const auto propPtr = self.getDataOutputSchema(inputShape, itemSeed).itemProp;
+                const auto prop = static_cast<RandomCropProp *>(propPtr);
+                pyBatch["left"] = prop->left;
+                pyBatch["top"] = prop->top;
+                pyBatch["height"] = prop->height;
+                pyBatch["width"] = prop->width;
                 return pyBatch;
             });
 
@@ -198,8 +201,8 @@ void bindDataProcessingPipe(const py::module &m) {
                 return new DataAugmentationPipe(std::move(augs), maxIn, maxNumPoints, maxBytes);
             }), py::keep_alive<1, 2>())
             .def("get_processing_schema",
-                 [](const DataAugmentationPipe &self, const std::vector<uint32_t> &inShape, uint64_t seed) {
-                     auto *schema = new DataProcessingSchema(self.getProcessingSchema(inShape, seed));
+                 [](const DataAugmentationPipe &self, const Shapes &inShapes, const uint64_t seed) {
+                     auto *schema = new DataProcessingSchema(self.getProcessingSchema(inShapes, seed));
                      // Return (OutputShape, SchemaCapsule)
                      return py::make_tuple(
                          schema->outputShape,
@@ -219,9 +222,8 @@ void bindDataProcessingPipe(const py::module &m) {
                      std::vector<uint8_t> b1(bufSize), b2(bufSize);
                      self.setBuffer(b1.data(), b2.data());
 
-                     verifyArraysIntegrity(input, toUint32Shape(inInfo), schema->dataAugInputShapes[0]);
-                     verifyArraysIntegrity(output, toUint32Shape(outInfo),
-                                           schema->dataAugOutputShapes[schema->dataAugOutputShapes.size() - 1]);
+                     // TODO (Uncomment): verifyArraysIntegrity(input, toUint32Shape(inInfo), schema->inputShapesPerAug[0]);
+                     // TODO (Uncomment): verifyArraysIntegrity(output, toUint32Shape(outInfo), schema->outputShapesPerAug.back());
 
                      self.augmentWithRaster(
                          getAndAssertEqualityOfDType(input, output),
@@ -243,8 +245,15 @@ void bindDataProcessingPipe(const py::module &m) {
 
                      verifyArraysIntegrity(input, toUint32Shape(inInfo), toUint32Shape(outInfo));
 
+                     const auto inShape = toUint32Shape(inInfo);
+                     const auto subShape = std::vector(inShape.begin() + 1, inShape.end());
+                     Shapes inputShapes;
+                     for (size_t b = 0; b < inShape[0]; b++) {
+                         inputShapes.push_back(subShape);
+                     }
+
                      self.augmentWithPoints(
-                         toUint32Shape(inInfo),
+                         inputShapes,
                          getAndAssertEqualityOfDType(input, output),
                          static_cast<const uint8_t *>(inInfo.ptr),
                          static_cast<uint8_t *>(outInfo.ptr),

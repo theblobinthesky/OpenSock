@@ -26,10 +26,10 @@ HEIGHT, WIDTH = 300, 300
 DL_CONFIGS = [
     # (NUM_THREADS, PREFETCH_SIZE)
     (16, 16),
-    (16, 4),
-    (8, 16),
-    (8, 1),
-    (8, 2)
+    # (16, 4),
+    # (8, 16),
+    # (8, 1),
+    # (8, 2)
 ]
 NUM_THREADS, PREFETCH_SIZE = 16, 4
 
@@ -64,7 +64,7 @@ def init_ds_fn():
 
 def get_dataset():
     root_dir, sub_dir = ensure_jpg_dataset()
-    return m.Dataset.from_subdirs(root_dir, {sub_dir: "img"}, init_ds_fn), root_dir
+    return m.Dataset.from_subdirs(root_dir, [(sub_dir, "img")], init_ds_fn), root_dir
 
 def get_dataloader(batch_size: int, num_threads: int, prefetch_size: int):
     ds, root_dir = get_dataset()

@@ -38,6 +38,19 @@ Dataset::Dataset(std::shared_ptr<IDataSource> _dataSource,
                  std::vector<IDataAugmentation *> _dataAugmentations)
     : dataSource(std::move(_dataSource)), dataAugmentations(std::move(_dataAugmentations)) {
     dataSource->initDataset();
+
+    // Defensive programming.
+    const auto &itemKeys = dataSource->getItemKeys();
+    bool rasterEncountered = false;
+    for (const auto & itemKey : itemKeys) {
+        rasterEncountered |= itemKey.type == ItemType::RASTER;
+        if (itemKey.type == ItemType::POINTS) {
+            if (!rasterEncountered) {
+                throw std::runtime_error("ItemKey of type POINTS must be preceeded by type RASTER to latch onto it.");
+            }
+            break;
+        }
+    }
 }
 
 std::tuple<Dataset, Dataset, Dataset> Dataset::splitTrainValidationTest(

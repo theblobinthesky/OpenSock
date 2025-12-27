@@ -327,7 +327,9 @@ void ResourcePool::threadMain(const size_t threadIdx, const std::atomic_uint32_t
     LOG_DEBUG("thread {} started", threadIdx);
 
     const auto temporaryArena = std::make_unique<uint8_t[]>(dl->outputBatchMemorySize);
-    auto temporaryAllocator = BumpAllocator(temporaryArena.get(), dl->outputBatchMemorySize);
+
+    const size_t tmpAllocSize = dl->maxInputBatchMemorySize + dl->outputBatchMemorySize;
+    auto tmpAlloc = BumpAllocator(temporaryArena.get(), tmpAllocSize);
 
     uint64_t rememberedGenIdx = genIdx.load();
 
@@ -343,16 +345,59 @@ void ResourcePool::threadMain(const size_t threadIdx, const std::atomic_uint32_t
         const auto [startingOffset, batchPaths] = dl->batchedDataset.getNextInFlightBatch();
         auto &dataset = dl->batchedDataset.getDataset();
         const std::vector<ItemKey> &itemKeys = dataset.getDataSource()->getItemKeys();
-        LOG_DEBUG("itemKeys.siez() {}", itemKeys.size());
 
         // For each head, load all batch items into one contigous cpu array.
-        std::vector<CpuAllocation> hostAllocations;
-        temporaryAllocator.reset();
+        std::vector<CpuAllocation> inputAllocsOnHost;
+        std::vector<uint8_t *> outputAllocsOnHost;
+        tmpAlloc.reset();
         for (size_t i = 0; i < itemKeys.size(); i++) {
-            hostAllocations.push_back(
-                dataset.getDataSource()->loadItemSliceIntoContigousBatch(temporaryAllocator, batchPaths, i)
-            );
+            // The convention is that data sources always read into cpu memory, even if no
+            // augmentations are applied. This is because we cannot guarantee,
+            // that the decoders never read from pinned memory.
+            // Reading from pinned memory can be very slow, as it is not always backed by RAM.
+            inputAllocsOnHost.push_back(dataset.getDataSource()->loadItemSliceIntoContigousBatch(
+                tmpAlloc, batchPaths, i, dl->maxInputSizesPerSingleItem[i]
+            ));
+            outputAllocsOnHost.push_back(tmpAlloc.allocate(dl->outputBatchMemorySize));
         }
+        DO_SHUTDOWN_OR_GENCHANGE_IF_NECESSARY()
+
+        // TODO: Move augmentations further up.
+        // TODO: Technically, no pair has to be available while we are still decoding and augmenting.
+        for (size_t i = 0; i < itemKeys.size(); i++) {
+            const auto itemKey = itemKeys[i];
+            const CpuAllocation &inputAlloc = inputAllocsOnHost[i];
+            uint8_t *outputAlloc = outputAllocsOnHost[i];
+            DataProcessingSchema lastSchema;
+            switch (itemKey.type) {
+                case ItemType::NONE:
+                    // TODO (Speed): Zero copy.
+                    memcpy(outputAlloc, inputAlloc.batchBuffer.uint8, dl->outputSizesPerBatchOfItem[0]);
+                    break;
+                case ItemType::POINTS:
+                    assert(!lastSchema.inputShapesPerAug.empty());
+                    dl->augPipe.augmentWithPoints(
+                        inputAlloc.shapes,
+                        itemKey.probeResult.dtype,
+                        inputAlloc.batchBuffer.uint8,
+                        outputAlloc,
+                        lastSchema
+                    );
+                    break;
+                case ItemType::RASTER:
+                    lastSchema = dl->augPipe.getProcessingSchema(inputAlloc.shapes, startingOffset);
+                    dl->augPipe.augmentWithRaster(
+                        itemKey.probeResult.dtype,
+                        inputAlloc.batchBuffer.uint8,
+                        outputAlloc,
+                        lastSchema
+                    );
+                    break;
+                default:
+                    throw std::runtime_error("Unsupported spatial hint in worker thread loop.");
+            }
+        }
+
         DO_SHUTDOWN_OR_GENCHANGE_IF_NECESSARY()
 
 
@@ -391,18 +436,20 @@ void ResourcePool::threadMain(const size_t threadIdx, const std::atomic_uint32_t
 
 
         assert(allocations.getArena().host != nullptr);
-        std::memcpy(allocations.getArena().host, temporaryAllocator.getArena(), dl->outputBatchMemorySize);
+        std::memcpy(allocations.getArena().host, tmpAlloc.getArena(), dl->outputBatchMemorySize);
         std::vector<uint8_t *> gpuAllocations;
         std::vector<Fence> fences;
         for (size_t itemKeyIdx = 0; itemKeyIdx < itemKeys.size(); itemKeyIdx++) {
-            const auto &[batchBuffer] = hostAllocations[itemKeyIdx];
-            const size_t batchBufferSize = itemKeys[itemKeyIdx].probeResult.getBufferSize();
-            const auto &[host, gpu, _] = allocations.allocate(batchBufferSize);
+            const auto &[batchBuffer, _1] = inputAllocsOnHost[itemKeyIdx];
+            const size_t batchBufferSize = dl->outputSizesPerBatchOfItem[itemKeyIdx];
+            const auto &[host, gpu, _2] = allocations.allocate(batchBufferSize);
 
             // Start async upload to gpu memory as soon as possible.
             // TODO: This also locked a mutex. Maybe this is still necessary?
 
-            std::memcpy(host, batchBuffer.uint8, batchBufferSize); // TODO: Think about pinned memory availabilty. I think this is right, but recheck.
+            std::memcpy(host, batchBuffer.uint8, batchBufferSize);
+            // TODO: Think about pinned memory availabilty. I think this is right, but recheck.
+
             device.copyFromHostToGpuMemory(host, gpu, batchBufferSize);
             gpuAllocations.push_back(gpu);
             // TODO: This needs to be synchronized by mutex?
@@ -473,7 +520,7 @@ PrefetchItem ResourcePool::acquireAndGetNextBatch(const std::shared_ptr<DataLoad
     std::unique_lock lock(prefetchCacheMutex);
     prefetchCacheNotify.wait(lock, [this] { return !prefetchCache.empty(); });
 
-    const auto prefetchItem = prefetchCache.top();
+    const PrefetchItem &prefetchItem = prefetchCache.top();
     prefetchCache.pop();
     LOG_DEBUG("acquireAndGetNextBatch datasetStartingOffset={}", prefetchItem.datasetStartingOffset);
     dl->batchedDataset.popWaitingBatch(prefetchItem.datasetStartingOffset);

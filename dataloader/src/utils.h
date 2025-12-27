@@ -26,11 +26,11 @@
 #endif
 
 // TODO: Speed.
-template <typename T>
-std::string mapAndJoin(const std::vector<T>& vals, const char joinChar = ',') {
+template<typename T>
+std::string mapAndJoin(const std::vector<T> &vals, const char joinChar = ',') {
     std::string ret;
-    for (size_t i = 0; i < vals.size(); i++){
-        const T& val = vals[i];
+    for (size_t i = 0; i < vals.size(); i++) {
+        const T &val = vals[i];
         ret += std::to_string(val);
         if (i < vals.size() - 1) {
             ret += joinChar;
@@ -40,8 +40,8 @@ std::string mapAndJoin(const std::vector<T>& vals, const char joinChar = ',') {
     return ret;
 }
 
-template <typename T>
-std::string formatVector(const std::vector<T>& vals, const char joinChar = ',') {
+template<typename T>
+std::string formatVector(const std::vector<T> &vals, const char joinChar = ',') {
     return "(" + mapAndJoin(vals, joinChar) + ")";
 }
 
@@ -149,18 +149,13 @@ struct ConsumerStream {
     uint64_t id;
 };
 
-enum class ItemFormat {
-    UINT,
-    FLOAT
-};
-
 enum class DType {
     UINT8,
     INT32,
     FLOAT32
 };
 
-inline size_t getWidthByDType(const DType dtype) {
+inline size_t getWidthOfDType(const DType dtype) {
     switch (dtype) {
         case DType::UINT8:
             return 1;
@@ -184,30 +179,29 @@ inline size_t getWidthByDType(const DType dtype) {
     return static_cast<size_t>(rand * static_cast<double>(static_cast<int64_t>(maxExclusive) - 1));
 }
 
-[[nodiscard]] inline size_t randomUniformBetween(const uint64_t seed, const uint64_t subSeed, const size_t minInclusive, const size_t maxExclusive) {
+[[nodiscard]] inline size_t randomUniformBetween(const uint64_t seed, const uint64_t subSeed, const size_t minInclusive,
+                                                 const size_t maxExclusive) {
     return minInclusive + randomUniformSize(seed, subSeed, maxExclusive + 1 - minInclusive);
 }
 
-[[nodiscard]] inline size_t getIdx(const size_t b, const size_t i, const size_t k, const std::vector<uint32_t> &shape) {
-    return b * shape[1] * shape[2]
-           + i * shape[2]
+[[nodiscard]] inline size_t getIdx(const size_t i, const size_t k, const std::vector<uint32_t> &shape) {
+    return i * shape[1]
            + k;
 }
 
-[[nodiscard]] inline size_t getIdx(const size_t b, const size_t i, const size_t j, const size_t k, const std::vector<uint32_t> &shape) {
-    return b * shape[1] * shape[2] * shape[3]
-           + i * shape[2] * shape[3]
-           + j * shape[3]
+[[nodiscard]] inline size_t getIdx(const size_t i, const size_t j, const size_t k, const std::vector<uint32_t> &shape) {
+    return i * shape[1] * shape[2]
+           + j * shape[2]
            + k;
 }
 
-[[nodiscard]] inline uint32_t getShapeSize(const std::vector<uint32_t>& shape) {
+[[nodiscard]] inline uint32_t getShapeSize(const std::vector<uint32_t> &shape) {
     uint32_t size = 1;
     for (const uint32_t dim: shape) size *= dim;
     return size;
 }
 
-template <typename Func>
+template<typename Func>
 void dispatchWithType(const DType dtype, const uint8_t *in, uint8_t *out, Func fun) {
     switch (dtype) {
         case DType::UINT8:

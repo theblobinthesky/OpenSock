@@ -28,11 +28,11 @@ DataOutputSchema PadAugmentation::getDataOutputSchema(const std::vector<uint32_t
 
     return {
         .outputShape = outputShape,
-        .itemSettings = nullptr
+        .itemProp = nullptr
     };
 }
 
-void PadAugmentation::freeItemSettings(void *itemSettings) const {
+void PadAugmentation::freeItemProp(ItemProp &) const {
     // Nothing.
 }
 
@@ -48,24 +48,24 @@ std::vector<uint32_t> PadAugmentation::getMaxOutputShapeAxesIfSupported(const st
     return {};
 }
 
-bool PadAugmentation::isAugmentWithPointsSkipped(const std::vector<uint32_t> &, DType, void *) {
-    // Padding only applies to rasters.
+bool PadAugmentation::isAugmentWithPointsSkipped(const Shape &, DType, ItemProp &) {
+    // Padding only applies to rasters
     return true;
 }
 
 void PadAugmentation::augmentWithPoints(
-    const std::vector<uint32_t> &,
+    const Shape &,
     const DType,
     const uint8_t *__restrict__, uint8_t *__restrict__,
-    void *
+    ItemProp &
 ) {
     // Padding only applies to rasters.
 }
 
 template<typename T>
 void padRaster(
-    const std::vector<uint32_t> &inputShape,
-    const std::vector<uint32_t> &outputShape,
+    const Shape &inputShape,
+    const Shape &outputShape,
     const T *inputData, T *outputData,
     const PadSettings padSettings
 ) {
@@ -93,32 +93,28 @@ void padRaster(
         break;
     }
 
-    // Copy raster. TODO: Vectorise.
-    for (size_t b = 0; b < inputShape[0]; b++) {
-        for (size_t i = 0; i < inputShape[1]; i++) {
-            for (size_t j = 0; j < inputShape[2]; j++) {
-                for (size_t k = 0; k < inputShape[3]; k++) {
-                    outputData[getIdx(b, i + left, j + top, k, outputShape)] = inputData[
-                        getIdx(b, i, j, k, inputShape)];
-                }
+    // Copy raster.
+    for (size_t i = 0; i < inputShape[0]; i++) {
+        for (size_t j = 0; j < inputShape[1]; j++) {
+            for (size_t k = 0; k < inputShape[2]; k++) {
+                outputData[getIdx(i + left, j + top, k, outputShape)] = inputData[getIdx(i, j, k, inputShape)];
             }
         }
     }
 }
 
 bool PadAugmentation::isAugmentWithRasterSkipped(
-    const std::vector<uint32_t> &inputShape,
-    const std::vector<uint32_t> &outputShape, DType, void *
-) {
+    const Shape &inputShape,
+    const Shape &outputShape, DType, ItemProp &) {
     return inputShape == outputShape;
 }
 
 void PadAugmentation::augmentWithRaster(
-    const std::vector<uint32_t> &inputShape,
-    const std::vector<uint32_t> &outputShape,
+    const Shape &inputShape,
+    const Shape &outputShape,
     const DType dtype,
     const uint8_t *__restrict__ inputData, uint8_t *__restrict__ outputData,
-    void *
+    ItemProp &
 ) {
     dispatchWithType(dtype, inputData, outputData, [&](auto *input, auto *output) {
         padRaster(

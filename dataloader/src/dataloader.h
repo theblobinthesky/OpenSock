@@ -30,7 +30,8 @@ public:
         Dataset &_dataset,
         int _batchSize,
         int _numThreads,
-        int _prefetchSize
+        int _prefetchSize,
+        DataAugmentationPipe &_augPipe
     );
 
     DataLoader(const DataLoader &) = delete;
@@ -43,10 +44,15 @@ public:
     static std::mutex concurrencyMutex; // TODO: Maybe this is not necessary. Maybe remove this later.
     uint64_t id;
     BatchedDataset batchedDataset;
+    DataAugmentationPipe augPipe;
     const size_t batchSize;
     const size_t numThreads;
     const size_t prefetchSize;
 
+    std::vector<size_t> maxInputSizesPerSingleItem;
+    std::vector<size_t> outputSizesPerBatchOfItem;
+    std::vector<size_t> outputMetadataSizesPerBatchOfItem;
+    size_t maxInputBatchMemorySize;
     size_t outputBatchMemorySize;
 };
 

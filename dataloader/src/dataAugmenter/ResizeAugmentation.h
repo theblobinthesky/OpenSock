@@ -3,7 +3,7 @@
 
 #include "dataAugmenter/augmentation.h"
 
-struct ResizeSettings {
+struct ResizeProp {
     uint32_t originalHeight;
     uint32_t originalWidth;
     bool skip;
@@ -17,34 +17,34 @@ public:
 
     [[nodiscard]] DataOutputSchema getDataOutputSchema(const std::vector<uint32_t> &inputShape, uint64_t itemSeed) const override;
 
-    void freeItemSettings(void *itemSettings) const override;
+    void freeItemProp(ItemProp &itemProp) const override;
 
-    std::vector<uint32_t> getMaxOutputShapeAxesIfSupported(const std::vector<uint32_t> &inputShape) const override;
+    Shape getMaxOutputShapeAxesIfSupported(const Shape &inputShape) const override;
 
     bool isAugmentWithPointsSkipped(
-        const std::vector<uint32_t> &shape,
-        DType dtype, void *itemSettings
+        const Shape &shape,
+        DType dtype, ItemProp &itemProp
     ) override;
 
     void augmentWithPoints(
-        const std::vector<uint32_t> &shape,
+        const Shape &shape,
         DType dtype,
         const uint8_t *__restrict__ inputData, uint8_t *__restrict__ outputData,
-        void *itemSettings
+        ItemProp &itemProp
     ) override;
 
     bool isAugmentWithRasterSkipped(
-        const std::vector<uint32_t> &inputShape,
-        const std::vector<uint32_t> &outputShape,
-        DType dtype, void *itemSettings
+        const Shape &inputShape,
+        const Shape &outputShape,
+        DType dtype, ItemProp &itemProp
     ) override;
 
     void augmentWithRaster(
-        const std::vector<uint32_t> &inputShape,
-        const std::vector<uint32_t> &outputShape,
+        const Shape &inputShape,
+        const Shape &outputShape,
         DType dtype,
         const uint8_t *__restrict__ inputData, uint8_t *__restrict__ outputData,
-        void *itemSettings
+        ItemProp &itemProp
     ) override;
 
 private:

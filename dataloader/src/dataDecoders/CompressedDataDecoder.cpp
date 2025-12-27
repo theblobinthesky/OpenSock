@@ -4,9 +4,9 @@ ProbeResult CompressedDataDecoder::probeFromMemory(uint8_t *inputData, size_t in
     return {};
 }
 
-uint8_t *CompressedDataDecoder::loadFromMemory(const ProbeResult &settings,
-                        uint8_t *inputData, size_t inputSize, BumpAllocator<uint8_t *> &output) {
-    return nullptr;
+DecodingResult CompressedDataDecoder::loadFromMemory(uint32_t bufferSize, uint8_t *inputData, size_t inputSize,
+                              BumpAllocator<uint8_t *> &output) {
+    return {};
 }
 
 std::string CompressedDataDecoder::getExtension() {

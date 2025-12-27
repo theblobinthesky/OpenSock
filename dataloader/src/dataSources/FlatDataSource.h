@@ -2,11 +2,17 @@
 #define VERSION_FILESYSTEMDATASOURCE_H
 
 #include "dataio.h"
-#include <unordered_map>
+
+struct SubdirToDictname {
+    std::string subdir;
+    std::string dictname;
+
+    SubdirToDictname(std::string subdir, std::string dictname);
+};
 
 class FlatDataSource final : public IDataSource {
 public:
-    explicit FlatDataSource(std::string _rootDirectory, std::unordered_map<std::string, std::string> _subdirToDictName);
+    explicit FlatDataSource(std::string _rootDirectory, std::vector<SubdirToDictname> _subdirsToDictNames);
 
     explicit FlatDataSource(std::string _rootDirectory,
                             std::vector<ItemKey> _itemKeys,
@@ -18,7 +24,7 @@ public:
 
     CpuAllocation loadItemSliceIntoContigousBatch(BumpAllocator<uint8_t *> alloc,
                                                   const std::vector<std::vector<std::string> > &batchPaths,
-                                                  size_t itemKeysIdx) override;
+                                                  size_t itemKeysIdx, uint32_t bufferSize) override;
 
     bool preInitDataset(bool forceInvalidation) override;
 
@@ -29,7 +35,7 @@ public:
 
 private:
     std::string rootDirectory;
-    std::unordered_map<std::string, std::string> subdirToDictName;
+    std::vector<SubdirToDictname> subdirsToDictNames;
     std::vector<ItemKey> itemKeys;
     std::vector<std::vector<std::string> > entries;
     std::vector<uint8_t> memoryArena;

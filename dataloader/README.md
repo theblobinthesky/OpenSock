@@ -45,13 +45,23 @@ Feature List (- not begun, w working, + solved):
     + vectorisation api
     + tests for augmentations
 
-    Misc:
-    - ensure easy setup with uv
-    - apply more sanitizers
-    - proper memory arenas everywhere
-    - zero-copy augmentation output to pinned memory
-    - gemini suggestions...
+    Compression:
+    - enable compressed file format use in dataloader
 
+    Misc:
+    - ensure easy setup with uv (both production and tests)
+    - apply more sanitizers
+    w proper memory arenas in all perf. critical areas
+    - zero-copy augmentation output to pinned memory
+    + fix item keys order
+    - gemini suggestions...
+    - factor out graphics card backend (e.g. cuda) and make it selectable at runtime
+
+
+Plan for how to select the backend:
+Needs to happen before the resource pool is initialized, as you obviously cannot switch as soon as the resource pool is actually in use.
+
+TODO: setBuffers for the augmentation pipe
 
 Test results for the compressor:
 ```

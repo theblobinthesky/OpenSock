@@ -8,36 +8,92 @@ namespace py = pybind11;
 std::atomic_uint64_t DataLoader::nextId;
 std::mutex DataLoader::concurrencyMutex;
 
-size_t getOutputBatchMemorySize(const BatchedDataset &batchedDataset, const size_t batchSize) {
-    size_t outputBatchMemorySize = 0;
-    for (const ItemKey &itemKey: batchedDataset.getDataset().getDataSource()->getItemKeys()) {
-        const ProbeResult &probe = itemKey.probeResult;
-        uint64_t itemMemorySize = probe.bytesPerItem;
-        for (const auto dim: probe.shape) {
-            itemMemorySize *= dim;
+void precomputeItemSizesInMemory(
+    const BatchedDataset &batchedDataset,
+    const DataAugmentationPipe &augPipe,
+    const size_t batchSize,
+    std::vector<size_t> &maxInputSizesPerSingleItem,
+    std::vector<size_t> &outputSizesPerBatchOfItem,
+    std::vector<size_t> &outputMetadataSizesPerBatchOfItem,
+    size_t &maxInputBatchMemorySize,
+    size_t &outputBatchMemorySize
+) {
+    const auto &itemKeys = batchedDataset.getDataset().getDataSource()->getItemKeys();
+    const auto augPipeMaxInputShapeSize = getShapeSize(augPipe.getMaxInputShape());
+    const auto augPipeOutputShapeSize = getShapeSize(augPipe.getStaticOutputShape());
+
+    outputSizesPerBatchOfItem.clear();
+    outputMetadataSizesPerBatchOfItem.clear();
+    maxInputBatchMemorySize = outputBatchMemorySize = 0;
+    for (const auto &itemKey: itemKeys) {
+        const auto probeDTypeWidth = getWidthOfDType(itemKey.probeResult.dtype);
+        size_t maxBytesOfInputPerItem = probeDTypeWidth;
+        size_t bytesOfOutputPerItem = probeDTypeWidth;
+        size_t bytesOfMetaOutputPerItem;
+
+        switch (itemKey.type) {
+            case ItemType::NONE: {
+                const size_t probeShapeSize = getShapeSize(itemKey.probeResult.shape);
+                maxBytesOfInputPerItem *= probeShapeSize;
+                bytesOfOutputPerItem *= probeShapeSize;
+                bytesOfMetaOutputPerItem = 0;
+            }
+            break;
+            case ItemType::RASTER:
+                maxBytesOfInputPerItem *= augPipeMaxInputShapeSize;
+                bytesOfOutputPerItem *= augPipeOutputShapeSize;
+                bytesOfMetaOutputPerItem = 0;
+                break;
+            case ItemType::POINTS:
+                maxBytesOfInputPerItem *= augPipe.getMaxNumPoints();
+                bytesOfOutputPerItem *= augPipe.getMaxNumPoints();
+
+                // Points need a metadata tensor of lengths with shape (b,).
+                bytesOfMetaOutputPerItem = batchSize * getWidthOfDType(PointsLengthsTensorDType);
+                break;
+            default:
+                throw std::runtime_error("Item sizes cannot be computed because an item type is unknown.");
         }
 
-        outputBatchMemorySize += batchSize * itemMemorySize;
+        maxInputSizesPerSingleItem.push_back(maxBytesOfInputPerItem);
+        maxInputBatchMemorySize += maxBytesOfInputPerItem;
+
+        const auto outputSize = batchSize * bytesOfOutputPerItem;
+        outputSizesPerBatchOfItem.push_back(outputSize);
+        outputBatchMemorySize += outputSize;
+
+        const auto outputMetadataSize = batchSize * bytesOfMetaOutputPerItem;
+        outputMetadataSizesPerBatchOfItem.push_back(outputMetadataSize);
+        outputBatchMemorySize += outputMetadataSize;
     }
 
-    return alignUp(outputBatchMemorySize, 16);
+    maxInputBatchMemorySize = 8 * alignUp(maxInputBatchMemorySize, 16); // TODO: Revert *8.
+    outputBatchMemorySize = 8 * alignUp(outputBatchMemorySize, 16); // TODO: Revert *8.
 }
 
 DataLoader::DataLoader(
     Dataset &_dataset,
     const int _batchSize,
     const int _numThreads,
-    const int _prefetchSize
+    const int _prefetchSize,
+    DataAugmentationPipe &_augPipe
 ) : id(nextId.fetch_add(1)),
     batchedDataset(std::move(_dataset), _batchSize),
+    augPipe(std::move(_augPipe)),
     batchSize(_batchSize),
     numThreads(_numThreads),
     prefetchSize(_prefetchSize),
-    outputBatchMemorySize(getOutputBatchMemorySize(batchedDataset, batchSize)) {
+    maxInputBatchMemorySize(0), outputBatchMemorySize(0) {
     if (batchSize <= 0 || _numThreads <= 0 || _prefetchSize <= 0) {
         throw std::runtime_error(
             "Batch size, the number of threads and the prefetch size need to be strictly positive.");
     }
+
+    precomputeItemSizesInMemory(
+        batchedDataset, augPipe, batchSize,
+        maxInputSizesPerSingleItem, outputSizesPerBatchOfItem, outputMetadataSizesPerBatchOfItem,
+        maxInputBatchMemorySize, outputBatchMemorySize
+    );
 
     LOG_INFO("DataLoader with id={} initialized.", id);
 }
@@ -76,6 +132,61 @@ void deleter(DLManagedTensor *self) {
     delete self;
 }
 
+uint8_t getItemCode(const DType dtype) {
+    switch (dtype) {
+        case DType::UINT8: return kDLUInt;
+        case DType::INT32: return kDLInt;
+        case DType::FLOAT32: return kDLFloat;
+        default:
+            throw std::runtime_error("DType cannot be converted to item code.");
+    }
+}
+
+DLWrapper *get(
+    const uint32_t batchSize,
+    const Shape &shape,
+    uint8_t *gpuAllocation,
+    const DType dtype,
+    const Fence &fence
+) {
+    const int ndim = static_cast<int>(shape.size()) + 1;
+    // ReSharper disable once CppDFAMemoryLeak
+    auto *const shapeArr = new int64_t[ndim]{};
+    shapeArr[0] = static_cast<int64_t>(batchSize);
+    for (size_t s = 0; s < shape.size(); s++) {
+        shapeArr[s + 1] = static_cast<int64_t>(shape[s]);
+    }
+
+    constexpr int deviceType = kDLCUDA; // TODO: This hardcodes CUDA.
+    constexpr int deviceId = 0; // TODO: This hardcodes GPU0.
+    auto *dlManagedTensor = new DLManagedTensor{
+        .dl_tensor = {
+            .data = gpuAllocation,
+            .device = {
+                .device_type = kDLCUDA,
+                .device_id = deviceId
+            },
+            .ndim = ndim,
+            .dtype = {
+                .code = getItemCode(dtype),
+                .bits = static_cast<uint8_t>(8 * getWidthOfDType(dtype)), //NOLINT(readability-magic-numbers)
+                .lanes = 1
+            },
+            .shape = shapeArr,
+            .strides = nullptr,
+            .byte_offset = 0
+        },
+        .manager_ctx = nullptr,
+        .deleter = &deleter
+    };
+
+    // ReSharper disable once CppDFAMemoryLeak
+    auto *wrapper = new DLWrapper(fence, deviceType, deviceId, dlManagedTensor);
+    dlManagedTensor->manager_ctx = wrapper;
+
+    return wrapper;
+}
+
 py::dict DataLoader::getNextBatch() {
     std::unique_lock lock(concurrencyMutex);
     const auto [datasetStartingOffset, gpuAllocations, fences]
@@ -93,52 +204,18 @@ py::dict DataLoader::getNextBatch() {
         const Fence fence = fences[i];
         ResourcePool::get().getAllocator()->handOff(gpuAllocation);
 
-        const std::vector<uint32_t> &shape = probe.shape;
-        const int ndim = static_cast<int>(shape.size()) + 1;
+        const Shape &shape = probe.shape; // TODO: This needs to contain the batch dimension.
+        auto wrapper = get(batchSize, shape, gpuAllocation, probe.dtype, fence);
 
-        auto *const shapeArr = new int64_t[ndim]{};
-        shapeArr[0] = static_cast<int64_t>(batchSize);
-        for (size_t s = 0; s < shape.size(); s++) {
-            shapeArr[s + 1] = static_cast<int64_t>(shape[s]);
-        }
-
-        uint8_t itemCode;
-        switch (probe.format) {
-            case ItemFormat::FLOAT: itemCode = kDLFloat;
+        switch (itemKey.type) {
+            case ItemType::NONE:
+            case ItemType::RASTER:
                 break;
-            case ItemFormat::UINT: itemCode = kDLUInt;
+            case ItemType::POINTS:
                 break;
             default:
-                throw std::runtime_error("Invalid item format.");
-        }
-
-        constexpr int deviceType = kDLCUDA; // TODO: This hardcodes CUDA.
-        constexpr int deviceId = 0; // TODO: This hardcodes GPU0.
-        auto *dlManagedTensor = new DLManagedTensor{
-            .dl_tensor = {
-                .data = gpuAllocation,
-                .device = {
-                    .device_type = kDLCUDA,
-                    .device_id = deviceId
-                },
-                .ndim = ndim,
-                .dtype = {
-                    .code = itemCode,
-                    .bits = static_cast<uint8_t>(8 * probe.bytesPerItem), //NOLINT(readability-magic-numbers)
-                    .lanes = 1
-                },
-                .shape = shapeArr,
-                .strides = nullptr,
-                .byte_offset = 0
-            },
-            .manager_ctx = nullptr,
-            .deleter = &deleter
-        };
-
-        // ReSharper disable once CppDFAMemoryLeak
-        auto *wrapper = new DLWrapper(fence, deviceType, deviceId, dlManagedTensor);
-        dlManagedTensor->manager_ctx = wrapper;
-
+                throw std::runtime_error("Next batch encountered unknown spatial hint..");
+        } // TODO
         pyBatch[itemKey.keyName.c_str()] = py::cast(wrapper, py::return_value_policy::reference);
     }
 

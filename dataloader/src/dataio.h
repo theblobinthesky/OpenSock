@@ -14,34 +14,26 @@ struct CpuAllocation {
         uint8_t *uint8;
         float *float32;
     } batchBuffer;
+    Shapes shapes;
 };
 
 struct ProbeResult {
-    ItemFormat format;
-    uint32_t bytesPerItem;
-    std::vector<uint32_t> shape;
+    DType dtype;
+    Shape shape;
     std::string extension;
-
-    [[nodiscard]] uint32_t getShapeSize() const {
-        uint32_t size = 1;
-        for (const uint32_t dim: shape) size *= dim;
-        return size;
-    }
-
-    [[nodiscard]] uint32_t getBufferSize() const {
-        return bytesPerItem * getShapeSize();
-    }
 };
 
-enum class SpatialHint : uint8_t {
+enum class ItemType : uint8_t {
     NONE,
     RASTER,
     POINTS
 };
 
+constexpr auto PointsLengthsTensorDType = DType::INT32;
+
 struct ItemKey {
     std::string keyName;
-    SpatialHint spatialHint;
+    ItemType type;
     ProbeResult probeResult;
 };
 
@@ -50,13 +42,14 @@ class IDataSource {
 public:
     virtual ~IDataSource() = default;
 
+    // An item key with type POINTS will always refer back to the last raster.
     virtual std::vector<ItemKey> getItemKeys() = 0;
 
     virtual std::vector<std::vector<std::string> > getEntries() = 0;
 
     virtual CpuAllocation loadItemSliceIntoContigousBatch(BumpAllocator<uint8_t *> alloc,
                                                           const std::vector<std::vector<std::string> > &batchPaths,
-                                                          size_t itemKeysIdx) = 0;
+                                                          size_t itemKeysIdx, uint32_t bufferSize) = 0;
 
     virtual bool preInitDataset(bool forceInvalidation) = 0;
 
@@ -66,14 +59,19 @@ public:
                                          std::shared_ptr<IDataSource> &dataSourceB) = 0;
 };
 
+struct DecodingResult {
+    uint8_t *data;
+    Shape shape;
+};
+
 class IDataDecoder {
 public:
     virtual ~IDataDecoder() = default;
 
     virtual ProbeResult probeFromMemory(uint8_t *inputData, size_t inputSize) = 0;
 
-    virtual uint8_t *loadFromMemory(const ProbeResult &settings,
-                                    uint8_t *inputData, size_t inputSize, BumpAllocator<uint8_t *> &output) = 0;
+    virtual DecodingResult loadFromMemory(uint32_t bufferSize, uint8_t *inputData, size_t inputSize,
+                                          BumpAllocator<uint8_t *> &output) = 0;
 
     virtual std::string getExtension() = 0;
 };
@@ -94,7 +92,6 @@ class Dataset {
 public:
     Dataset(std::shared_ptr<IDataSource> _dataSource,
             std::vector<IDataAugmentation *> _dataAugmentations,
-
             const pybind11::function &createDatasetFunction,
             bool isVirtualDataset
     );

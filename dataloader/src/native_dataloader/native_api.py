@@ -1,13 +1,14 @@
 from enum import Enum
-from typing import Callable, Dict, List, Optional
+from typing import Callable, Tuple, List, Optional
 from . import _core as m
 import jax
 import jax.numpy as jnp
 
 
-class ItemFormat(Enum):
-    FLOAT = m.ItemFormat.FLOAT
-    UINT = m.ItemFormat.UINT
+class DType(Enum):
+    UINT8 = m.DType.UINT8
+    INT32 = m.DType.INT32
+    FLOAT32 = m.DType.FLOAT32
 
 
 class Dataset:
@@ -18,14 +19,14 @@ class Dataset:
     @classmethod
     def from_subdirs(cls,
                      root_dir: str,
-                     subdir_to_dict: Dict[str, str],
+                     subdir_to_dict: List[Tuple[str, str]],
                      create_dataset_function: Callable,
                      data_augs=None,
                      post_process_fn: Optional[Callable[[dict], dict]] = None,
                      is_virtual_dataset: bool = False) -> 'Dataset':
         if data_augs is None: data_augs = [m.ResizeAugmentation(64, 64)]
         native = m.Dataset(
-            m.FlatDataSource(root_dir, subdir_to_dict),
+            m.FlatDataSource(root_dir, [m.SubdirToDictname(subdir, dictname) for (subdir, dictname) in subdir_to_dict]),
             data_augs,
             create_dataset_function,
             is_virtual_dataset

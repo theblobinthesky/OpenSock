@@ -62,14 +62,13 @@ ProbeResult PngDataDecoder::probeFromMemory(uint8_t *inputData, const size_t inp
     png_destroy_read_struct(&png, &info, nullptr);
 
     return ProbeResult{
-        .format = ItemFormat::UINT,
-        .bytesPerItem = 1,
+        .dtype = DType::UINT8,
         .shape = std::vector<uint32_t>{height, width, 3},
         .extension = "png"
     };
 }
 
-uint8_t *PngDataDecoder::loadFromMemory(const ProbeResult &settings,
+DecodingResult PngDataDecoder::loadFromMemory(const uint32_t bufferSize,
                                         uint8_t *inputData, const size_t inputSize,
                                         BumpAllocator<uint8_t *> &output) {
     if (inputSize < 8 || png_sig_cmp(inputData, 0, 8)) {
@@ -108,19 +107,11 @@ uint8_t *PngDataDecoder::loadFromMemory(const ProbeResult &settings,
 
     png_read_update_info(png, info);
 
-    // Validate shape consistency with probed settings
-    if (settings.shape.size() != 3 || settings.shape[2] != 3 ||
-        settings.shape[0] != height || settings.shape[1] != width) {
-        png_destroy_read_struct(&png, &info, nullptr);
-        throw std::runtime_error("PNG file has inconsistent shape with the probed shape.");
-    }
-
-    const size_t rowStride = static_cast<size_t>(width) * 3; // RGB8
-    const size_t bytesTotal = static_cast<size_t>(height) * rowStride;
-    uint8_t *out = output.allocate(bytesTotal);
 
     // Set up row pointers directly into output buffer to avoid extra copies
+    uint8_t *out = output.allocate(bufferSize);
     std::vector<png_bytep> row_ptrs(height);
+    const size_t rowStride = static_cast<size_t>(width) * 3; // RGB8
     for (png_uint_32 y = 0; y < height; ++y) {
         row_ptrs[y] = out + static_cast<size_t>(y) * rowStride;
     }
@@ -129,7 +120,10 @@ uint8_t *PngDataDecoder::loadFromMemory(const ProbeResult &settings,
     png_read_end(png, nullptr);
     png_destroy_read_struct(&png, &info, nullptr);
 
-    return out;
+    return {
+        .data = out,
+        .shape = {height, width, 3}
+    };
 }
 
 std::string PngDataDecoder::getExtension() {

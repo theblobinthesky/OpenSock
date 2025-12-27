@@ -3,22 +3,25 @@
 #include <utility>
 #include <ranges>
 
-bool isInputShapeBHWN(const std::vector<uint32_t> &inputShape, const size_t N) {
-    if (inputShape.size() != 4) {
+bool isInputShapeHWN(const std::vector<uint32_t> &inputShape, const size_t N) {
+    if (inputShape.size() != 3) {
         return false;
     }
 
-    return inputShape[3] == N;
+    return inputShape[2] == N;
 }
 
-uint32_t calcMaxRequiredBufferSize(
+void calcMaxRequiredBufferSize(
     const std::vector<IDataAugmentation *> &dataAugmentations,
     const std::vector<uint32_t> &maxAlongAllAxesInputShape,
     const uint32_t maxBytesPerElement,
-    const uint32_t maxNumPoints
+    const uint32_t maxNumPoints,
+    uint32_t &maxRequiredBufferSize
 ) {
+    const uint32_t batchSize = maxAlongAllAxesInputShape[0];
+
     uint32_t maxShapeSize = getShapeSize(maxAlongAllAxesInputShape);
-    std::vector<uint32_t> lastMaxShape = maxAlongAllAxesInputShape;
+    auto lastMaxShape = std::vector(maxAlongAllAxesInputShape.begin() + 1, maxAlongAllAxesInputShape.end());
     for (size_t i = 0; i < dataAugmentations.size(); i++) {
         const auto dataAugmentation = dataAugmentations[i];
         const auto outputMaxShape = dataAugmentation->getMaxOutputShapeAxesIfSupported(lastMaxShape);
@@ -28,28 +31,50 @@ uint32_t calcMaxRequiredBufferSize(
         }
 
         lastMaxShape = outputMaxShape;
-        maxShapeSize = std::max(maxShapeSize, getShapeSize(lastMaxShape));
+        maxShapeSize = std::max(maxShapeSize, batchSize * getShapeSize(lastMaxShape));
     }
 
-    return std::max(
-        maxShapeSize, maxAlongAllAxesInputShape[0] * maxNumPoints
-        * static_cast<uint32_t>(maxAlongAllAxesInputShape.size() - 2)
-    ) * maxBytesPerElement;
+    maxRequiredBufferSize = std::max(
+               maxShapeSize,
+               batchSize * maxNumPoints * static_cast<uint32_t>(maxAlongAllAxesInputShape.size() - 2)
+           ) * maxBytesPerElement;
+}
+
+Shape calcStaticOutputShape(
+    const std::vector<IDataAugmentation *> &dataAugs,
+    const Shape &inputShape
+) {
+    Shape lastShape = inputShape;
+    for (const auto dataAug: dataAugs) {
+        lastShape = dataAug->getDataOutputSchema(lastShape, 0).outputShape;
+    }
+    return lastShape;
 }
 
 DataAugmentationPipe::DataAugmentationPipe(
     std::vector<IDataAugmentation *> dataAugmentations,
-    const std::vector<uint32_t> &maxInputShape, const uint32_t maxNumPoints,
+    const Shape &maxInputShape, const uint32_t maxNumPoints,
     const uint32_t maxBytesPerElement
 ) : dataAugs(std::move(dataAugmentations)), buffer1(nullptr), buffer2(nullptr),
-    maximumRequiredBufferSize(calcMaxRequiredBufferSize(dataAugs, maxInputShape, maxBytesPerElement, maxNumPoints)) {
+    maxInputShape(maxInputShape), maxNumPoints(maxNumPoints),
+    maxRequiredBufferSize(0), staticOutputShape(calcStaticOutputShape(dataAugs, maxInputShape)) {
     if (!isOutputShapeStatic()) {
         throw std::runtime_error("Augmentation pipe needs to output a static shape.");
     }
+
+    calcMaxRequiredBufferSize(
+        dataAugs,
+        maxInputShape, maxBytesPerElement, maxNumPoints,
+        maxRequiredBufferSize
+    );
 }
 
 size_t DataAugmentationPipe::getMaximumRequiredBufferSize() const {
-    return maximumRequiredBufferSize;
+    return maxRequiredBufferSize;
+}
+
+Shape DataAugmentationPipe::getStaticOutputShape() const {
+    return staticOutputShape;
 }
 
 void DataAugmentationPipe::setBuffer(uint8_t *_buffer1, uint8_t *_buffer2) {
@@ -57,37 +82,57 @@ void DataAugmentationPipe::setBuffer(uint8_t *_buffer1, uint8_t *_buffer2) {
     buffer2 = _buffer2;
 }
 
-DataProcessingSchema DataAugmentationPipe::getProcessingSchema(const std::vector<uint32_t> &inputShape,
+DataProcessingSchema DataAugmentationPipe::getProcessingSchema(const Shapes &inputShapes,
                                                                const uint64_t itemSeed) const {
-    std::vector<uint32_t> lastShape = inputShape;
-    std::vector<void *> itemSettingsList;
-    std::vector<Shape> inputShapes, outputShapes;
+    Shape outerOutputShape;
+    std::vector<ItemProps> itemPropsPerAug(dataAugs.size());
+    std::vector<Shapes> inputShapesPerAug(dataAugs.size());
+    std::vector<Shapes> outputShapesPerAug(dataAugs.size());
 
-    for (size_t i = 0; i < dataAugs.size(); i++) {
-        const auto dataAugmentation = dataAugs[i];
-        const auto [outputShape, itemSettings] = dataAugmentation->getDataOutputSchema(lastShape, itemSeed);
-        if (outputShape.empty()) {
-            throw std::runtime_error(std::format("Augmenter {} does not support input shape {}.",
-                                                 i, formatVector(lastShape)));
+    for (size_t b = 0; b < inputShapes.size(); b++) { // NOLINT(*-loop-convert)
+        // Compute changing shapes for each batch slice seperately.
+        std::vector<uint32_t> lastShapeForSlice = inputShapes[b];
+        std::vector<void *> itemPropsForSlice;
+        std::vector<Shape> inputShapesForSlice, outputShapesForSlice;
+
+        for (size_t i = 0; i < dataAugs.size(); i++) {
+            const auto dataAugmentation = dataAugs[i];
+            auto [outputShape, itemProp] = dataAugmentation->getDataOutputSchema(lastShapeForSlice, itemSeed);
+            if (outputShape.empty()) {
+                throw std::runtime_error(std::format("Augmenter {} does not support input shape {}.",
+                                                     i, formatVector(lastShapeForSlice)));
+            }
+
+            inputShapesForSlice.push_back(lastShapeForSlice);
+            outputShapesForSlice.push_back(outputShape);
+            lastShapeForSlice = outputShape;
+            itemPropsForSlice.push_back(itemProp);
         }
 
-        inputShapes.push_back(lastShape);
-        outputShapes.push_back(outputShape);
-        lastShape = outputShape;
-        itemSettingsList.push_back(itemSettings);
+        outerOutputShape = lastShapeForSlice;
+
+        // Accumulate them into their respective augmentation list.
+        for (size_t i = 0; i < dataAugs.size(); i++) {
+            itemPropsPerAug[i].push_back(itemPropsForSlice[i]);
+            inputShapesPerAug[i].push_back(inputShapesForSlice[i]);
+            outputShapesPerAug[i].push_back(outputShapesForSlice[i]);
+        }
     }
 
     return {
-        .outputShape = lastShape,
-        .itemSettingsList = itemSettingsList,
-        .dataAugInputShapes = inputShapes,
-        .dataAugOutputShapes = outputShapes
+        .outputShape = std::move(outerOutputShape), // All are required to be the same output shape.
+        .itemPropsPerAug = std::move(itemPropsPerAug),
+        .inputShapesPerAug = std::move(inputShapesPerAug),
+        .outputShapesPerAug = std::move(outputShapesPerAug)
     };
 }
 
 void DataAugmentationPipe::freeProcessingSchema(const DataProcessingSchema &processingSchema) const {
     for (size_t i = 0; i < dataAugs.size(); i++) {
-        dataAugs[i]->freeItemSettings(processingSchema.itemSettingsList[i]);
+        for (const auto &b: processingSchema.itemPropsPerAug) {
+            auto tmp = b[i];
+            dataAugs[i]->freeItemProp(tmp);
+        }
     }
 }
 
@@ -96,48 +141,68 @@ void dispatchInLoop(
     const std::vector<IDataAugmentation *> &dataAugs,
     uint8_t *__restrict__ buffer1, uint8_t *__restrict__ buffer2,
     const uint8_t *__restrict__ inputData, uint8_t *__restrict__ outputData,
-    const Shape &inputShape, const Shape &outputShape, const DType dtype,
+    const Shapes &inputShapes, const Shape &outputShape, const DType dtype,
+    const uint32_t batchStride,
     SkipCheck skipCheck, Func func
 ) {
-    uint8_t *swapBuffer1 = buffer1;
-    uint8_t *swapBuffer2 = buffer2;
-    bool outputBufferIsUntouched = true;
+    const size_t B = inputShapes.size();
+    std::vector<uint8_t *> swapBuffers1(B);
+    std::vector<uint8_t *> swapBuffers2(B);
+    std::vector<bool> outputBufferIsUntouchedForSlice(B);
+    for (size_t i = 0; i < B; i++) {
+        swapBuffers1[i] = buffer1;
+        swapBuffers2[i] = buffer2;
+        outputBufferIsUntouchedForSlice[i] = true;
+    }
+
+    const uint32_t outputSize = getShapeSize(outputShape) * getWidthOfDType(dtype);
 
     for (size_t i = 0; i < dataAugs.size(); i++) {
-        bool doesLaterAugSwap = false;
-        for (size_t j = i + 1; j < dataAugs.size(); j++) {
-            if (!skipCheck(j)) {
-                doesLaterAugSwap = true;
-                break;
+        for (size_t b = 0; b < B; b++) {
+            bool doesLaterAugSwap = false;
+            for (size_t j = i + 1; j < dataAugs.size(); j++) {
+                if (!skipCheck(b, j)) {
+                    doesLaterAugSwap = true;
+                    break;
+                }
             }
-        }
 
-        if (!skipCheck(i)) {
-            func(
-                i, i == 0 || outputBufferIsUntouched ? inputData : swapBuffer1,
-                i == dataAugs.size() - 1 || !doesLaterAugSwap ? outputData : swapBuffer2
-            );
+            if (!skipCheck(b, i)) {
+                const uint8_t *sliceOfInputForAug = (i == 0 || outputBufferIsUntouchedForSlice[b])
+                                                        ? inputData + b * outputSize
+                                                        : swapBuffers1[b] + b * batchStride;
+                uint8_t *sliceOfOutputForAug = (i == dataAugs.size() - 1 || !doesLaterAugSwap)
+                                                   ? outputData + b * outputSize
+                                                   : swapBuffers2[b] + b * batchStride;
+                func(b, i, sliceOfInputForAug, sliceOfOutputForAug);
 
-            const auto tmp = swapBuffer1;
-            swapBuffer1 = swapBuffer2;
-            swapBuffer2 = tmp;
-            outputBufferIsUntouched = false;
+                const auto tmp = swapBuffers1[b];
+                swapBuffers1[b] = swapBuffers2[b];
+                swapBuffers2[b] = tmp;
+                outputBufferIsUntouchedForSlice[b] = false;
+            }
         }
     }
 
-    if (outputBufferIsUntouched) {
-        if (inputShape != outputShape) {
-            throw std::runtime_error(std::format(
-                "Pipeline did not modify buffers, but input shape {} != output shape {}",
-                formatVector(inputShape), formatVector(outputShape)
-            ));
+    for (size_t b = 0; b < B; b++) {
+        if (outputBufferIsUntouchedForSlice[b]) {
+            if (inputShapes[b] != outputShape) {
+                throw std::runtime_error(std::format(
+                    "Pipeline did not modify buffers, but input shape {} != output shape {}",
+                    formatVector(inputShapes[b]), formatVector(outputShape)
+                ));
+            }
+            memcpy(
+                outputData + b * outputSize,
+                inputData + maxInputStrides[b],
+                getShapeSize(inputShapes[b]) * getWidthOfDType(dtype)
+            );
         }
-        memcpy(outputData, inputData, getShapeSize(inputShape) * getWidthByDType(dtype));
     }
 }
 
 void DataAugmentationPipe::augmentWithPoints(
-    const std::vector<uint32_t> &shape,
+    const Shapes &shapes,
     const DType dtype,
     const uint8_t *__restrict__ inputData, uint8_t *__restrict__ outputData,
     const DataProcessingSchema &schema
@@ -146,16 +211,44 @@ void DataAugmentationPipe::augmentWithPoints(
         throw std::runtime_error("Augmentation of points cannot happen in unsigned type.");
     }
 
-    dispatchInLoop(dataAugs, buffer1, buffer2, inputData, outputData, shape, shape, dtype,
-                   [&](const size_t i) {
+    if (shapes.empty()) {
+        throw std::runtime_error("Cannot augment an empty list of points.");
+    }
+
+    const uint32_t lastBatch = shapes[0][0];
+    const uint32_t lastDim = shapes[0].back();
+    for (const auto &shape: shapes) {
+        if (shape.size() != 3) {
+            throw std::runtime_error("Augmentation can only apply to shapes (b, n_i, d); n_i may vary across items.");
+        }
+        if (shape[0] != lastBatch) {
+            throw std::runtime_error("Augmentation can only apply to shapes (b, n_i, d), but b is not constant.");
+        }
+        if (shape.back() != lastDim) {
+            throw std::runtime_error("Augmentation can only apply to shapes (b, n_i, d), but d is not constant.");
+        }
+    }
+
+    // TODO: Shapes can be different!!!!!!!!!!!!!
+    const Shape outputShape = {
+        shapes[0][0],
+        maxNumPoints,
+        shapes[0][2]
+    };
+
+    dispatchInLoop(dataAugs, buffer1, buffer2,
+                   inputData, outputData,
+                   shapes, outputShape,
+                   dtype, maxRequiredBufferSize,
+                   [&](const size_t b, const size_t i) {
                        const auto dataAug = dataAugs[i];
-                       void *itemSettings = schema.itemSettingsList[i];
-                       return dataAug->isAugmentWithPointsSkipped(shape, dtype, itemSettings);
+                       void *itemProp = schema.itemPropsPerAug[i][b];
+                       return dataAug->isAugmentWithPointsSkipped(shapes[b], dtype, itemProp);
                    },
-                   [&](const size_t i, const uint8_t *input, uint8_t *output) {
+                   [&](const size_t b, const size_t i, const uint8_t *input, uint8_t *output) {
                        const auto dataAugmentation = dataAugs[i];
-                       void *itemSettings = schema.itemSettingsList[i];
-                       return dataAugmentation->augmentWithPoints(shape, dtype, input, output, itemSettings);
+                       void *itemProp = schema.itemPropsPerAug[i][b];
+                       return dataAugmentation->augmentWithPoints(shapes[b], dtype, input, output, itemProp);
                    });
 }
 
@@ -164,27 +257,39 @@ void DataAugmentationPipe::augmentWithRaster(
     const uint8_t *__restrict__ inputData, uint8_t *__restrict__ outputData,
     const DataProcessingSchema &schema
 ) const {
-    const Shape &inputShape = schema.dataAugInputShapes[0];
-    const Shape &outputShape = schema.dataAugOutputShapes[schema.dataAugOutputShapes.size() - 1];
-    dispatchInLoop(dataAugs, buffer1, buffer2, inputData, outputData, inputShape, outputShape, dtype,
-                   [&](const size_t i) {
+    // TODO: Shapes can be different!!!!!!!!!!!!!
+
+    const Shapes &inputShapes = schema.inputShapesPerAug[0];
+    dispatchInLoop(dataAugs, buffer1, buffer2,
+                   inputData, outputData,
+                   inputShapes, schema.outputShape,
+                   dtype, maxRequiredBufferSize,
+                   [&](const size_t b, const size_t i) {
                        const auto dataAug = dataAugs[i];
-                       void *itemSettings = schema.itemSettingsList[i];
+                       void *itemProp = schema.itemPropsPerAug[i][b];
                        return dataAug->isAugmentWithRasterSkipped(
-                           schema.dataAugInputShapes[i],
-                           schema.dataAugOutputShapes[i],
-                           dtype, itemSettings
+                           schema.inputShapesPerAug[i][b],
+                           schema.outputShapesPerAug[i][b],
+                           dtype, itemProp
                        );
                    },
-                   [&](const size_t i, const uint8_t *input, uint8_t *output) {
+                   [&](const size_t b, const size_t i, const uint8_t *input, uint8_t *output) {
                        const auto dataAug = dataAugs[i];
-                       void *itemSettings = schema.itemSettingsList[i];
+                       void *itemProp = schema.itemPropsPerAug[i][b];
                        return dataAug->augmentWithRaster(
-                           schema.dataAugInputShapes[i],
-                           schema.dataAugOutputShapes[i],
-                           dtype, input, output, itemSettings
+                           schema.inputShapesPerAug[i][b],
+                           schema.outputShapesPerAug[i][b],
+                           dtype, input, output, itemProp
                        );
                    });
+}
+
+const Shape &DataAugmentationPipe::getMaxInputShape() const {
+    return maxInputShape;
+}
+
+uint32_t DataAugmentationPipe::getMaxNumPoints() const {
+    return maxNumPoints;
 }
 
 bool DataAugmentationPipe::isOutputShapeStatic() const {

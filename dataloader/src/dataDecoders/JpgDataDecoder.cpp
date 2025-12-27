@@ -50,26 +50,22 @@ ProbeResult JpgDataDecoder::probeFromMemory(uint8_t *inputData, const size_t inp
     }
 
     return {
-        .format = ItemFormat::UINT,
-        .bytesPerItem = 1,
+        .dtype = DType::UINT8,
         .shape = std::vector<uint32_t>{comprInfo.image_height, comprInfo.image_width, 3},
         .extension = "jpg"
     };
 }
 
-uint8_t *JpgDataDecoder::loadFromMemory(const ProbeResult &settings,
-                                        uint8_t *inputData, const size_t inputSize, BumpAllocator<uint8_t *> &output) {
-    uint8_t *outputData = output.allocate(settings.getShapeSize());
+DecodingResult JpgDataDecoder::loadFromMemory(const uint32_t bufferSize, uint8_t *inputData, const size_t inputSize,
+                                              BumpAllocator<uint8_t *> &output) {
+    uint8_t *outputData = output.allocate(bufferSize);
     jpeg_decompress_struct comprInfo = {};
     readJpg(inputData, inputSize, comprInfo, outputData);
 
-    if (settings.shape[0] != comprInfo.output_height
-        || settings.shape[1] != comprInfo.output_width
-        || settings.shape[2] != 3) {
-        throw std::runtime_error("Jpg file has inconsistent shape with the probed shape.");
-    } // TODO: This acktschually needs to happen at the end of the augmentation stage. So not here definitely.
-
-    return outputData;
+    return {
+        .data = outputData,
+        .shape = {comprInfo.output_height, comprInfo.output_width, 3}
+    };
 }
 
 std::string JpgDataDecoder::getExtension() {

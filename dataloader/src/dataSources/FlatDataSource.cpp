@@ -105,9 +105,13 @@ std::string validateRootDirectory(std::string rootDirectory) {
     return rootDirectory;
 }
 
+SubdirToDictname::SubdirToDictname(std::string subdir, std::string dictname)
+    : subdir(std::move(subdir)), dictname(std::move(dictname)) {
+}
+
 FlatDataSource::FlatDataSource(std::string _rootDirectory,
-                               std::unordered_map<std::string, std::string> _subdirToDictName)
-    : rootDirectory(std::move(_rootDirectory)), subdirToDictName(std::move(_subdirToDictName)), initRequired(false) {
+                               std::vector<SubdirToDictname> _subdirsToDictNames)
+    : rootDirectory(std::move(_rootDirectory)), subdirsToDictNames(std::move(_subdirsToDictNames)), initRequired(false) {
     rootDirectory = validateRootDirectory(rootDirectory);
     initRequired = !fs::exists(rootDirectory);
 }
@@ -129,24 +133,27 @@ std::vector<std::vector<std::string> > FlatDataSource::getEntries() {
 
 CpuAllocation FlatDataSource::loadItemSliceIntoContigousBatch(BumpAllocator<uint8_t *> alloc,
                                                               const std::vector<std::vector<std::string> > &batchPaths,
-                                                              const size_t itemKeysIdx) {
-    /*const auto &itemKey = itemKeys[itemKeysIdx];
+                                                              const size_t itemKeysIdx, const uint32_t bufferSize) {
+    const auto &itemKey = itemKeys[itemKeysIdx];
     IDataDecoder *decoder = DecoderRegister::getInstance().getDataDecoderByExtension(itemKey.probeResult.extension);
     uint8_t *startOfBuffer = alloc.getCurrent();
+    std::vector<Shape> shapes;
 
     for (const auto &batchPath: batchPaths) {
         const std::string &path = batchPath[itemKeysIdx];
 
-        // size_t inputSize;
-        // uint8_t *inputData = loadFileStoopid(path, inputSize);
-        // decoder->loadFromMemory(itemKey.probeResult, inputData, inputSize, alloc);
-        // delete[] inputData; // TODO: Delete this once the switch to overlappedio is complete.
-    }*/
+        size_t inputSize;
+        uint8_t *inputData = loadFileStoopid(path, inputSize);
+        auto [_, shape] = decoder->loadFromMemory(bufferSize, inputData, inputSize, alloc);
+        shapes.push_back(shape);
+        delete[] inputData; // TODO: Delete this once the switch to overlappedio is complete.
+    }
 
     return {
         .batchBuffer = {
-            .uint8 = alloc.getCurrent() // startOfBuffer
+            .uint8 = startOfBuffer
         },
+        .shapes = std::move(shapes)
     };
 }
 
@@ -180,9 +187,9 @@ void FlatDataSource::splitIntoTwoDataSources(const size_t aNumEntries, std::shar
 
 void FlatDataSource::initDatasetFromRootDirectory() {
     std::vector<std::string> subDirs;
-    subDirs.reserve(subdirToDictName.size());
-    for (const auto &keys: subdirToDictName | std::views::keys) {
-        subDirs.push_back(keys);
+    subDirs.reserve(subdirsToDictNames.size());
+    for (const auto &[subdir, _]: subdirsToDictNames) {
+        subDirs.push_back(subdir);
     }
 
     if (subDirs.empty()) {
@@ -237,10 +244,9 @@ void FlatDataSource::initDatasetFromRootDirectory() {
     std::ranges::shuffle(entries, rnd);
 
     for (size_t i = 0; i < subDirs.size(); i++) {
-        const std::string dictName = subdirToDictName.find(subDirs[i])->second;
         itemKeys.push_back({
-            .keyName = dictName,
-            .spatialHint = SpatialHint::NONE,
+            .keyName = subdirsToDictNames[i].dictname,
+            .type = ItemType::NONE,
             .probeResult = probeResults[i]
         });
     }

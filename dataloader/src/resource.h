@@ -49,7 +49,7 @@ public:
 
     virtual void synchronizeFenceWithHostDevice(Fence fence) = 0;
 
-    virtual void copyFromHostToGpuMemory(const uint8_t *host, uint8_t *gpu, const uint32_t size) = 0;
+    virtual void copyFromHostToGpuMemory(const uint8_t *host, uint8_t *gpu, uint32_t size) = 0;
 };
 
 class MirroredAllocator {

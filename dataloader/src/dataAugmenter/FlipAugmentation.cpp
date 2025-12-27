@@ -27,7 +27,7 @@ DataOutputSchema FlipAugmentation::getDataOutputSchema(const std::vector<uint32_
 
     const bool doesFlipVertical = randomUniformDoubleBetween01(itemSeed, 0) <= verticalFlipProbability;
     const bool doesFlipHorizontal = randomUniformDoubleBetween01(itemSeed, 1) <= horizontalFlipProbability;
-    auto *itemSettings = new FlipItemSettings{
+    auto *itemProp = new FlipProp{
         .doesVerticalFlip = doesFlipVertical,
         .doesHorizontalFlip = doesFlipHorizontal,
         .originalHeight = inputShape[1],
@@ -36,12 +36,12 @@ DataOutputSchema FlipAugmentation::getDataOutputSchema(const std::vector<uint32_
 
     return {
         .outputShape = std::move(outputShape),
-        .itemSettings = itemSettings
+        .itemProp = itemProp
     };
 }
 
-void FlipAugmentation::freeItemSettings(void *itemSettings) const {
-    delete static_cast<FlipItemSettings *>(itemSettings);
+void FlipAugmentation::freeItemProp(ItemProp &itemProp) const {
+    delete static_cast<FlipProp *>(itemProp);
 }
 
 std::vector<uint32_t>
@@ -52,74 +52,63 @@ FlipAugmentation::getMaxOutputShapeAxesIfSupported(const std::vector<uint32_t> &
     return {};
 }
 
-template<typename Func>
-void loopOverPoints(const Shape &shape, Func func) {
-    for (size_t b = 0; b < shape[0]; b++) {
-        for (size_t i = 0; i < shape[1]; i++) {
-            func(b, i);
+template<typename T>
+void flipPoints(
+    const Shape &shape,
+    const T *inputData, T *outputData,
+    FlipProp *itemProp
+) {
+    if (itemProp->doesVerticalFlip && itemProp->doesHorizontalFlip) {
+        for (size_t i = 0; i < shape[0]; i++) {
+            const size_t idx = getIdx(i, 0, shape);
+            outputData[idx + 0] = itemProp->originalHeight - 1 - inputData[idx + 0];
+            outputData[idx + 1] = itemProp->originalWidth - 1 - inputData[idx + 1];
+        }
+    } else if (itemProp->doesVerticalFlip) {
+        for (size_t i = 0; i < shape[0]; i++) {
+            const size_t idx = getIdx(i, 0, shape);
+            outputData[idx + 0] = itemProp->originalHeight - 1 - inputData[idx + 0];
+            outputData[idx + 1] = inputData[idx + 1];
+        }
+    } else if (itemProp->doesHorizontalFlip) {
+        for (size_t i = 0; i < shape[0]; i++) {
+            const size_t idx = getIdx(i, 0, shape);
+            outputData[idx + 0] = inputData[idx + 0];
+            outputData[idx + 1] = itemProp->originalWidth - 1 - inputData[idx + 1];
         }
     }
 }
 
-template<typename T>
-void flipPoints(
-    const std::vector<uint32_t> &shape,
-    const T *inputData, T *outputData,
-    FlipItemSettings *itemSettings
-) {
-    if (itemSettings->doesVerticalFlip && itemSettings->doesHorizontalFlip) {
-        loopOverPoints(shape, [&](const size_t b, const size_t i) {
-            const size_t idx = getIdx(b, i, 0, shape);
-            outputData[idx + 0] = itemSettings->originalHeight - 1 - inputData[idx + 0];
-            outputData[idx + 1] = itemSettings->originalWidth - 1 - inputData[idx + 1];
-        });
-    } else if (itemSettings->doesVerticalFlip) {
-        loopOverPoints(shape, [&](const size_t b, const size_t i) {
-            const size_t idx = getIdx(b, i, 0, shape);
-            outputData[idx + 0] = itemSettings->originalHeight - 1 - inputData[idx + 0];
-            outputData[idx + 1] = inputData[idx + 1];
-        });
-    } else if (itemSettings->doesHorizontalFlip) {
-        loopOverPoints(shape, [&](const size_t b, const size_t i) {
-            const size_t idx = getIdx(b, i, 0, shape);
-            outputData[idx + 0] = inputData[idx + 0];
-            outputData[idx + 1] = itemSettings->originalWidth - 1 - inputData[idx + 1];
-        });
-    }
-}
-
-static bool shouldBeSkipped(void *itemSettings) {
-    const auto settings = static_cast<FlipItemSettings *>(itemSettings);
+static bool shouldBeSkipped(const ItemProp itemProp) {
+    const auto settings = static_cast<FlipProp *>(itemProp);
     return !settings->doesHorizontalFlip && !settings->doesVerticalFlip;
 }
 
-bool FlipAugmentation::isAugmentWithPointsSkipped(const std::vector<uint32_t> &, DType, void *itemSettings) {
-    return shouldBeSkipped(itemSettings);
+bool FlipAugmentation::isAugmentWithPointsSkipped(const Shape &, DType, ItemProp &itemProp) {
+    return shouldBeSkipped(itemProp);
 }
 
 void FlipAugmentation::augmentWithPoints(
-    const std::vector<uint32_t> &shape,
+    const Shape &shape,
     const DType dtype,
     const uint8_t *__restrict__ inputData, uint8_t *__restrict__ outputData,
-    void *itemSettings
+    ItemProp &itemProp
 ) {
     dispatchWithType(dtype, inputData, outputData, [&](auto *input, auto *output) {
         flipPoints(
             shape,
             input, output,
-            static_cast<FlipItemSettings *>(itemSettings)
+            static_cast<FlipProp *>(itemProp)
         );
     });
 }
 
 template<typename Func>
 void loopOverRaster(const Shape &shape, Func func) {
-    for (size_t b = 0; b < shape[0]; b++) {
-        for (size_t i = 0; i < shape[1]; i++) {
-            for (size_t j = 0; j < shape[2]; j++) {
-                for (size_t k = 0; k < shape[3]; k++) {
-                    func(b, i, j, k);
-                }
+    for (size_t i = 0; i < shape[0]; i++) {
+        for (size_t j = 0; j < shape[1]; j++) {
+            for (size_t k = 0; k < shape[2]; k++) {
+                func(i, j, k);
             }
         }
     }
@@ -127,49 +116,49 @@ void loopOverRaster(const Shape &shape, Func func) {
 
 template<typename T>
 void flipRaster(
-    const std::vector<uint32_t> &inputShape,
-    const std::vector<uint32_t> &outputShape,
+    const Shape &inputShape,
+    const Shape &outputShape,
     const T *inputData, T *outputData,
-    FlipItemSettings *itemSettings
+    const FlipProp *itemProp
 ) {
     assert(inputShape == outputShape);
-    if (itemSettings->doesVerticalFlip && itemSettings->doesHorizontalFlip) {
-        loopOverRaster(inputShape, [&](const size_t b, const size_t i, const size_t j, const size_t k) {
-            size_t outIdx = getIdx(b, inputShape[1] - 1 - i, inputShape[2] - 1 - j, k, inputShape);
-            outputData[outIdx] = inputData[getIdx(b, i, j, k, inputShape)];
+    if (itemProp->doesVerticalFlip && itemProp->doesHorizontalFlip) {
+        loopOverRaster(inputShape, [&](const size_t i, const size_t j, const size_t k) {
+            size_t outIdx = getIdx(inputShape[1] - 1 - i, inputShape[2] - 1 - j, k, inputShape);
+            outputData[outIdx] = inputData[getIdx(i, j, k, inputShape)];
         });
-    } else if (itemSettings->doesVerticalFlip) {
-        loopOverRaster(inputShape, [&](const size_t b, const size_t i, const size_t j, const size_t k) {
-            size_t outIdx = getIdx(b, inputShape[1] - 1 - i, j, k, inputShape);
-            outputData[outIdx] = inputData[getIdx(b, i, j, k, inputShape)];
+    } else if (itemProp->doesVerticalFlip) {
+        loopOverRaster(inputShape, [&](const size_t i, const size_t j, const size_t k) {
+            size_t outIdx = getIdx(inputShape[1] - 1 - i, j, k, inputShape);
+            outputData[outIdx] = inputData[getIdx(i, j, k, inputShape)];
         });
-    } else if (itemSettings->doesHorizontalFlip) {
-        loopOverRaster(inputShape, [&](const size_t b, const size_t i, const size_t j, const size_t k) {
-            size_t outIdx = getIdx(b, i, inputShape[2] - 1 - j, k, inputShape);
-            outputData[outIdx] = inputData[getIdx(b, i, j, k, inputShape)];
+    } else if (itemProp->doesHorizontalFlip) {
+        loopOverRaster(inputShape, [&](const size_t i, const size_t j, const size_t k) {
+            size_t outIdx = getIdx(i, inputShape[2] - 1 - j, k, inputShape);
+            outputData[outIdx] = inputData[getIdx(i, j, k, inputShape)];
         });
     }
 }
 
 bool FlipAugmentation::isAugmentWithRasterSkipped(
-    const std::vector<uint32_t> &,
-    const std::vector<uint32_t> &,
-    DType, void *itemSettings
+    const Shape &,
+    const Shape &,
+    DType, ItemProp &itemProp
 ) {
-    return shouldBeSkipped(itemSettings);
+    return shouldBeSkipped(itemProp);
 }
 
 void FlipAugmentation::augmentWithRaster(
-    const std::vector<uint32_t> &inputShape,
-    const std::vector<uint32_t> &outputShape,
+    const Shape &inputShape,
+    const Shape &outputShape,
     const DType dtype,
     const uint8_t *__restrict__ inputData, uint8_t *__restrict__ outputData,
-    void *itemSettings
+    ItemProp &itemProp
 ) {
     dispatchWithType(dtype, inputData, outputData, [&](auto *input, auto *output) {
         flipRaster(
             inputShape, outputShape,
-            input, output, static_cast<FlipItemSettings *>(itemSettings)
+            input, output, static_cast<FlipProp *>(itemProp)
         );
     });
 }

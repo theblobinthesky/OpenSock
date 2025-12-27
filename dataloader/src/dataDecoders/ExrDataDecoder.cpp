@@ -92,26 +92,22 @@ ProbeResult ExrDataDecoder::probeFromMemory(uint8_t *inputData, const size_t inp
     readExr(inputData, inputSize, width, height, nullptr);
 
     return {
-        .format = ItemFormat::FLOAT,
-        .bytesPerItem = 4,
+        .dtype = DType::FLOAT32,
         .shape = std::vector<uint32_t>{height, width, 3},
         .extension = "exr"
     };
 }
 
-uint8_t *ExrDataDecoder::loadFromMemory(const ProbeResult &settings,
-                                        uint8_t *inputData, const size_t inputSize, BumpAllocator<uint8_t *> &output) {
-    const size_t bytesToWrite = static_cast<size_t>(settings.getShapeSize()) * settings.bytesPerItem;
-    uint8_t *outputData = output.allocate(bytesToWrite);
+DecodingResult ExrDataDecoder::loadFromMemory(const uint32_t bufferSize, uint8_t *inputData, const size_t inputSize,
+                                              BumpAllocator<uint8_t *> &output) {
+    uint8_t *outputData = output.allocate(bufferSize);
     uint32_t width, height;
     readExr(inputData, inputSize, width, height, reinterpret_cast<float *>(outputData));
 
-    if (settings.shape.size() != 3 || settings.shape[2] != 3 ||
-        settings.shape[0] != height || settings.shape[1] != width) {
-        throw std::runtime_error("EXR file has inconsistent shape with the probed shape.");
-    }
-
-    return outputData;
+    return {
+        .data = outputData,
+        .shape = {height, width, 3}
+    };
 }
 
 std::string ExrDataDecoder::getExtension() {
