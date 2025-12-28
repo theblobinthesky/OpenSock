@@ -32,3 +32,4 @@ node_modules
 storage
 autocalibration/data/dataset
 autocalibration/data/scraped-assets
+logs

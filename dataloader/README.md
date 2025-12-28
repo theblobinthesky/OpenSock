@@ -63,6 +63,12 @@ Needs to happen before the resource pool is initialized, as you obviously cannot
 
 TODO: setBuffers for the augmentation pipe
 
+TODO (Document in README later): Enable address sanitizer to work in dbeug mode using LD_PRELOAD=$(gcc -print-file-name=libasan.so) ASAN_OPTIONS="detect_leaks=0:log_path=logs/asan_log".
+
+Tutorial (How to deal with debug-asan):
+make install-debug-asan
+LD_PRELOAD=$(gcc -print-file-name=libasan.so) ASAN_OPTIONS="detect_leaks=0:log_path=logs/asan_log" pytest tests/...
+
 Test results for the compressor:
 ```
 config                      fp16 bshuf codecs                   compressed   ratio  comp(s)  c_in MB/s  c_out MB/s   dec(s)  d_in MB/s  d_out MB/s

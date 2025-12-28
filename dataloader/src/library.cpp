@@ -16,7 +16,7 @@
 #define MACRO_STRINGIFY(x) STRINGIFY(x)
 namespace py = pybind11;
 
-void bindDatasetRelated(const py::module &m) {
+static void bindDatasetRelated(const py::module &m) {
     py::enum_<DType>(m, "DType")
             .value("UINT8", DType::UINT8)
             .value("INT32", DType::INT32)
@@ -39,7 +39,7 @@ void bindDatasetRelated(const py::module &m) {
             .def("__len__", &BatchedDataset::getNumberOfBatches);
 }
 
-void bindDataloaderRelated(const py::module &m) {
+static void bindDataloaderRelated(const py::module &m) {
     py::class_<DLWrapper>(m, "DLWrapper")
             .def("__dlpack__", &DLWrapper::getDLpackCapsule, py::arg("stream") = py::none())
             .def("__dlpack_device__", &DLWrapper::getDLpackDevice);
@@ -53,7 +53,7 @@ void bindDataloaderRelated(const py::module &m) {
             });
 }
 
-void bindCompressionRelated(const py::module &m) {
+static void bindCompressionRelated(const py::module &m) {
     py::enum_<Codec>(m, "Codec")
             .value("ZSTD_LEVEL_3", Codec::ZSTD_LEVEL_3)
             .value("ZSTD_LEVEL_7", Codec::ZSTD_LEVEL_7)
@@ -101,7 +101,7 @@ void bindCompressionRelated(const py::module &m) {
             });
 }
 
-void bindDataSources(const py::module &m) {
+static void bindDataSources(const py::module &m) {
     py::class_<SubdirToDictname>(m, "SubdirToDictname")
             .def(py::init<std::string, std::string>());
 
@@ -111,7 +111,7 @@ void bindDataSources(const py::module &m) {
                  py::arg("subdir_to_dict") = std::vector<SubdirToDictname>{});
 }
 
-DType getDType(const py::array &array) {
+static DType getDType(const py::array &array) {
     if (py::isinstance<py::array_t<float> >(array)) {
         return DType::FLOAT32;
     }
@@ -124,7 +124,7 @@ DType getDType(const py::array &array) {
     throw std::runtime_error("py::array has unknown DType.");
 }
 
-DType getAndAssertEqualityOfDType(const py::array &array1, const py::array &array2) {
+static DType getAndAssertEqualityOfDType(const py::array &array1, const py::array &array2) {
     const DType dtype1 = getDType(array1);
     if (dtype1 != getDType(array2)) {
         throw std::runtime_error("DTypes of arrays don't match, when they should.");
@@ -132,7 +132,7 @@ DType getAndAssertEqualityOfDType(const py::array &array1, const py::array &arra
     return dtype1;
 }
 
-void bindAugmentations(const py::module &m) {
+static void bindAugmentations(const py::module &m) {
     py::class_<IDataAugmentation>(m, "IDataAugmentation");
 
     py::class_<FlipAugmentation, IDataAugmentation>(m, "FlipAugmentation")
@@ -175,11 +175,11 @@ void bindAugmentations(const py::module &m) {
             .def(py::init<uint32_t, uint32_t>());
 }
 
-auto toUint32Shape(const py::buffer_info &info) {
+static auto toUint32Shape(const py::buffer_info &info) {
     return std::vector<uint32_t>(info.shape.begin(), info.shape.end());
 }
 
-void verifyArraysIntegrity(py::array array, Shape &&shape, const Shape &expShape) {
+static void verifyArraysIntegrity(py::array array, Shape &&shape, const Shape &expShape) {
     if (shape != expShape) {
         throw std::runtime_error(std::format("Shape {} must match the expected shape {}",
                                              formatVector(shape), formatVector(expShape)));
@@ -194,7 +194,22 @@ void verifyArraysIntegrity(py::array array, Shape &&shape, const Shape &expShape
     }
 }
 
-void bindDataProcessingPipe(const py::module &m) {
+static void verifyArraysIntegrity(py::array array, Shape &&shape, const Shapes &expShapes) {
+    if (std::vector(shape.begin() + 1, shape.end()) != expShapes[0] || shape[0] != expShapes.size()) {
+        throw std::runtime_error(std::format("Shape {} must match the expected shape {}, {}",
+                                             formatVector(shape), expShapes.size(), formatVector(expShapes[0])));
+    }
+
+    if (!(array.flags() & py::array::c_style)) {
+        throw std::runtime_error("Array must be C-style contiguous.");
+    }
+
+    if (!array.ptr()) {
+        throw std::runtime_error("Array must be non-null.");
+    }
+}
+
+static void bindDataProcessingPipe(const py::module &m) {
     py::class_<DataAugmentationPipe>(m, "DataAugmentationPipe")
             .def(py::init([](std::vector<IDataAugmentation *> augs, std::vector<uint32_t> maxIn, uint32_t maxBytes,
                              uint32_t maxNumPoints) {
@@ -222,8 +237,8 @@ void bindDataProcessingPipe(const py::module &m) {
                      std::vector<uint8_t> b1(bufSize), b2(bufSize);
                      self.setBuffer(b1.data(), b2.data());
 
-                     // TODO (Uncomment): verifyArraysIntegrity(input, toUint32Shape(inInfo), schema->inputShapesPerAug[0]);
-                     // TODO (Uncomment): verifyArraysIntegrity(output, toUint32Shape(outInfo), schema->outputShapesPerAug.back());
+                     verifyArraysIntegrity(input, toUint32Shape(inInfo), schema->inputShapesPerAug[0]);
+                     verifyArraysIntegrity(output, toUint32Shape(outInfo), schema->outputShapesPerAug.back());
 
                      self.augmentWithRaster(
                          getAndAssertEqualityOfDType(input, output),
