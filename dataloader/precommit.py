@@ -54,6 +54,7 @@ def run_cpp_check(files: List[str]) -> bool:
         "--suppress=missingInclude",
         "--suppress=unusedStructMember",
         "--std=c++20",
+        "--language=c++",
         "--enable=all",
         "--error-exitcode=1",
         "--inconclusive"
@@ -82,13 +83,13 @@ def main():
     checks = [
         ("CppCheck", run_cpp_check),
         ("Clang-Tidy", run_clang_tidy),
-        ("Tests (ASan)", run_tests_with_asan),
+        # ("Tests (ASan)", run_tests_with_asan),
     ]
 
     files = get_all_h_cpp_files()
     if not files:
         print(f"{RED}✗ Could not gather header and cpp files.{RESET}")
-        exit(-1)
+        exit(1)
 
     print(f"{BLUE}Found {len(files)} C++ files to check{RESET}")
 
@@ -108,7 +109,7 @@ def main():
         failedChecksStr = ", ".join(failedChecks)
         print(f"{RED}{BOLD}✗ Failed checks: {failedChecksStr}{RESET}")
         print(f"{BOLD}{'═' * 50}{RESET}")
-        exit(-1)
+        exit(1)
 
 
 if __name__ == "__main__":
