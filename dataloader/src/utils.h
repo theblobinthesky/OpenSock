@@ -195,7 +195,7 @@ inline size_t getWidthOfDType(const DType dtype) {
            + k;
 }
 
-[[nodiscard]] inline uint32_t getShapeSize(const std::vector<uint32_t> &shape) {
+[[nodiscard]] inline uint32_t getShapeSize(const std::span<const uint32_t> shape) {
     uint32_t size = 1;
     for (const uint32_t dim: shape) size *= dim;
     return size;
@@ -234,5 +234,10 @@ inline bool isUnsignedDType(const DType dtype) {
     if (!(condition)) { \
         throw std::runtime_error("Assert failed."); \
     }
+
+template<typename T>
+bool operator==(std::span<T> a, std::span<T> b) {
+    return std::ranges::equal(a, b);
+}
 
 #endif

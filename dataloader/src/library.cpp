@@ -179,7 +179,7 @@ static auto toUint32Shape(const py::buffer_info &info) {
     return std::vector<uint32_t>(info.shape.begin(), info.shape.end());
 }
 
-static void verifyArraysIntegrity(const py::array &array, Shape &&shape, const Shape &expShape) {
+static void verifyArraysIntegrity(const py::array &array, const Shape &shape, const Shape &expShape) {
     if (shape != expShape) {
         throw std::runtime_error(std::format("Shape {} must match the expected shape {}",
                                              formatVector(shape), formatVector(expShape)));
@@ -194,7 +194,7 @@ static void verifyArraysIntegrity(const py::array &array, Shape &&shape, const S
     }
 }
 
-static void verifyArraysIntegrity(const py::array &array, Shape &&shape, const Shapes &expShapes) {
+static void verifyArraysIntegrity(const py::array &array, const Shape &shape, const Shapes &expShapes) {
     if (std::vector(shape.begin() + 1, shape.end()) != expShapes[0] || shape[0] != expShapes.size()) {
         throw std::runtime_error(std::format("Shape {} must match the expected shape {}, {}",
                                              formatVector(shape), expShapes.size(), formatVector(expShapes[0])));
@@ -211,8 +211,8 @@ static void verifyArraysIntegrity(const py::array &array, Shape &&shape, const S
 
 static void bindDataProcessingPipe(const py::module &m) {
     py::class_<DataAugmentationPipe>(m, "DataAugmentationPipe")
-            .def(py::init([](std::vector<IDataAugmentation *> augs, const std::vector<uint32_t> &maxIn, uint32_t maxBytes,
-                             uint32_t maxNumPoints) {
+            .def(py::init([](std::vector<IDataAugmentation *> augs, const std::vector<uint32_t> &maxIn,
+                             const uint32_t maxBytes, const uint32_t maxNumPoints) {
                 return new DataAugmentationPipe(std::move(augs), maxIn, maxNumPoints, maxBytes);
             }), py::keep_alive<1, 2>())
             .def("get_processing_schema",
@@ -227,7 +227,8 @@ static void bindDataProcessingPipe(const py::module &m) {
                      );
                  })
             .def("augment_raster",
-                 [](DataAugmentationPipe &self, const py::array &input, const py::array &output, const py::capsule &schemaCap) {
+                 [](DataAugmentationPipe &self, const py::array &input, const py::array &output,
+                    const py::capsule &schemaCap) {
                      const auto inInfo = input.request();
                      const auto outInfo = output.request();
                      const auto *schema = static_cast<DataProcessingSchema *>(schemaCap.get_pointer());
@@ -237,18 +238,29 @@ static void bindDataProcessingPipe(const py::module &m) {
                      std::vector<uint8_t> b1(bufSize), b2(bufSize);
                      self.setBuffer(b1.data(), b2.data());
 
-                     verifyArraysIntegrity(input, toUint32Shape(inInfo), schema->inputShapesPerAug[0]);
+                     const auto inputShape = toUint32Shape(inInfo);
+                     verifyArraysIntegrity(input, inputShape, schema->inputShapesPerAug[0]);
                      verifyArraysIntegrity(output, toUint32Shape(outInfo), schema->outputShapesPerAug.back());
 
+                     std::vector<size_t> maxInputSizesPerSingleItem;
+                     const auto inputShapeWithoutBatch = std::span(inputShape).subspan(1);
+                     const DType dtype = getAndAssertEqualityOfDType(input, output);
+                     const size_t inputShapeWithoutBatchSize = getShapeSize(inputShapeWithoutBatch) * getWidthOfDType(dtype);
+                     for (size_t i = 0; i < inputShape[0]; i++) {
+                         maxInputSizesPerSingleItem.push_back(inputShapeWithoutBatchSize);
+                     }
+
                      self.augmentWithRaster(
-                         getAndAssertEqualityOfDType(input, output),
+                         dtype,
                          static_cast<const uint8_t *>(inInfo.ptr),
                          static_cast<uint8_t *>(outInfo.ptr),
+                         maxInputSizesPerSingleItem,
                          *schema
                      );
                  })
             .def("augment_points",
-                 [](DataAugmentationPipe &self, const py::array &input, const py::array &output, const py::capsule &schemaCap) {
+                 [](DataAugmentationPipe &self, const py::array &input, const py::array &output,
+                    const py::capsule &schemaCap) {
                      const auto inInfo = input.request();
                      const auto outInfo = output.request();
                      const auto *schema = static_cast<DataProcessingSchema *>(schemaCap.get_pointer());
@@ -315,9 +327,9 @@ PYBIND11_MODULE(_core, m) {
     // Ensure automatic shutdown on interpreter exit.
     try {
         const py::module_ atexit = py::module_::import("atexit");
-        atexit.attr("register")(py::cpp_function([]() {
+        atexit.attr("register")(py::cpp_function([] {
             LOG_DEBUG_FUN("atexit", "atexit has been called");
-            ResourcePool::get().shutdown();
+            // TODO: Fix exception. ResourcePool::get().shutdown();
         }));
     } catch (const std::exception &e) {
         // Swallow errors to avoid import-time failures if atexit is unavailable.

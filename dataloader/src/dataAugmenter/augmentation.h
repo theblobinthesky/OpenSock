@@ -72,8 +72,7 @@ class DataAugmentationPipe {
 public:
     explicit DataAugmentationPipe(
         std::vector<IDataAugmentation *> dataAugmentations,
-        const Shape& maxInputShape, uint32_t maxNumPoints,
-        uint32_t maxBytesPerElement
+        const Shape &rasterMaxInputShape, uint32_t maxNumPoints, uint32_t maxBytesPerElement
     );
 
     [[nodiscard]] size_t getMaximumRequiredBufferSize() const;
@@ -87,7 +86,6 @@ public:
     // TODO: I don't love the manual free api here, but we'll go with it for now.
     void freeProcessingSchema(const DataProcessingSchema &processingSchema) const;
 
-    // Input needs to respect batch stride.
     // Shapes are necessary, as the number of points can vary for each item in the batch.
     void augmentWithPoints(
         const Shapes &shapes,
@@ -96,23 +94,25 @@ public:
         const DataProcessingSchema &schema
     ) const;
 
-    // Input needs to respect batch stride.
     void augmentWithRaster(
         DType dtype,
         const uint8_t *__restrict__ inputData, uint8_t *__restrict__ outputData,
+        const std::vector<size_t> &maxInputSizesPerSingleItem,
         const DataProcessingSchema &schema
     ) const;
 
-    [[nodiscard]] const Shape &getMaxInputShape() const;
+    [[nodiscard]] Shape getRasterMaxInputShape() const;
 
     [[nodiscard]] uint32_t getMaxNumPoints() const;
 
 private:
     std::vector<IDataAugmentation *> dataAugs;
     uint8_t *buffer1, *buffer2;
-    const Shape maxInputShape;
-    uint32_t maxNumPoints;
     uint32_t maxRequiredBufferSize;
+    uint32_t maxIntermediateSizeForItem;
+
+    Shape rasterMaxInputShape;
+    uint32_t maxNumPoints;
     Shape staticOutputShape;
 
     [[nodiscard]] bool isOutputShapeStatic() const;

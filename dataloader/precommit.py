@@ -41,9 +41,11 @@ def run_command(command_list, cwd=None):
             print_error("Command failed!")
             print(f"{YELLOW}{'─' * 50}{RESET}")
             if result.stdout.strip():
-                print_info(f"STDOUT:\n{result.stdout}")
+                print_info("STDOUT:")
+                print(result.stdout)
             if result.stderr.strip():
-                print_info(f"STDERR:\n{result.stderr}")
+                print_error("STDERR:")
+                print(result.stderr)
             print(f"{YELLOW}{'─' * 50}{RESET}")
             return None
         return result.stdout
@@ -106,7 +108,6 @@ def run_cpp_check(files: List[str]) -> bool:
                 "--suppress=unusedStructMember",
                 "--suppress=invalidPointerCast",
                 "--suppress=useStlAlgorithm",
-                "--suppress=funcArgNamesDifferent",
                 "--std=c++20",
                 "--language=c++",
                 "--enable=all",
@@ -120,12 +121,7 @@ def run_cpp_check(files: List[str]) -> bool:
 
 
 def run_single_clang_tidy(compile_db_path: str, file: str) -> bool:
-    return (
-        run_command(
-            ["clang-tidy", "-p", compile_db_path, "--warnings-as-errors=*", file]
-        )
-        is not None
-    )
+    return run_command(["clang-tidy", "-p", compile_db_path, "--warnings-as-errors=*", file]) is not None
 
 
 def run_clang_tidy(files: List[str]) -> bool:
@@ -153,7 +149,7 @@ def run_tests_with_asan(_: List[str]) -> bool:
         return False
 
     print_info("→ Running tests with AddressSanitizer...")
-    if not run_command([f"./scripts/run_tests_with_asan.sh"]):
+    if not run_command([f"scripts/run_tests_with_asan.sh"]):
         return False
     return True
 
@@ -178,14 +174,14 @@ def main():
         print_error("Could not gather header and cpp files.")
         exit(1)
 
-    print_info(f"Found {len(files)} C++ files to check")
+    print_info(f"Found {len(files)} C++ files to check.")
 
     succeededChecks = []
     failedChecks = []
     for name, check in checks:
         if check(files):
             succeededChecks.append(name)
-            print_success(f"{name} passed")
+            print_success(f"{name} passed.")
         else:
             failedChecks.append(name)
 

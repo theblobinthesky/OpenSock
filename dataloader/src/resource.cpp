@@ -343,8 +343,9 @@ void ResourcePool::threadMain(const size_t threadIdx, const std::atomic_uint32_t
 
 
         const auto [startingOffset, batchPaths] = dl->batchedDataset.getNextInFlightBatch();
-        auto &dataset = dl->batchedDataset.getDataset();
-        const std::vector<ItemKey> &itemKeys = dataset.getDataSource()->getItemKeys();
+        auto &bds = dl->batchedDataset;
+        auto &ds = bds.getDataset();
+        const std::vector<ItemKey> &itemKeys = ds.getDataSource()->getItemKeys();
 
         // For each head, load all batch items into one contigous cpu array.
         std::vector<CpuAllocation> inputAllocsOnHost;
@@ -355,7 +356,7 @@ void ResourcePool::threadMain(const size_t threadIdx, const std::atomic_uint32_t
             // augmentations are applied. This is because we cannot guarantee,
             // that the decoders never read from pinned memory.
             // Reading from pinned memory can be very slow, as it is not always backed by RAM.
-            inputAllocsOnHost.push_back(dataset.getDataSource()->loadItemSliceIntoContigousBatch(
+            inputAllocsOnHost.push_back(ds.getDataSource()->loadItemSliceIntoContigousBatch(
                 tmpAlloc, batchPaths, i, dl->maxInputSizesPerSingleItem[i]
             ));
             outputAllocsOnHost.push_back(tmpAlloc.allocate(dl->outputBatchMemorySize));
@@ -390,6 +391,7 @@ void ResourcePool::threadMain(const size_t threadIdx, const std::atomic_uint32_t
                         itemKey.probeResult.dtype,
                         inputAlloc.batchBuffer.uint8,
                         outputAlloc,
+                        dl->maxInputSizesPerSingleItem,
                         lastSchema
                     );
                     break;

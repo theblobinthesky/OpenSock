@@ -20,7 +20,7 @@ bool RandomCropAugmentation::isOutputShapeDetStaticExceptForBatchDim() {
 }
 
 static bool isInputShapeSupported(const std::vector<uint32_t> &inputShape) {
-    return inputShape.size() == 4;
+    return inputShape.size() == 3;
 }
 
 DataOutputSchema RandomCropAugmentation::getDataOutputSchema(const std::vector<uint32_t> &inputShape, const uint64_t itemSeed) const {
@@ -30,10 +30,9 @@ DataOutputSchema RandomCropAugmentation::getDataOutputSchema(const std::vector<u
     std::vector<uint32_t> outputShape;
     if (isInputShapeSupported(inputShape)) {
         outputShape = {
-            inputShape[0],
             cropHeight,
             cropWidth,
-            inputShape[3]
+            inputShape[2]
         };
     }
 
@@ -58,10 +57,9 @@ void RandomCropAugmentation::freeItemProp(ItemProp &itemProp) const {
 std::vector<uint32_t> RandomCropAugmentation::getMaxOutputShapeAxesIfSupported(const std::vector<uint32_t> &inputShape) const {
     if (isInputShapeSupported(inputShape)) {
         return {
-            inputShape[0],
             maxCropHeight,
             maxCropWidth,
-            inputShape[3]
+            inputShape[2]
         };
     }
     return {};
@@ -113,12 +111,14 @@ void randomCropRaster(
     const T *inputData, T *outputData,
     const RandomCropProp *itemProp
 ) {
-    const size_t clampedHeight = std::min(inputShape[1], itemProp->height);
-    const size_t clampedWidth = std::min(inputShape[2], itemProp->width);
+    const size_t clampedHeight = std::min(inputShape[0], itemProp->height);
+    const size_t clampedWidth = std::min(inputShape[1], itemProp->width);
+
+    std::printf("inputShape==%s\n", formatVector(inputShape).c_str());
 
     for (size_t i = 0; i < clampedHeight; i++) {
         for (size_t j = 0; j < clampedWidth; j++) {
-            for (size_t k = 0; k < outputShape[3]; k++) {
+            for (size_t k = 0; k < inputShape[2]; k++) {
                 size_t inpIdx = getIdx(itemProp->top + i, itemProp->left + j, k, inputShape);
                 outputData[getIdx(i, j, k, outputShape)] = inputData[inpIdx];
             }

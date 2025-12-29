@@ -1,5 +1,7 @@
 #include "PadAugmentation.h"
 
+#include "spdlog/fmt/bundled/color.h"
+
 PadAugmentation::PadAugmentation(
     const uint32_t padHeight, const uint32_t padWidth,
     const PadSettings padSettings
@@ -12,17 +14,16 @@ bool PadAugmentation::isOutputShapeDetStaticExceptForBatchDim() {
 
 static bool isInputShapeSupported(const std::vector<uint32_t> &inputShape, const uint32_t padHeight,
                                   const uint32_t padWidth) {
-    return inputShape.size() == 4 && inputShape[1] <= padHeight && inputShape[2] <= padWidth;
+    return inputShape.size() == 3 && inputShape[0] <= padHeight && inputShape[1] <= padWidth;
 }
 
 DataOutputSchema PadAugmentation::getDataOutputSchema(const std::vector<uint32_t> &inputShape, uint64_t) const {
     std::vector<uint32_t> outputShape;
     if (isInputShapeSupported(inputShape, padHeight, padWidth)) {
         outputShape = {
-            inputShape[0],
             padHeight,
             padWidth,
-            inputShape[3]
+            inputShape[2]
         };
     }
 
@@ -36,13 +37,12 @@ void PadAugmentation::freeItemProp(ItemProp &) const {
     // Nothing.
 }
 
-std::vector<uint32_t> PadAugmentation::getMaxOutputShapeAxesIfSupported(const std::vector<uint32_t> &inputShape) const {
+std::vector<uint32_t> PadAugmentation::getMaxOutputShapeAxesIfSupported(const Shape &inputShape) const {
     if (isInputShapeSupported(inputShape, padHeight, padWidth)) {
         return {
-            inputShape[0],
             padHeight,
             padWidth,
-            inputShape[3]
+            inputShape[2]
         };
     }
     return {};

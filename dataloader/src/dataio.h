@@ -14,6 +14,7 @@ struct CpuAllocation {
         uint8_t *uint8;
         float *float32;
     } batchBuffer;
+
     Shapes shapes;
 };
 
@@ -92,8 +93,7 @@ class Dataset {
 public:
     Dataset(std::shared_ptr<IDataSource> _dataSource,
             std::vector<IDataAugmentation *> _dataAugmentations,
-            const pybind11::function &createDatasetFunction,
-            bool isVirtualDataset
+            const pybind11::function &createDatasetFunction, bool isVirtualDataset
     );
 
     Dataset(std::shared_ptr<IDataSource> _dataSource, std::vector<IDataAugmentation *> _dataAugmentations);
@@ -115,8 +115,6 @@ private:
 class BatchedDataset {
 public:
     BatchedDataset(const Dataset &dataset, size_t batchSize);
-
-    BatchedDataset(const Dataset &&dataset, size_t batchSize);
 
     [[nodiscard]] DatasetBatch getNextInFlightBatch();
 

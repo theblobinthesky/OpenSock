@@ -24,8 +24,7 @@ bool checkTransformOperatesOnStandardNDShape(const std::vector<size_t> &inputSha
 
 Dataset::Dataset(std::shared_ptr<IDataSource> _dataSource,
                  std::vector<IDataAugmentation *> _dataAugmentations,
-                 const pybind11::function &createDatasetFunction,
-                 const bool isVirtualDataset
+                 const pybind11::function &createDatasetFunction, const bool isVirtualDataset
 ) : dataSource(std::move(_dataSource)), dataAugmentations(std::move(_dataAugmentations)) {
     if (dataSource->preInitDataset(existsEnvVar(INVALID_DS_ENV_VAR) && isVirtualDataset)) {
         createDatasetFunction();
@@ -35,14 +34,14 @@ Dataset::Dataset(std::shared_ptr<IDataSource> _dataSource,
 }
 
 Dataset::Dataset(std::shared_ptr<IDataSource> _dataSource,
-                 std::vector<IDataAugmentation *> _dataAugmentations)
-    : dataSource(std::move(_dataSource)), dataAugmentations(std::move(_dataAugmentations)) {
+                 std::vector<IDataAugmentation *> _dataAugmentations
+) : dataSource(std::move(_dataSource)), dataAugmentations(std::move(_dataAugmentations)) {
     dataSource->initDataset();
 
     // Defensive programming.
     const auto &itemKeys = dataSource->getItemKeys();
     bool rasterEncountered = false;
-    for (const auto & itemKey : itemKeys) {
+    for (const auto &itemKey: itemKeys) {
         rasterEncountered |= itemKey.type == ItemType::RASTER;
         if (itemKey.type == ItemType::POINTS) {
             if (!rasterEncountered) {
@@ -91,10 +90,6 @@ std::vector<IDataAugmentation *> Dataset::getDataAugmentations() const {
 }
 
 BatchedDataset::BatchedDataset(const Dataset &dataset, const size_t batchSize) : dataset(dataset),
-    batchSize(batchSize), currInFlightBatch(0), lastWaitingBatch(-static_cast<int>(batchSize)) {
-}
-
-BatchedDataset::BatchedDataset(const Dataset &&dataset, const size_t batchSize) : dataset(dataset),
     batchSize(batchSize), currInFlightBatch(0), lastWaitingBatch(-static_cast<int>(batchSize)) {
 }
 

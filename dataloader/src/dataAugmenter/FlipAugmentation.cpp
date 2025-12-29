@@ -15,7 +15,7 @@ bool FlipAugmentation::isOutputShapeDetStaticExceptForBatchDim() {
 }
 
 static bool isInputShapeSupported(const std::vector<uint32_t> &inputShape) {
-    return inputShape.size() == 4;
+    return inputShape.size() == 3;
 }
 
 DataOutputSchema FlipAugmentation::getDataOutputSchema(const std::vector<uint32_t> &inputShape,
@@ -124,17 +124,17 @@ void flipRaster(
     ASSERT(inputShape == outputShape);
     if (itemProp->doesVerticalFlip && itemProp->doesHorizontalFlip) {
         loopOverRaster(inputShape, [&](const size_t i, const size_t j, const size_t k) {
-            size_t outIdx = getIdx(inputShape[1] - 1 - i, inputShape[2] - 1 - j, k, inputShape);
+            size_t outIdx = getIdx(inputShape[0] - 1 - i, inputShape[1] - 1 - j, k, inputShape);
             outputData[outIdx] = inputData[getIdx(i, j, k, inputShape)];
         });
     } else if (itemProp->doesVerticalFlip) {
         loopOverRaster(inputShape, [&](const size_t i, const size_t j, const size_t k) {
-            size_t outIdx = getIdx(inputShape[1] - 1 - i, j, k, inputShape);
+            size_t outIdx = getIdx(inputShape[0] - 1 - i, j, k, inputShape);
             outputData[outIdx] = inputData[getIdx(i, j, k, inputShape)];
         });
     } else if (itemProp->doesHorizontalFlip) {
         loopOverRaster(inputShape, [&](const size_t i, const size_t j, const size_t k) {
-            size_t outIdx = getIdx(i, inputShape[2] - 1 - j, k, inputShape);
+            size_t outIdx = getIdx(i, inputShape[1] - 1 - j, k, inputShape);
             outputData[outIdx] = inputData[getIdx(i, j, k, inputShape)];
         });
     }

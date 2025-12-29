@@ -9,7 +9,7 @@ std::atomic_uint64_t DataLoader::nextId;
 std::mutex DataLoader::concurrencyMutex;
 
 void precomputeItemSizesInMemory(
-    const BatchedDataset &batchedDataset,
+    const BatchedDataset &bds,
     const DataAugmentationPipe &augPipe,
     const size_t batchSize,
     std::vector<size_t> &maxInputSizesPerSingleItem,
@@ -18,9 +18,9 @@ void precomputeItemSizesInMemory(
     size_t &maxInputBatchMemorySize,
     size_t &outputBatchMemorySize
 ) {
-    const auto &itemKeys = batchedDataset.getDataset().getDataSource()->getItemKeys();
-    const auto augPipeMaxInputShapeSize = getShapeSize(augPipe.getMaxInputShape());
-    const auto augPipeOutputShapeSize = getShapeSize(augPipe.getStaticOutputShape());
+    const auto &itemKeys = bds.getDataset().getDataSource()->getItemKeys();
+    const auto rasterMaxInputShapeSize = getShapeSize(augPipe.getRasterMaxInputShape());
+    const auto augPipeRasterOutputShapeSize = getShapeSize(augPipe.getStaticOutputShape());
 
     outputSizesPerBatchOfItem.clear();
     outputMetadataSizesPerBatchOfItem.clear();
@@ -40,8 +40,8 @@ void precomputeItemSizesInMemory(
             }
             break;
             case ItemType::RASTER:
-                maxBytesOfInputPerItem *= augPipeMaxInputShapeSize;
-                bytesOfOutputPerItem *= augPipeOutputShapeSize;
+                maxBytesOfInputPerItem *= rasterMaxInputShapeSize;
+                bytesOfOutputPerItem *= augPipeRasterOutputShapeSize;
                 bytesOfMetaOutputPerItem = 0;
                 break;
             case ItemType::POINTS:
@@ -67,8 +67,8 @@ void precomputeItemSizesInMemory(
         outputBatchMemorySize += outputMetadataSize;
     }
 
-    maxInputBatchMemorySize = 8 * alignUp(maxInputBatchMemorySize, 16); // TODO: Revert *8.
-    outputBatchMemorySize = 8 * alignUp(outputBatchMemorySize, 16); // TODO: Revert *8.
+    maxInputBatchMemorySize = alignUp(maxInputBatchMemorySize, 16);
+    outputBatchMemorySize = alignUp(outputBatchMemorySize, 16);
 }
 
 DataLoader::DataLoader(
@@ -82,8 +82,7 @@ DataLoader::DataLoader(
     augPipe(std::move(_augPipe)),
     batchSize(_batchSize),
     numThreads(_numThreads),
-    prefetchSize(_prefetchSize),
-    maxInputBatchMemorySize(0), outputBatchMemorySize(0) {
+    prefetchSize(_prefetchSize) {
     if (batchSize == 0 || _numThreads == 0 || _prefetchSize == 0) {
         throw std::runtime_error(
             "Batch size, the number of threads and the prefetch size need to be strictly positive.");

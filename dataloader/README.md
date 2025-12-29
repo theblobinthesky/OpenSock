@@ -44,24 +44,24 @@ Feature List (- not begun, w working, + solved):
     + make pipeline work; only bilinear resize for now
     + vectorisation api
     + tests for augmentations
+    - test augmentations with inconsistent input shapes
 
     Compression:
     - enable compressed file format use in dataloader
 
     Misc:
     - ensure easy setup with uv (both production and tests)
-    - apply more sanitizers
+    + apply more sanitizers
     w proper memory arenas in all perf. critical areas
     - zero-copy augmentation output to pinned memory
     + fix item keys order
-    - gemini suggestions...
     - factor out graphics card backend (e.g. cuda) and make it selectable at runtime
 
 
 Plan for how to select the backend:
 Needs to happen before the resource pool is initialized, as you obviously cannot switch as soon as the resource pool is actually in use.
 
-TODO: setBuffers for the augmentation pipe
+TODO (IMPORTANT IF THE DATALOADER IS EVER SUPPOSED TO WORK; THINK ABOUT GENCHANGE): setBuffers for the augmentation pipe
 
 TODO (Document in README later): Enable address sanitizer to work in dbeug mode using LD_PRELOAD=$(gcc -print-file-name=libasan.so) ASAN_OPTIONS="detect_leaks=0:log_path=logs/asan_log".
 

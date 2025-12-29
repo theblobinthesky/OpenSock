@@ -16,11 +16,12 @@ void calcMaxRequiredBufferSize(
     const std::vector<uint32_t> &maxAlongAllAxesInputShape,
     const uint32_t maxBytesPerElement,
     const uint32_t maxNumPoints,
-    uint32_t &maxRequiredBufferSize
+    uint32_t &maxRequiredBufferSize,
+    uint32_t &maxIntermediateSizeForItem
 ) {
     const uint32_t batchSize = maxAlongAllAxesInputShape[0];
-
     uint32_t maxShapeSize = getShapeSize(maxAlongAllAxesInputShape);
+
     auto lastMaxShape = std::vector(maxAlongAllAxesInputShape.begin() + 1, maxAlongAllAxesInputShape.end());
     for (size_t i = 0; i < dataAugmentations.size(); i++) {
         const IDataAugmentation *dataAugmentation = dataAugmentations[i];
@@ -34,10 +35,11 @@ void calcMaxRequiredBufferSize(
         maxShapeSize = std::max(maxShapeSize, batchSize * getShapeSize(lastMaxShape));
     }
 
-    maxRequiredBufferSize = std::max(
-               maxShapeSize,
-               batchSize * maxNumPoints * static_cast<uint32_t>(maxAlongAllAxesInputShape.size() - 2)
-           ) * maxBytesPerElement;
+    const size_t numAxes = maxAlongAllAxesInputShape.size();
+    maxRequiredBufferSize = std::max(maxShapeSize,
+                                     batchSize * maxNumPoints * static_cast<uint32_t>(numAxes - 2)
+                            ) * maxBytesPerElement;
+    maxIntermediateSizeForItem = maxRequiredBufferSize / batchSize;
 }
 
 Shape calcStaticOutputShape(
@@ -53,19 +55,19 @@ Shape calcStaticOutputShape(
 
 DataAugmentationPipe::DataAugmentationPipe(
     std::vector<IDataAugmentation *> dataAugmentations,
-    const Shape &maxInputShape, const uint32_t maxNumPoints,
-    const uint32_t maxBytesPerElement
+    const Shape &rasterMaxInputShape, const uint32_t maxNumPoints, const uint32_t maxBytesPerElement
 ) : dataAugs(std::move(dataAugmentations)), buffer1(nullptr), buffer2(nullptr),
-    maxInputShape(maxInputShape), maxNumPoints(maxNumPoints),
-    maxRequiredBufferSize(0), staticOutputShape(calcStaticOutputShape(dataAugs, maxInputShape)) {
+    rasterMaxInputShape(rasterMaxInputShape), maxNumPoints(maxNumPoints),
+    staticOutputShape(calcStaticOutputShape(dataAugs, rasterMaxInputShape)) {
     if (!isOutputShapeStatic()) {
         throw std::runtime_error("Augmentation pipe needs to output a static shape.");
     }
 
     calcMaxRequiredBufferSize(
         dataAugs,
-        maxInputShape, maxBytesPerElement, maxNumPoints,
-        maxRequiredBufferSize
+        rasterMaxInputShape, maxBytesPerElement, maxNumPoints,
+        maxRequiredBufferSize,
+        maxIntermediateSizeForItem
     );
 }
 
@@ -120,7 +122,7 @@ DataProcessingSchema DataAugmentationPipe::getProcessingSchema(const Shapes &inp
     }
 
     const uint32_t batchSize = inputShapes.size();
-    Shape outputShapeWithBatch =  { batchSize };
+    Shape outputShapeWithBatch = {batchSize};
     outputShapeWithBatch.insert(outputShapeWithBatch.end(), outerOutputShape.begin(), outerOutputShape.end());
 
     return {
@@ -146,10 +148,11 @@ void dispatchInLoop(
     uint8_t *__restrict__ buffer1, uint8_t *__restrict__ buffer2,
     const uint8_t *__restrict__ inputData, uint8_t *__restrict__ outputData,
     const Shapes &inputShapes, const Shape &outputShape, const DType dtype,
-    const uint32_t batchStride,
+    const std::vector<size_t> &maxInputSizesPerSingleItem,
+    const uint32_t maxIntermediateSizeOfItem,
     SkipCheck skipCheck, Func func
 ) {
-    const auto outputShapeNoBatch = std::vector(outputShape.begin() + 1, outputShape.end());
+    const auto outputShapeNoBatch = std::span(outputShape).subspan(1);
 
     const size_t B = inputShapes.size();
     std::vector<uint8_t *> swapBuffers1(B);
@@ -161,9 +164,12 @@ void dispatchInLoop(
         outputBufferIsUntouchedForSlice[i] = true;
     }
 
-    const uint32_t outputSize = getShapeSize(outputShape) * getWidthOfDType(dtype);
+    const uint32_t outputSize = getShapeSize(outputShapeNoBatch) * getWidthOfDType(dtype);
+
+    std::printf("maxIntermediateSizeOfItem==%u\n", maxIntermediateSizeOfItem);
 
     for (size_t i = 0; i < dataAugs.size(); i++) {
+        size_t inputOffset = 0;
         for (size_t b = 0; b < B; b++) {
             bool doesLaterAugSwap = false;
             for (size_t j = i + 1; j < dataAugs.size(); j++) {
@@ -175,11 +181,11 @@ void dispatchInLoop(
 
             if (!skipCheck(b, i)) {
                 const uint8_t *sliceOfInputForAug = (i == 0 || outputBufferIsUntouchedForSlice[b])
-                                                        ? inputData + b * outputSize
-                                                        : swapBuffers1[b] + b * batchStride;
+                                                        ? inputData + inputOffset
+                                                        : swapBuffers1[b] + b * maxIntermediateSizeOfItem;
                 uint8_t *sliceOfOutputForAug = (i == dataAugs.size() - 1 || !doesLaterAugSwap)
                                                    ? outputData + b * outputSize
-                                                   : swapBuffers2[b] + b * batchStride;
+                                                   : swapBuffers2[b] + b * maxIntermediateSizeOfItem;
                 func(b, i, sliceOfInputForAug, sliceOfOutputForAug);
 
                 const auto tmp = swapBuffers1[b];
@@ -187,12 +193,15 @@ void dispatchInLoop(
                 swapBuffers2[b] = tmp;
                 outputBufferIsUntouchedForSlice[b] = false;
             }
+
+            inputOffset += maxInputSizesPerSingleItem[b];
         }
     }
 
+    size_t inputOffset = 0;
     for (size_t b = 0; b < B; b++) {
         if (outputBufferIsUntouchedForSlice[b]) {
-            if (inputShapes[b] != outputShapeNoBatch) {
+            if (std::span(inputShapes[b]) != outputShapeNoBatch) {
                 throw std::runtime_error(std::format(
                     "Pipeline did not modify buffers, but input shape {} != output shape {}",
                     formatVector(inputShapes[b]), formatVector(outputShape)
@@ -200,10 +209,11 @@ void dispatchInLoop(
             }
             memcpy(
                 outputData + b * outputSize,
-                inputData + b * outputSize,
-                getShapeSize(inputShapes[b]) * getWidthOfDType(dtype)
+                inputData + inputOffset,
+                outputSize
             );
         }
+        inputOffset += maxInputSizesPerSingleItem[b];
     }
 }
 
@@ -235,17 +245,23 @@ void DataAugmentationPipe::augmentWithPoints(
         }
     }
 
-    // TODO: Shapes can be different!!!!!!!!!!!!!
     const Shape outputShape = {
         shapes[0][0],
         maxNumPoints,
         shapes[0][2]
     };
 
+    std::vector<size_t> maxInputSizesPerSingleItem;
+    const size_t outputShapeSize = getShapeSize(outputShape);
+    for (size_t i = 0; i < shapes.size(); i++) {
+        maxInputSizesPerSingleItem.push_back(outputShapeSize);
+    }
+
     dispatchInLoop(dataAugs, buffer1, buffer2,
                    inputData, outputData,
                    shapes, outputShape,
-                   dtype, maxRequiredBufferSize,
+                   dtype, maxInputSizesPerSingleItem,
+                   maxIntermediateSizeForItem,
                    [&](const size_t b, const size_t i) {
                        const auto dataAug = dataAugs[i];
                        void *itemProp = schema.itemPropsPerAug[i][b];
@@ -261,6 +277,7 @@ void DataAugmentationPipe::augmentWithPoints(
 void DataAugmentationPipe::augmentWithRaster(
     const DType dtype,
     const uint8_t *__restrict__ inputData, uint8_t *__restrict__ outputData,
+    const std::vector<size_t> &maxInputSizesPerSingleItem,
     const DataProcessingSchema &schema
 ) const {
     // TODO: Shapes can be different!!!!!!!!!!!!!
@@ -269,7 +286,8 @@ void DataAugmentationPipe::augmentWithRaster(
     dispatchInLoop(dataAugs, buffer1, buffer2,
                    inputData, outputData,
                    inputShapes, schema.outputShape,
-                   dtype, maxRequiredBufferSize,
+                   dtype, maxInputSizesPerSingleItem,
+                   maxIntermediateSizeForItem,
                    [&](const size_t b, const size_t i) {
                        const auto dataAug = dataAugs[i];
                        void *itemProp = schema.itemPropsPerAug[i][b];
@@ -290,11 +308,11 @@ void DataAugmentationPipe::augmentWithRaster(
                    });
 }
 
-const Shape &DataAugmentationPipe::getMaxInputShape() const {
-    return maxInputShape;
+Shape DataAugmentationPipe::getRasterMaxInputShape() const {
+    return rasterMaxInputShape;
 }
 
-uint32_t DataAugmentationPipe::getMaxNumPoints() const {
+[[nodiscard]] uint32_t DataAugmentationPipe::getMaxNumPoints() const {
     return maxNumPoints;
 }
 

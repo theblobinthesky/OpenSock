@@ -49,11 +49,12 @@ public:
     const size_t numThreads;
     const size_t prefetchSize;
 
+    // Metadata about inputs/outputs:
     std::vector<size_t> maxInputSizesPerSingleItem;
     std::vector<size_t> outputSizesPerBatchOfItem;
     std::vector<size_t> outputMetadataSizesPerBatchOfItem;
-    size_t maxInputBatchMemorySize;
-    size_t outputBatchMemorySize;
+    size_t maxInputBatchMemorySize{};
+    size_t outputBatchMemorySize{};
 };
 
 #endif //DATALOADER_H
