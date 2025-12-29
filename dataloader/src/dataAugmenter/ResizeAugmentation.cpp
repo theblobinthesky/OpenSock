@@ -73,7 +73,7 @@ void resizePoints(
 }
 
 static bool shouldBeSkipped(void *itemProp) {
-    const auto settings = static_cast<ResizeProp *>(itemProp);
+    const ResizeProp *settings = static_cast<ResizeProp *>(itemProp);
     return settings->skip;
 }
 

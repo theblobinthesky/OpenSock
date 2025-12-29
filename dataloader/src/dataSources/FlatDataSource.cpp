@@ -27,11 +27,17 @@ static uint8_t *loadFileStoopid(const std::string &path, size_t &inputSize) {
     FILE *f = fopen(path.c_str(), "rb");
     if (!f) return nullptr;
 
-    fseek(f, 0, SEEK_END);
+    if (fseek(f, 0, SEEK_END) != 0) {
+        fclose(f);
+        return nullptr;
+    }
     inputSize = ftell(f);
-    rewind(f);
+    if (fseek(f, 0, SEEK_SET) != 0) {
+        fclose(f);
+        return nullptr;
+    }
 
-    uint8_t *buf = (uint8_t *) malloc(inputSize);
+    void *buf = malloc(inputSize);
     if (!buf) {
         fclose(f);
         return nullptr;
@@ -44,7 +50,7 @@ static uint8_t *loadFileStoopid(const std::string &path, size_t &inputSize) {
     }
 
     fclose(f);
-    return buf;
+    return static_cast<uint8_t *>(buf);
 }
 
 static std::vector<ProbeResult> probeAllSubDirs(const std::string &rootDirectory,
@@ -65,9 +71,9 @@ static std::vector<ProbeResult> probeAllSubDirs(const std::string &rootDirectory
 
                 size_t inputSize;
                 uint8_t *inputData = loadFileStoopid(entry.path().string(), inputSize);
-                std::printf("path: %s, inputSize: %lu, inputData: %hhu\n", entry.path().c_str(), inputSize, inputData[0]);
+                std::printf("path: %s, inputSize: %zu, inputData: %hhu\n", entry.path().c_str(), inputSize, inputData[0]);
                 probeResults.push_back(dataDecoder->probeFromMemory(inputData, inputSize));
-                delete[] inputData; // TODO: Delete this once the switch to overlappedio is complete.
+                free(inputData); // TODO: Delete this once the switch to overlappedio is complete.
                 break;
             }
         }
@@ -111,7 +117,8 @@ SubdirToDictname::SubdirToDictname(std::string subdir, std::string dictname)
 
 FlatDataSource::FlatDataSource(std::string _rootDirectory,
                                std::vector<SubdirToDictname> _subdirsToDictNames)
-    : rootDirectory(std::move(_rootDirectory)), subdirsToDictNames(std::move(_subdirsToDictNames)), initRequired(false) {
+    : rootDirectory(std::move(_rootDirectory)), subdirsToDictNames(std::move(_subdirsToDictNames)),
+      initRequired(false) {
     rootDirectory = validateRootDirectory(rootDirectory);
     initRequired = !fs::exists(rootDirectory);
 }
@@ -146,7 +153,7 @@ CpuAllocation FlatDataSource::loadItemSliceIntoContigousBatch(BumpAllocator<uint
         uint8_t *inputData = loadFileStoopid(path, inputSize);
         auto [_, shape] = decoder->loadFromMemory(bufferSize, inputData, inputSize, alloc);
         shapes.push_back(shape);
-        delete[] inputData; // TODO: Delete this once the switch to overlappedio is complete.
+        free(inputData); // TODO: Delete this once the switch to overlappedio is complete.
     }
 
     return {
@@ -173,7 +180,8 @@ void FlatDataSource::initDataset() {
     verifyDatasetIsConsistent();
 }
 
-void FlatDataSource::splitIntoTwoDataSources(const size_t aNumEntries, std::shared_ptr<IDataSource> &dataSourceA, std::shared_ptr<IDataSource> &dataSourceB) {
+void FlatDataSource::splitIntoTwoDataSources(const size_t aNumEntries, std::shared_ptr<IDataSource> &dataSourceA,
+                                             std::shared_ptr<IDataSource> &dataSourceB) {
     if (aNumEntries > entries.size()) {
         throw std::runtime_error("Data source can only be split into two smaller sources.");
     }
@@ -217,8 +225,8 @@ void FlatDataSource::initDatasetFromRootDirectory() {
         }
 
         for (size_t s = 1; s < subDirs.size(); s++) {
-            auto &eS = probeResults[s].extension;
-            auto &sS = subDirs[s];
+            const auto &eS = probeResults[s].extension;
+            const auto &sS = subDirs[s];
 
             std::string newFile(file);
             newFile = replaceAll(newFile, s0, sS);

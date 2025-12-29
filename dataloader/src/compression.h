@@ -93,7 +93,7 @@ struct CompressorSettings {
     }
 
     [[nodiscard]] int getItemSize() const noexcept {
-        return flags & static_cast<uint64_t>(CompressorFlags::CAST_TO_FP16) ? 2 : 4;
+        return (flags & static_cast<uint64_t>(CompressorFlags::CAST_TO_FP16)) ? 2 : 4;
     }
 
     [[nodiscard]] bool isIdentityPermutation() const noexcept {
@@ -113,7 +113,7 @@ struct CompressionItem {
 
 class Compressor {
 public:
-    explicit Compressor(CompressorOptions _options);
+    explicit Compressor(const CompressorOptions &options);
 
     PREVENT_COPY_OR_MOVE(Compressor)
 

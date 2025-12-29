@@ -23,7 +23,7 @@ void calcMaxRequiredBufferSize(
     uint32_t maxShapeSize = getShapeSize(maxAlongAllAxesInputShape);
     auto lastMaxShape = std::vector(maxAlongAllAxesInputShape.begin() + 1, maxAlongAllAxesInputShape.end());
     for (size_t i = 0; i < dataAugmentations.size(); i++) {
-        const auto dataAugmentation = dataAugmentations[i];
+        const IDataAugmentation *dataAugmentation = dataAugmentations[i];
         const auto outputMaxShape = dataAugmentation->getMaxOutputShapeAxesIfSupported(lastMaxShape);
         if (outputMaxShape.empty()) {
             throw std::runtime_error(std::format("Augmentation {} pipline does not support maximum input shape {}",
@@ -96,7 +96,7 @@ DataProcessingSchema DataAugmentationPipe::getProcessingSchema(const Shapes &inp
         std::vector<Shape> inputShapesForSlice, outputShapesForSlice;
 
         for (size_t i = 0; i < dataAugs.size(); i++) {
-            const auto dataAugmentation = dataAugs[i];
+            const IDataAugmentation *dataAugmentation = dataAugs[i];
             auto [outputShape, itemProp] = dataAugmentation->getDataOutputSchema(lastShapeForSlice, itemSeed);
             if (outputShape.empty()) {
                 throw std::runtime_error(std::format("Augmenter {} does not support input shape {}.",

@@ -2,13 +2,17 @@ Checks: >
   clang-analyzer-*,
   bugprone-*,
   -bugprone-easily-swappable-parameters,
+  -bugprone-macro-parentheses,
   concurrency-*,
   misc-unused-*,
   modernize-*,
+  -modernize-use-auto,
   -modernize-use-trailing-return-type,
   -modernize-avoid-c-arrays,
+  -modernize-use-default-member-init,
+  -modernize-pass-by-value,
   performance-*,
   -performance-enum-size,
   WarningsAsErrors: ''
-HeaderFilterRegex: 'src/.*'
+HeaderFilterRegex: 'src/'
 FormatStyle: none

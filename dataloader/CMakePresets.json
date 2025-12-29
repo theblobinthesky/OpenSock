@@ -20,6 +20,7 @@
             "generator": "Ninja",
             "binaryDir": "build/release",
             "cacheVariables": {
+                "CMAKE_EXPORT_COMPILE_COMMANDS": "1",
                 "CMAKE_BUILD_TYPE": "Release",
                 "Python_EXECUTABLE": "/usr/bin/python3.12",
                 "Python_INCLUDE_DIR": "/usr/include/python3.12",

@@ -73,9 +73,9 @@ void precomputeItemSizesInMemory(
 
 DataLoader::DataLoader(
     Dataset &_dataset,
-    const int _batchSize,
-    const int _numThreads,
-    const int _prefetchSize,
+    const size_t _batchSize,
+    const size_t _numThreads,
+    const size_t _prefetchSize,
     DataAugmentationPipe &_augPipe
 ) : id(nextId.fetch_add(1)),
     batchedDataset(std::move(_dataset), _batchSize),
@@ -84,7 +84,7 @@ DataLoader::DataLoader(
     numThreads(_numThreads),
     prefetchSize(_prefetchSize),
     maxInputBatchMemorySize(0), outputBatchMemorySize(0) {
-    if (batchSize <= 0 || _numThreads <= 0 || _prefetchSize <= 0) {
+    if (batchSize == 0 || _numThreads == 0 || _prefetchSize == 0) {
         throw std::runtime_error(
             "Batch size, the number of threads and the prefetch size need to be strictly positive.");
     }
@@ -207,7 +207,8 @@ py::dict DataLoader::getNextBatch() {
         const Shape &shape = probe.shape; // TODO: This needs to contain the batch dimension.
         auto wrapper = get(batchSize, shape, gpuAllocation, probe.dtype, fence);
 
-        switch (itemKey.type) {
+        // TODO
+        /* switch (itemKey.type) {
             case ItemType::NONE:
             case ItemType::RASTER:
                 break;
@@ -215,7 +216,7 @@ py::dict DataLoader::getNextBatch() {
                 break;
             default:
                 throw std::runtime_error("Next batch encountered unknown spatial hint..");
-        } // TODO
+        } // TODO*/
         pyBatch[itemKey.keyName.c_str()] = py::cast(wrapper, py::return_value_policy::reference);
     }
 

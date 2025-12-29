@@ -33,3 +33,4 @@ storage
 autocalibration/data/dataset
 autocalibration/data/scraped-assets
 logs
+compile_commands.json

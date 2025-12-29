@@ -56,7 +56,7 @@ template<typename T>
 void flipPoints(
     const Shape &shape,
     const T *inputData, T *outputData,
-    FlipProp *itemProp
+    const FlipProp *itemProp
 ) {
     if (itemProp->doesVerticalFlip && itemProp->doesHorizontalFlip) {
         for (size_t i = 0; i < shape[0]; i++) {
@@ -80,7 +80,7 @@ void flipPoints(
 }
 
 static bool shouldBeSkipped(const ItemProp itemProp) {
-    const auto settings = static_cast<FlipProp *>(itemProp);
+    const FlipProp *settings = static_cast<FlipProp *>(itemProp);
     return !settings->doesHorizontalFlip && !settings->doesVerticalFlip;
 }
 
@@ -121,7 +121,7 @@ void flipRaster(
     const T *inputData, T *outputData,
     const FlipProp *itemProp
 ) {
-    assert(inputShape == outputShape);
+    ASSERT(inputShape == outputShape);
     if (itemProp->doesVerticalFlip && itemProp->doesHorizontalFlip) {
         loopOverRaster(inputShape, [&](const size_t i, const size_t j, const size_t k) {
             size_t outIdx = getIdx(inputShape[1] - 1 - i, inputShape[2] - 1 - j, k, inputShape);

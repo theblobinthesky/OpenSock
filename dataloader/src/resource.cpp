@@ -375,7 +375,7 @@ void ResourcePool::threadMain(const size_t threadIdx, const std::atomic_uint32_t
                     memcpy(outputAlloc, inputAlloc.batchBuffer.uint8, dl->outputSizesPerBatchOfItem[0]);
                     break;
                 case ItemType::POINTS:
-                    assert(!lastSchema.inputShapesPerAug.empty());
+                    ASSERT(!lastSchema.inputShapesPerAug.empty());
                     dl->augPipe.augmentWithPoints(
                         inputAlloc.shapes,
                         itemKey.probeResult.dtype,
@@ -435,7 +435,7 @@ void ResourcePool::threadMain(const size_t threadIdx, const std::atomic_uint32_t
         DO_SHUTDOWN_OR_GENCHANGE_IF_NECESSARY()
 
 
-        assert(allocations.getArena().host != nullptr);
+        ASSERT(allocations.getArena().host != nullptr);
         std::memcpy(allocations.getArena().host, tmpAlloc.getArena(), dl->outputBatchMemorySize);
         std::vector<uint8_t *> gpuAllocations;
         std::vector<Fence> fences;

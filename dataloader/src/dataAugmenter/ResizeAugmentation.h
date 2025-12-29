@@ -19,7 +19,7 @@ public:
 
     void freeItemProp(ItemProp &itemProp) const override;
 
-    Shape getMaxOutputShapeAxesIfSupported(const Shape &inputShape) const override;
+    [[nodiscard]] Shape getMaxOutputShapeAxesIfSupported(const Shape &inputShape) const override;
 
     bool isAugmentWithPointsSkipped(
         const Shape &shape,

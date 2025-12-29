@@ -71,7 +71,7 @@ template<typename T>
 void randomCropPoints(
     const std::vector<uint32_t> &shape,
     const T *inputData, T *outputData,
-    RandomCropProp *itemProp
+    const RandomCropProp *itemProp
 ) {
     for (size_t b = 0; b < shape[0]; b++) {
         for (size_t i = 0; i < shape[1]; i++) {
@@ -83,7 +83,7 @@ void randomCropPoints(
 }
 
 static bool shouldBeSkipped(void *itemProp) {
-    const auto settings = static_cast<RandomCropProp *>(itemProp);
+    const RandomCropProp *settings = static_cast<RandomCropProp *>(itemProp);
     return settings->skip;
 }
 
@@ -97,7 +97,7 @@ void RandomCropAugmentation::augmentWithPoints(
     const uint8_t *__restrict__ inputData, uint8_t *__restrict__ outputData,
     ItemProp &itemProp
 ) {
-    assert(shape[2] == 2);
+    ASSERT(shape[2] == 2);
     dispatchWithType(dtype, inputData, outputData, [&](auto *input, auto *output) {
         randomCropPoints(
             shape, input, output,
@@ -111,7 +111,7 @@ void randomCropRaster(
     const std::vector<uint32_t> &inputShape,
     const std::vector<uint32_t> &outputShape,
     const T *inputData, T *outputData,
-    RandomCropProp *itemProp
+    const RandomCropProp *itemProp
 ) {
     const size_t clampedHeight = std::min(inputShape[1], itemProp->height);
     const size_t clampedWidth = std::min(inputShape[2], itemProp->width);

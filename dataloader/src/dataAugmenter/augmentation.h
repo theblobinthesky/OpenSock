@@ -103,9 +103,9 @@ public:
         const DataProcessingSchema &schema
     ) const;
 
-    const Shape &getMaxInputShape() const;
+    [[nodiscard]] const Shape &getMaxInputShape() const;
 
-    uint32_t getMaxNumPoints() const;
+    [[nodiscard]] uint32_t getMaxNumPoints() const;
 
 private:
     std::vector<IDataAugmentation *> dataAugs;

@@ -115,7 +115,7 @@ public:
         return arena;
     }
 
-    [[nodiscard]] T getCurrent() {
+    [[nodiscard]] T getCurrent() const {
         return arena + offset;
     }
 
@@ -126,8 +126,8 @@ private:
 };
 
 // Safe for us: environment never mutated after startup
-// NOLINTNEXTLINE(concurrency-mt-unsafe)
 inline bool existsEnvVar(const std::string &name) {
+    // NOLINTNEXTLINE(concurrency-mt-unsafe)
     return std::getenv(name.c_str()) != nullptr;
 }
 
@@ -222,10 +222,17 @@ inline bool isUnsignedDType(const DType dtype) {
     switch (dtype) {
         case DType::UINT8:
             return true;
-        default:
+        case DType::INT32:
+        case DType::FLOAT32:
             return false;
+        default:
+            throw std::runtime_error("Cannot determine signedness of unknown dtype.");
     }
 }
 
+#define ASSERT(condition) \
+    if (!(condition)) { \
+        throw std::runtime_error("Assert failed."); \
+    }
 
 #endif

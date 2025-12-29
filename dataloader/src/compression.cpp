@@ -152,6 +152,7 @@ uint64_t getLength(const uint32_t shape[MAX_SHAPE_SIZE], const size_t shapeSize)
     return length;
 }
 
+// NOLINTBEGIN(clang-analyzer-core.uninitialized.ArraySubscript)
 template<typename T>
 void applyShapePermutationInternal(const uint32_t shape[MAX_SHAPE_SIZE], const uint32_t permutation[MAX_SHAPE_SIZE],
                                    const size_t shapeSize,
@@ -190,7 +191,7 @@ void applyShapePermutationInternal(const uint32_t shape[MAX_SHAPE_SIZE], const u
     for (size_t i = 0; i < length; i++) {
         size_t newIdx = 0;
         for (size_t s = 0; s < shapeSize; s++) {
-            assert(shape[s] != 0);
+            ASSERT(shape[s] != 0);
             const size_t oldDimIdx = (i / oldStrides[s]) % shape[s];
             newIdx += oldDimIdx * remapCache[s];
         }
@@ -198,6 +199,7 @@ void applyShapePermutationInternal(const uint32_t shape[MAX_SHAPE_SIZE], const u
         dataOut[newIdx] = dataIn[i];
     }
 }
+// NOLINTEND(clang-analyzer-core.uninitialized.ArraySubscript)
 
 void applyShapePermutation(const uint32_t shape[MAX_SHAPE_SIZE], const uint32_t permutation[MAX_SHAPE_SIZE],
                            const CompressorSettings &settings,
@@ -338,7 +340,7 @@ static std::vector<std::string> listAllFiles(const std::string &directoryPath) {
     return paths;
 }
 
-Compressor::Compressor(CompressorOptions _options) : options(std::move(_options)),
+Compressor::Compressor(const CompressorOptions &_options) : options(_options),
                                                      bufferSize(
                                                          alignUp(getMaxSizeRequiredByCodec(options.shape), 16)
                                                          + alignUp(sizeof(CompressorSettings), 16)),
@@ -346,7 +348,7 @@ Compressor::Compressor(CompressorOptions _options) : options(std::move(_options)
                                                      allocator(new uint8_t[arenaSize], arenaSize),
                                                      threadPool([this] { this->threadMain(); }, options.numThreads) {
     for (const auto dim: options.shape) {
-        if (dim <= 0) {
+        if (dim == 0) {
             throw std::runtime_error("The dimension of a shape cannot be non-positive.");
         }
     }
@@ -537,7 +539,7 @@ Decompressor::Decompressor(std::vector<uint32_t> _shape)
       arenaSize(2 * bufferSize),
       allocator(new uint8_t[arenaSize], arenaSize) {
     for (const auto dim: shape) {
-        if (dim <= 0) {
+        if (dim == 0) {
             throw std::runtime_error("Shape is invalid.");
         }
     }

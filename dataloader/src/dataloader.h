@@ -28,9 +28,9 @@ class DataLoader : public std::enable_shared_from_this<DataLoader> {
 public:
     DataLoader(
         Dataset &_dataset,
-        int _batchSize,
-        int _numThreads,
-        int _prefetchSize,
+        size_t _batchSize,
+        size_t _numThreads,
+        size_t _prefetchSize,
         DataAugmentationPipe &_augPipe
     );
 
