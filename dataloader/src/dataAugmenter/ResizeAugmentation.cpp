@@ -61,14 +61,12 @@ void resizePoints(
     ResizeProp *itemProp,
     const uint32_t height, const uint32_t width
 ) {
-    for (size_t b = 0; b < shape[0]; b++) {
-        for (size_t i = 0; i < shape[1]; i++) {
-            const size_t idx = getIdx(b, i, 0, shape);
-            outputData[idx + 0] = static_cast<T>(
-                height * static_cast<double>(inputData[idx + 0]) / static_cast<double>(itemProp->originalHeight));
-            outputData[idx + 1] = static_cast<T>(
-                width * static_cast<double>(inputData[idx + 1]) / static_cast<double>(itemProp->originalWidth));
-        }
+    for (size_t i = 0; i < shape[0]; i++) {
+        const size_t idx = 2 * i; // getIdx(i, 0, shape);
+        outputData[idx + 0] = static_cast<T>(
+            height * static_cast<double>(inputData[idx + 0]) / static_cast<double>(itemProp->originalHeight));
+        outputData[idx + 1] = static_cast<T>(
+            width * static_cast<double>(inputData[idx + 1]) / static_cast<double>(itemProp->originalWidth));
     }
 }
 
@@ -106,38 +104,31 @@ void ResizeAugmentation::augmentWithRaster(
     const uint8_t *__restrict__ inputData, uint8_t *__restrict__ outputData,
     ItemProp &
 ) {
-    const size_t inputSize = getShapeSize(inputShape) / inputShape[0];
-    const size_t outputSize = getShapeSize(outputShape) / inputShape[0];
-
     switch (dtype) {
         case DType::UINT8:
-            for (size_t b = 0; b < inputShape[0]; b++) {
-                stbir_resize_uint8_srgb(
-                    inputData + inputSize * b,
-                    static_cast<int>(inputShape[2]),
-                    static_cast<int>(inputShape[1]),
-                    static_cast<int>(inputShape[2]) * 3,
-                    outputData + outputSize * b,
-                    static_cast<int>(width),
-                    static_cast<int>(height),
-                    static_cast<int>(width) * 3, STBIR_RGB
-                );
-            }
+            stbir_resize_uint8_srgb(
+                inputData,
+                static_cast<int>(inputShape[1]),
+                static_cast<int>(inputShape[0]),
+                static_cast<int>(inputShape[1]) * 3,
+                outputData,
+                static_cast<int>(width),
+                static_cast<int>(height),
+                static_cast<int>(width) * 3, STBIR_RGB
+            );
             break;
         case DType::FLOAT32:
-            for (size_t b = 0; b < inputShape[0]; b++) {
-                stbir_resize_float_linear(
-                    reinterpret_cast<const float *>(inputData) + inputSize * b,
-                    static_cast<int>(inputShape[2]),
-                    static_cast<int>(inputShape[1]),
-                    static_cast<int>(inputShape[2]) * 3 * static_cast<int>(sizeof(float)),
-                    reinterpret_cast<float *>(outputData) + outputSize * b,
-                    static_cast<int>(width),
-                    static_cast<int>(height),
-                    static_cast<int>(width) * 3 * static_cast<int>(sizeof(float)),
-                    STBIR_RGB
-                );
-            }
+            stbir_resize_float_linear(
+                reinterpret_cast<const float *>(inputData),
+                static_cast<int>(inputShape[1]),
+                static_cast<int>(inputShape[0]),
+                static_cast<int>(inputShape[1]) * 3 * static_cast<int>(sizeof(float)),
+                reinterpret_cast<float *>(outputData),
+                static_cast<int>(width),
+                static_cast<int>(height),
+                static_cast<int>(width) * 3 * static_cast<int>(sizeof(float)),
+                STBIR_RGB
+            );
             break;
         case DType::INT32:
         default:

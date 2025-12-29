@@ -212,7 +212,7 @@ static void verifyArraysIntegrity(const py::array &array, const Shape &shape, co
 static void bindDataProcessingPipe(const py::module &m) {
     py::class_<DataAugmentationPipe>(m, "DataAugmentationPipe")
             .def(py::init([](std::vector<IDataAugmentation *> augs, const std::vector<uint32_t> &maxIn,
-                             const uint32_t maxBytes, const uint32_t maxNumPoints) {
+                             const uint32_t maxNumPoints, const uint32_t maxBytes) {
                 return new DataAugmentationPipe(std::move(augs), maxIn, maxNumPoints, maxBytes);
             }), py::keep_alive<1, 2>())
             .def("get_processing_schema",
@@ -242,19 +242,19 @@ static void bindDataProcessingPipe(const py::module &m) {
                      verifyArraysIntegrity(input, inputShape, schema->inputShapesPerAug[0]);
                      verifyArraysIntegrity(output, toUint32Shape(outInfo), schema->outputShapesPerAug.back());
 
-                     std::vector<size_t> maxInputSizesPerSingleItem;
-                     const auto inputShapeWithoutBatch = std::span(inputShape).subspan(1);
+                     std::vector<size_t> maxBytesOfEveryInput;
+                     const auto inpShapeWithoutBatch = std::span(inputShape).subspan(1);
                      const DType dtype = getAndAssertEqualityOfDType(input, output);
-                     const size_t inputShapeWithoutBatchSize = getShapeSize(inputShapeWithoutBatch) * getWidthOfDType(dtype);
+                     const size_t inputShapeWithoutBatchSize = getShapeSize(inpShapeWithoutBatch) * getWidthOfDType(dtype);
                      for (size_t i = 0; i < inputShape[0]; i++) {
-                         maxInputSizesPerSingleItem.push_back(inputShapeWithoutBatchSize);
+                         maxBytesOfEveryInput.push_back(inputShapeWithoutBatchSize);
                      }
 
                      self.augmentWithRaster(
                          dtype,
                          static_cast<const uint8_t *>(inInfo.ptr),
                          static_cast<uint8_t *>(outInfo.ptr),
-                         maxInputSizesPerSingleItem,
+                         maxBytesOfEveryInput,
                          *schema
                      );
                  })
@@ -290,7 +290,7 @@ static void bindDataProcessingPipe(const py::module &m) {
 }
 
 PYBIND11_MODULE(_core, m) {
-#if defined(ENABLE_DEBUG_PRINT)
+#if defined(ENABLE_DEBUG)
     spdlog::set_level(spdlog::level::trace);
     spdlog::set_pattern("[%Y-%m-%d %H:%M:%S.%e] %^[%l]%$ [%s:%# %!] %v");
 #else
@@ -329,7 +329,7 @@ PYBIND11_MODULE(_core, m) {
         const py::module_ atexit = py::module_::import("atexit");
         atexit.attr("register")(py::cpp_function([] {
             LOG_DEBUG_FUN("atexit", "atexit has been called");
-            // TODO: Fix exception. ResourcePool::get().shutdown();
+            ResourcePool::get().shutdown();
         }));
     } catch (const std::exception &e) {
         // Swallow errors to avoid import-time failures if atexit is unavailable.

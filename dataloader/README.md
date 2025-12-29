@@ -55,7 +55,7 @@ Feature List (- not begun, w working, + solved):
     w proper memory arenas in all perf. critical areas
     - zero-copy augmentation output to pinned memory
     + fix item keys order
-    - factor out graphics card backend (e.g. cuda) and make it selectable at runtime
+    - graphics card backend (e.g. cuda) selectable at runtime
 
 
 Plan for how to select the backend:

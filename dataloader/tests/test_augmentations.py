@@ -105,8 +105,6 @@ class TestBasics:
         pipe.augment_raster(input_array, output_array, schema_capsule)
         assert np.all(input_array == output_array[:, :128, :128])
 
-    # TODO: Mixed by batch augmentations are skipped test.
-
 
 class TestAugmentationRules:
     def test_random_crop_fails_with_different_min_max(self):
@@ -165,11 +163,11 @@ class TestRasterCorrectness:
         input_shape = (4, 128, 64, 3)
         pipe = DataAugmentationPipe(
             [aug, PadAugmentation(128, 128, PadSettings.PAD_BOTTOM_RIGHT)], 
-            DEF_MAX_INPUT_SHAPE, DEF_MAX_NUM_POINTS, 8
+           DEF_MAX_INPUT_SHAPE, DEF_MAX_NUM_POINTS, 8
         )
 
         for item_seed in range(NUM_EXAMPLES):
-            settings = aug.get_item_settings(input_shape, item_seed)
+            settings = aug.get_item_settings(input_shape[1:], item_seed)
             output_shape, schema_capsule = def_get_processing_schema(pipe, input_shape, item_seed)
             input_array = gen_random(input_shape, dtype)
             output_array = np.zeros(output_shape, dtype=dtype)
@@ -182,7 +180,7 @@ class TestRasterCorrectness:
         B = 4
         dtype = supported_dtypes_config_no_ints["dtype"]
         input_shape = (B, 128, 64, 3)
-        pipe = DataAugmentationPipe([ResizeAugmentation(48, 48)], DEF_MAX_INPUT_SHAPE, DEF_MAX_NUM_POINTS, 8)
+        pipe = DataAugmentationPipe([ResizeAugmentation(48, 36)], DEF_MAX_INPUT_SHAPE, DEF_MAX_NUM_POINTS, 8)
 
         for item_seed in range(NUM_EXAMPLES):
             output_shape, schema_capsule = def_get_processing_schema(pipe, input_shape, item_seed)
@@ -192,7 +190,7 @@ class TestRasterCorrectness:
             output_array = np.zeros(output_shape, dtype=dtype)
 
             pipe.augment_raster(input_array, output_array, schema_capsule)
-            gt = np.stack([cv2.resize(input_array[i], (48, 48)) for i in range(B)], axis=0)
+            gt = np.stack([cv2.resize(input_array[i], (36, 48)) for i in range(B)], axis=0)
 
             gt = gt.astype(np.double)
             output_array = output_array.astype(np.double)
@@ -232,7 +230,7 @@ class TestPointCorrectness:
         )
 
         for item_seed in range(NUM_EXAMPLES):
-            settings = aug.get_item_settings(input_shape, item_seed)
+            settings = aug.get_item_settings(input_shape[1:], item_seed)
             _, schema_capsule = def_get_processing_schema(pipe, input_shape, item_seed)
             input_array = gen_random(points_shape, dtype)
             output_array = np.zeros(points_shape, dtype=dtype)
@@ -248,7 +246,7 @@ class TestPointCorrectness:
         B = 4
         dtype = supported_signed_dtypes_config["dtype"]
         input_shape, points_shape = (B, 128, 64, 3), (4, 128, 2)
-        pipe = DataAugmentationPipe([ResizeAugmentation(48, 48)], DEF_MAX_INPUT_SHAPE, DEF_MAX_NUM_POINTS, 8)
+        pipe = DataAugmentationPipe([ResizeAugmentation(48, 36)], DEF_MAX_INPUT_SHAPE, DEF_MAX_NUM_POINTS, 8)
 
         for item_seed in range(NUM_EXAMPLES):
             _, schema_capsule = def_get_processing_schema(pipe, input_shape, item_seed)
@@ -258,7 +256,7 @@ class TestPointCorrectness:
 
             gt = input_array.astype(np.float64)
             gt[:, :, 0] *= 48.0 / 128
-            gt[:, :, 1] *= 48.0 / 64
+            gt[:, :, 1] *= 36.0 / 64
             gt = gt.astype(dtype)
             assert np.allclose(gt, output_array)
 
@@ -267,3 +265,4 @@ class TestPointCorrectness:
 # - data aug pipeline test individual tests
 # - no data aug two differently sized images throw exception
 # - no data aug two similar sized images throw no exception
+# TODO: Mixed by batch augmentations are skipped test.

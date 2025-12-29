@@ -357,7 +357,7 @@ void ResourcePool::threadMain(const size_t threadIdx, const std::atomic_uint32_t
             // that the decoders never read from pinned memory.
             // Reading from pinned memory can be very slow, as it is not always backed by RAM.
             inputAllocsOnHost.push_back(ds.getDataSource()->loadItemSliceIntoContigousBatch(
-                tmpAlloc, batchPaths, i, dl->maxInputSizesPerSingleItem[i]
+                tmpAlloc, batchPaths, i, dl->maxBytesOfEveryInput[i]
             ));
             outputAllocsOnHost.push_back(tmpAlloc.allocate(dl->outputBatchMemorySize));
         }
@@ -391,7 +391,7 @@ void ResourcePool::threadMain(const size_t threadIdx, const std::atomic_uint32_t
                         itemKey.probeResult.dtype,
                         inputAlloc.batchBuffer.uint8,
                         outputAlloc,
-                        dl->maxInputSizesPerSingleItem,
+                        dl->maxBytesOfEveryInput,
                         lastSchema
                     );
                     break;

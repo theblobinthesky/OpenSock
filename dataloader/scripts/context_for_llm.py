@@ -5,6 +5,7 @@ filters = [
     "tests/*.py",
     "src/*.h",
     "src/*.cpp",
+    "scripts/*",
     ".clang-tidy",
     "CMake*",
     "Makefile",

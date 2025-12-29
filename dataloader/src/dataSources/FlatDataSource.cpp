@@ -71,7 +71,6 @@ static std::vector<ProbeResult> probeAllSubDirs(const std::string &rootDirectory
 
                 size_t inputSize;
                 uint8_t *inputData = loadFileStoopid(entry.path().string(), inputSize);
-                std::printf("path: %s, inputSize: %zu, inputData: %hhu\n", entry.path().c_str(), inputSize, inputData[0]);
                 probeResults.push_back(dataDecoder->probeFromMemory(inputData, inputSize));
                 free(inputData); // TODO: Delete this once the switch to overlappedio is complete.
                 break;

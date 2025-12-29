@@ -9,7 +9,7 @@
 #include <chrono>
 #include "spdlog/spdlog.h"
 
-#ifdef ENABLE_DEBUG_PRINT
+#ifdef ENABLE_DEBUG
 #define LOG_TRACE(...)   spdlog::log(spdlog::source_loc{__FILE__, __LINE__, SPDLOG_FUNCTION}, spdlog::level::trace, __VA_ARGS__)
 #define LOG_DEBUG(...)   spdlog::log(spdlog::source_loc{__FILE__, __LINE__, SPDLOG_FUNCTION}, spdlog::level::debug, __VA_ARGS__)
 #define LOG_DEBUG_FUN(FUN, ...) spdlog::log(spdlog::source_loc{__FILE__, __LINE__, (FUN)}, spdlog::level::debug, __VA_ARGS__)
@@ -230,10 +230,14 @@ inline bool isUnsignedDType(const DType dtype) {
     }
 }
 
+#ifdef ENABLE_DEBUG
 #define ASSERT(condition) \
     if (!(condition)) { \
-        throw std::runtime_error("Assert failed."); \
+        throw std::runtime_error(std::string("Assert failed in: ") + __PRETTY_FUNCTION__); \
     }
+#else
+#define ASSERT(condition)
+#endif
 
 template<typename T>
 bool operator==(std::span<T> a, std::span<T> b) {

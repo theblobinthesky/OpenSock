@@ -30,8 +30,8 @@ DataOutputSchema FlipAugmentation::getDataOutputSchema(const std::vector<uint32_
     auto *itemProp = new FlipProp{
         .doesVerticalFlip = doesFlipVertical,
         .doesHorizontalFlip = doesFlipHorizontal,
-        .originalHeight = inputShape[1],
-        .originalWidth = inputShape[2]
+        .originalHeight = inputShape[0],
+        .originalWidth = inputShape[1]
     };
 
     return {
@@ -60,19 +60,19 @@ void flipPoints(
 ) {
     if (itemProp->doesVerticalFlip && itemProp->doesHorizontalFlip) {
         for (size_t i = 0; i < shape[0]; i++) {
-            const size_t idx = getIdx(i, 0, shape);
+            const size_t idx = 2 * i; // getIdx(i, 0, shape);
             outputData[idx + 0] = itemProp->originalHeight - 1 - inputData[idx + 0];
             outputData[idx + 1] = itemProp->originalWidth - 1 - inputData[idx + 1];
         }
     } else if (itemProp->doesVerticalFlip) {
         for (size_t i = 0; i < shape[0]; i++) {
-            const size_t idx = getIdx(i, 0, shape);
+            const size_t idx = 2 * i; // getIdx(i, 0, shape);
             outputData[idx + 0] = itemProp->originalHeight - 1 - inputData[idx + 0];
             outputData[idx + 1] = inputData[idx + 1];
         }
     } else if (itemProp->doesHorizontalFlip) {
         for (size_t i = 0; i < shape[0]; i++) {
-            const size_t idx = getIdx(i, 0, shape);
+            const size_t idx = 2 * i; // getIdx(i, 0, shape);
             outputData[idx + 0] = inputData[idx + 0];
             outputData[idx + 1] = itemProp->originalWidth - 1 - inputData[idx + 1];
         }

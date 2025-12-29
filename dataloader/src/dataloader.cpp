@@ -12,7 +12,7 @@ void precomputeItemSizesInMemory(
     const BatchedDataset &bds,
     const DataAugmentationPipe &augPipe,
     const size_t batchSize,
-    std::vector<size_t> &maxInputSizesPerSingleItem,
+    std::vector<size_t> &maxBytesOfEveryInput,
     std::vector<size_t> &outputSizesPerBatchOfItem,
     std::vector<size_t> &outputMetadataSizesPerBatchOfItem,
     size_t &maxInputBatchMemorySize,
@@ -55,7 +55,7 @@ void precomputeItemSizesInMemory(
                 throw std::runtime_error("Item sizes cannot be computed because an item type is unknown.");
         }
 
-        maxInputSizesPerSingleItem.push_back(maxBytesOfInputPerItem);
+        maxBytesOfEveryInput.push_back(maxBytesOfInputPerItem);
         maxInputBatchMemorySize += maxBytesOfInputPerItem;
 
         const auto outputSize = batchSize * bytesOfOutputPerItem;
@@ -90,7 +90,7 @@ DataLoader::DataLoader(
 
     precomputeItemSizesInMemory(
         batchedDataset, augPipe, batchSize,
-        maxInputSizesPerSingleItem, outputSizesPerBatchOfItem, outputMetadataSizesPerBatchOfItem,
+        maxBytesOfEveryInput, outputSizesPerBatchOfItem, outputMetadataSizesPerBatchOfItem,
         maxInputBatchMemorySize, outputBatchMemorySize
     );
 
