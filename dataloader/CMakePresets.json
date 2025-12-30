@@ -15,6 +15,19 @@
             }
         },
         {
+            "name": "DebugAsan",
+            "displayName": "DebugAsan",
+            "generator": "Ninja",
+            "binaryDir": "build/debug-asan",
+            "cacheVariables": {
+                "CMAKE_EXPORT_COMPILE_COMMANDS": "1",
+                "CMAKE_BUILD_TYPE": "Debug",
+                "Python_EXECUTABLE": "/usr/bin/python3.12",
+                "Python_INCLUDE_DIR": "/usr/include/python3.12",
+                "Python_LIBRARY": "/usr/lib/x86_64-linux-gnu/libpython3.12.so"
+            }
+        },
+        {
             "name": "Release",
             "displayName": "Release",
             "generator": "Ninja",

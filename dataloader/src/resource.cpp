@@ -2,8 +2,9 @@
 #include <format>
 
 #include "dataio.h"
+#include "hostAndGpuInterfaces/CudaHostAndGpuDeviceInterface.h"
 
-MirroredAllocator::MirroredAllocator(HostAndGpuDeviceInterface *device) : device(device) {
+MirroredAllocator::MirroredAllocator(const std::shared_ptr<HostAndGpuDeviceInterface> &device) : device(device) {
 }
 
 MirroredAllocator::~MirroredAllocator() {
@@ -109,149 +110,32 @@ bool MirroredAllocator::isDrained() const {
     return allocAndHandOffGpuData.empty();
 }
 
-CudaHostAndGpuDeviceInterface::CudaHostAndGpuDeviceInterface() {
-    if (const auto err = cudaDeviceGetDefaultMemPool(&pool, /*device=*/0); err != cudaSuccess) {
-        throw std::runtime_error("cudaDeviceGetDefaultMemPool failed");
-    }
+std::shared_ptr<HostAndGpuDeviceInterface> ResourcePool::deviceForNewResourcePool;
 
-    setGpuMemoryPoolReleaseThreshold(1);
-
-    if (const cudaError_t err = cudaStreamCreate(&stream); err != cudaSuccess) {
-        throw std::runtime_error("cudaStreamCreate failed.");
-    }
-}
-
-uint8_t *CudaHostAndGpuDeviceInterface::hostMemoryChangeSizeAndInvalidateMemory(const size_t size) {
-    if (!stream) {
-        if (const cudaError_t err = cudaStreamCreate(&stream); err != cudaSuccess) {
-            throw std::runtime_error("cudaStreamCreate failed.");
-        }
-    } else {
-        cudaStreamSynchronize(stream);
-    }
-
-    freeEverything();
-
-    if (const cudaError_t err = cudaHostAlloc(&hostData, size, cudaHostAllocWriteCombined); err != cudaSuccess) {
-        throw std::runtime_error(std::format("cudaHostAlloc failed to allocate {} MB", size / 1024 / 1024));
-    }
-
-    return hostData;
-}
-
-uint8_t *CudaHostAndGpuDeviceInterface::gpuMemoryIncreasePoolSizeAndInvalidateMemory(const size_t size) {
-    LOG_DEBUG("Increasing gpu memory pool to {}", size);
-    setGpuMemoryPoolReleaseThreshold(size);
-
-    if (!stream) {
-        if (const cudaError_t err = cudaStreamCreate(&stream); err != cudaSuccess) {
-            throw std::runtime_error("cudaStreamCreate failed.");
-        }
-    }
-
-    if (gpuData != nullptr) {
-        if (const auto err = cudaFreeAsync(gpuData, stream); err != cudaSuccess) {
-            throw std::runtime_error("cudaFreeAsync warm-up free failed");
-        }
-    }
-
-    if (const auto err = cudaMallocAsync(&gpuData, size, stream); err != cudaSuccess) {
-        throw std::runtime_error("cudaMallocAsync warm-up alloc failed");
-    }
-
-    return gpuData;
-}
-
-void CudaHostAndGpuDeviceInterface::freeEverything() {
-    if (hostData != nullptr) {
-        if (const cudaError_t err = cudaFreeHost(hostData); err != cudaSuccess) {
-            throw std::runtime_error("cudaFreeHost failed to free data.");
-        }
-    }
-
-    // The gpu memory is handled by a cuda memory pool.
-    // Beyond destroying the stream, no additional cleanup is required.
-
-    if (stream) {
-        if (const auto err = cudaStreamDestroy(stream); err != cudaSuccess) {
-            LOG_WARNING("cudaStreamDestroy failed.");
-        }
-        stream = {};
-    }
-
-    hostData = nullptr;
-    gpuData = nullptr;
-}
-
-Fence CudaHostAndGpuDeviceInterface::insertNextFenceIntoStream() {
-    cudaEvent_t event;
-    if (cudaEventCreateWithFlags(&event, cudaEventDisableTiming) != cudaSuccess) {
-        throw std::runtime_error("cudaEventCreate failed.");
-    }
-
-    if (cudaEventRecord(event, stream) != cudaSuccess) {
-        throw std::runtime_error("cudaEventRecord failed.");
-    }
-
-    auto fence = eventIndex.fetch_add(1);
-    fenceToEventMap.emplace(fence, event);
-    return {fence};
-}
-
-void CudaHostAndGpuDeviceInterface::synchronizeFenceWithConsumerStream(const Fence fence,
-                                                                       const ConsumerStream consumerStream) {
-    const auto found = fenceToEventMap.find(fence.id);
-    if (found == fenceToEventMap.end()) {
-        throw std::runtime_error("Fence is invalid.");
-    }
-
-    // NOLINTNEXTLINE(performance-no-int-to-ptr)
-    auto consumer = reinterpret_cast<cudaStream_t>(consumerStream.id);
-    cudaEvent_t event = found->second;
-    if (cudaStreamWaitEvent(consumer, event) != cudaSuccess) {
-        throw std::runtime_error("cudaStreamWaitEvent failed.");
-    }
-
-    fenceToEventMap.erase(found);
-    if (cudaEventDestroy(event) != cudaSuccess) {
-        throw std::runtime_error("cudaEventDestroy failed.");
-    }
-}
-
-void CudaHostAndGpuDeviceInterface::synchronizeFenceWithHostDevice(const Fence fence) {
-    const auto found = fenceToEventMap.find(fence.id);
-    if (found == fenceToEventMap.end()) {
-        throw std::runtime_error("Fence is invalid.");
-    }
-
-    const cudaEvent_t event = found->second;
-    if (cudaEventSynchronize(event) != cudaSuccess) {
-        throw std::runtime_error("cudaEventSynchronize failed.");
-    }
-
-    fenceToEventMap.erase(found);
-    if (cudaEventDestroy(event) != cudaSuccess) {
-        throw std::runtime_error("cudaEventDestroy failed.");
-    }
-}
-
-void CudaHostAndGpuDeviceInterface::copyFromHostToGpuMemory(const uint8_t *host, uint8_t *gpu, const uint32_t size) {
-    if (cudaMemcpyAsync(gpu, host, size, cudaMemcpyHostToDevice, stream) != cudaSuccess) {
-        throw std::runtime_error("cudaMemcpyAsync failed.");
-    }
-}
-
-void CudaHostAndGpuDeviceInterface::setGpuMemoryPoolReleaseThreshold(size_t bytes) const {
-    if (const auto err = cudaMemPoolSetAttribute(pool, cudaMemPoolAttrReleaseThreshold, &bytes);
-        err != cudaSuccess) {
-        throw std::runtime_error("cudaMemPoolSetAttribute(cudaMemPoolAttrReleaseThreshold) failed");
-    }
-}
+ResourcePool *ResourcePool::singleton;
 
 ResourcePool &ResourcePool::get() {
     // Intentional leak to avoid implicit destruction order issues; use shutdown() to free resources explicitly.
-    static auto *instance = new ResourcePool();
-    return *instance;
+    if (!singleton) {
+        if (!deviceForNewResourcePool) {
+            // This needs to be in here, because the augmentations, compression etc. are tested without sanitizers.
+            // The sanitizers don't play well with CUDA, or any GPU library in general.
+            // So we cannot just eagerly initialize them in library.cpp, which leads to this unfortunate code.
+            deviceForNewResourcePool = std::make_shared<CudaHostAndGpuDeviceInterface>();
+        }
+        singleton = new ResourcePool(deviceForNewResourcePool);
+    }
+    return *singleton;
+}
+
+void ResourcePool::shutdownLazily() {
+    if (singleton) {
+        get().shutdown();
+    }
+}
+
+void ResourcePool::setDeviceForNewResourcePool(const std::shared_ptr<HostAndGpuDeviceInterface> &device) {
+    deviceForNewResourcePool = device;
 }
 
 MirroredAllocator *ResourcePool::getAllocator() noexcept {
@@ -267,27 +151,28 @@ bool PrefetchItem::operator<(const PrefetchItem &other) const {
     return datasetStartingOffset > other.datasetStartingOffset;
 }
 
-ResourcePool::ResourcePool() : allocator(&device), dl(nullptr),
-                               threadPool(
-                                   [this](const size_t threadIdx, const std::atomic_uint32_t &desiredThreadCount) {
-                                       this->threadMain(threadIdx, desiredThreadCount);
-                                   },
-                                   0,
-                                   [this] {
-                                       // Allow the threads to continue exection.
-                                       genChangeSendOff->count_down();
-                                   },
-                                   [this] { wakeupAllThreads(); }) {
+ResourcePool::ResourcePool(const std::shared_ptr<HostAndGpuDeviceInterface> &device)
+    : device(device), allocator(device), dl(nullptr),
+      threadPool(
+          [this](const size_t threadIdx, const std::atomic_uint32_t &desiredThreadCount, uint64_t initialGenIdx) {
+              this->threadMain(threadIdx, desiredThreadCount, initialGenIdx);
+          },
+          0,
+          [this] {
+              // Allow the threads to continue exection.
+              genChangeSendOff->count_down();
+          },
+          [this] { wakeupAllThreads(); }) {
 }
 
 ResourcePool::~ResourcePool() {
-    threadPool.resize(0);
+    threadPool.resize(0, genIdx.load());
     prefetchCacheNotify.notify_all();
 }
 
 void ResourcePool::shutdown() {
     // Stop threads and wake any waiters.
-    threadPool.resize(0);
+    threadPool.resize(0, genIdx.load());
 
     // Wait for allocator to drain if there is a current dataloader.
     if (dl != nullptr) {
@@ -312,7 +197,8 @@ void ResourcePool::wakeupAllThreads() {
     // TODO (i don't think this is necessary): genChangeSendOff->count_down();
 }
 
-void ResourcePool::threadMain(const size_t threadIdx, const std::atomic_uint32_t &desiredThreadCount) {
+void ResourcePool::threadMain(const size_t threadIdx, const std::atomic_uint32_t &desiredThreadCount,
+                              const uint64_t initialGenIdx) {
 #define IS_SHUTDOWN_REQUIRED() (threadIdx >= desiredThreadCount.load())
 #define IS_GENCHANGE_REQUIRED() (rememberedGenIdx != genIdx.load())
 #define IS_SHUTDOWN_OR_GENCHANGE_REQUIRED() (IS_SHUTDOWN_REQUIRED() || IS_GENCHANGE_REQUIRED())
@@ -325,17 +211,22 @@ void ResourcePool::threadMain(const size_t threadIdx, const std::atomic_uint32_t
     if (IS_GENCHANGE_REQUIRED()) { continue; }
 
     LOG_DEBUG("thread {} started", threadIdx);
+    uint64_t rememberedGenIdx = initialGenIdx;
 
-    const auto temporaryArena = std::make_unique<uint8_t[]>(dl->outputBatchMemorySize);
+    const auto inputBuffer = std::make_unique<uint8_t[]>(dl->maxInputBatchMemorySize);
+    auto inputArena = BumpAllocator(inputBuffer.get(), dl->maxInputBatchMemorySize);
 
-    const size_t tmpAllocSize = dl->maxInputBatchMemorySize + dl->outputBatchMemorySize;
-    auto tmpAlloc = BumpAllocator(temporaryArena.get(), tmpAllocSize);
+    const auto outputBuffer = std::make_unique<uint8_t[]>(dl->outputBatchMemorySize);
+    auto outputArena = BumpAllocator(outputBuffer.get(), dl->outputBatchMemorySize);
 
-    uint64_t rememberedGenIdx = genIdx.load();
+    const size_t augPipeBufSize = dl->augPipe->getMaximumRequiredBufferSize();
+    const auto augPipeBuffer1 = std::make_unique<uint8_t[]>(augPipeBufSize);
+    const auto augPipeBuffer2 = std::make_unique<uint8_t[]>(augPipeBufSize);
 
     while (!IS_SHUTDOWN_REQUIRED()) {
         if (IS_GENCHANGE_REQUIRED()) {
             genChangeAssemble->count_down();
+            LOG_DEBUG("thread {} waiting for genchange", threadIdx);
             rememberedGenIdx = genIdx.load();
             genChangeSendOff->wait();
             continue;
@@ -345,53 +236,68 @@ void ResourcePool::threadMain(const size_t threadIdx, const std::atomic_uint32_t
         const auto [startingOffset, batchPaths] = dl->batchedDataset.getNextInFlightBatch();
         auto &bds = dl->batchedDataset;
         auto &ds = bds.getDataset();
-        const std::vector<ItemKey> &itemKeys = ds.getDataSource()->getItemKeys();
+        const std::vector<ItemKey> &itemKeys = ds->getDataSource()->getItemKeys();
 
         // For each head, load all batch items into one contigous cpu array.
         std::vector<CpuAllocation> inputAllocsOnHost;
         std::vector<uint8_t *> outputAllocsOnHost;
-        tmpAlloc.reset();
+        inputArena.reset();
+        outputArena.reset();
         for (size_t i = 0; i < itemKeys.size(); i++) {
             // The convention is that data sources always read into cpu memory, even if no
             // augmentations are applied. This is because we cannot guarantee,
             // that the decoders never read from pinned memory.
             // Reading from pinned memory can be very slow, as it is not always backed by RAM.
-            inputAllocsOnHost.push_back(ds.getDataSource()->loadItemSliceIntoContigousBatch(
-                tmpAlloc, batchPaths, i, dl->maxBytesOfEveryInput[i]
+            inputAllocsOnHost.push_back(ds->getDataSource()->loadItemSliceIntoContigousBatch(
+                inputArena, batchPaths, i, dl->maxBytesOfInputPerItemOfItemKey[i]
             ));
-            outputAllocsOnHost.push_back(tmpAlloc.allocate(dl->outputBatchMemorySize));
+            outputAllocsOnHost.push_back(outputArena.allocate(dl->bytesOfOutputOfItemKey[i]));
         }
         DO_SHUTDOWN_OR_GENCHANGE_IF_NECESSARY()
 
+
         // TODO: Move augmentations further up.
         // TODO: Technically, no pair has to be available while we are still decoding and augmenting.
+        bool lastSchemaIsLeakingMemory = false;
+        DataProcessingSchema lastSchema;
         for (size_t i = 0; i < itemKeys.size(); i++) {
             const auto itemKey = itemKeys[i];
             const CpuAllocation &inputAlloc = inputAllocsOnHost[i];
             uint8_t *outputAlloc = outputAllocsOnHost[i];
-            DataProcessingSchema lastSchema;
             switch (itemKey.type) {
                 case ItemType::NONE:
+                    if (itemKey.probeResult.shape != inputAlloc.shapes[i]) {
+                        throw std::runtime_error("Item type NONE requires the shape to be constant across files.");
+                    }
+
                     // TODO (Speed): Zero copy.
-                    memcpy(outputAlloc, inputAlloc.batchBuffer.uint8, dl->outputSizesPerBatchOfItem[0]);
+                    memcpy(outputAlloc, inputAlloc.batchBuffer.uint8, dl->bytesOfOutputOfItemKey[i]);
+                    std::printf("probe.shape==%lu\n", dl->bytesOfOutputOfItemKey[i]);
                     break;
                 case ItemType::POINTS:
+                    throw std::runtime_error("done");
                     ASSERT(!lastSchema.inputShapesPerAug.empty());
-                    dl->augPipe.augmentWithPoints(
+                    dl->augPipe->augmentWithPoints(
                         inputAlloc.shapes,
                         itemKey.probeResult.dtype,
                         inputAlloc.batchBuffer.uint8,
+                        augPipeBuffer1.get(), augPipeBuffer2.get(),
                         outputAlloc,
                         lastSchema
                     );
                     break;
                 case ItemType::RASTER:
-                    lastSchema = dl->augPipe.getProcessingSchema(inputAlloc.shapes, startingOffset);
-                    dl->augPipe.augmentWithRaster(
+                    if (lastSchemaIsLeakingMemory) {
+                        dl->augPipe->freeProcessingSchema(lastSchema);
+                    }
+                    lastSchemaIsLeakingMemory = true;
+                    lastSchema = dl->augPipe->getProcessingSchema(inputAlloc.shapes, startingOffset);
+                    dl->augPipe->augmentWithRaster(
                         itemKey.probeResult.dtype,
                         inputAlloc.batchBuffer.uint8,
                         outputAlloc,
-                        dl->maxBytesOfEveryInput,
+                        augPipeBuffer1.get(), augPipeBuffer2.get(),
+                        dl->maxBytesOfInputPerItemOfItemKey[i],
                         lastSchema
                     );
                     break;
@@ -399,9 +305,7 @@ void ResourcePool::threadMain(const size_t threadIdx, const std::atomic_uint32_t
                     throw std::runtime_error("Unsupported spatial hint in worker thread loop.");
             }
         }
-
         DO_SHUTDOWN_OR_GENCHANGE_IF_NECESSARY()
-
 
         // At this point, the thread has loaded the batch into cpu ram.
         // As soon as pinned memory is available, we start copying to the gpu.
@@ -438,24 +342,23 @@ void ResourcePool::threadMain(const size_t threadIdx, const std::atomic_uint32_t
 
 
         ASSERT(allocations.getArena().host != nullptr);
-        std::memcpy(allocations.getArena().host, tmpAlloc.getArena(), dl->outputBatchMemorySize);
         std::vector<uint8_t *> gpuAllocations;
         std::vector<Fence> fences;
         for (size_t itemKeyIdx = 0; itemKeyIdx < itemKeys.size(); itemKeyIdx++) {
-            const auto &[batchBuffer, _1] = inputAllocsOnHost[itemKeyIdx];
-            const size_t batchBufferSize = dl->outputSizesPerBatchOfItem[itemKeyIdx];
+            const auto &batchBuffer = outputAllocsOnHost[itemKeyIdx];
+            const size_t batchBufferSize = dl->bytesOfOutputOfItemKey[itemKeyIdx];
             const auto &[host, gpu, _2] = allocations.allocate(batchBufferSize);
 
             // Start async upload to gpu memory as soon as possible.
             // TODO: This also locked a mutex. Maybe this is still necessary?
 
-            std::memcpy(host, batchBuffer.uint8, batchBufferSize);
+            std::memcpy(host, batchBuffer, batchBufferSize);
             // TODO: Think about pinned memory availabilty. I think this is right, but recheck.
 
-            device.copyFromHostToGpuMemory(host, gpu, batchBufferSize);
+            device->copyFromHostToGpuMemory(host, gpu, batchBufferSize);
             gpuAllocations.push_back(gpu);
             // TODO: This needs to be synchronized by mutex?
-            fences.push_back(device.insertNextFenceIntoStream());
+            fences.push_back(device->insertNextFenceIntoStream());
         }
         DO_SHUTDOWN_OR_GENCHANGE_IF_NECESSARY()
 
@@ -494,12 +397,16 @@ PrefetchItem ResourcePool::acquireAndGetNextBatch(const std::shared_ptr<DataLoad
         // The protocol allows for a clean state transition:
         // Wait for all threads to exit their generational loops.
         // Only then can you safely reinitialize everything.
+        LOG_DEBUG("Waiting for Gen change send-off.");
         genChangeSendOff = std::make_unique<std::latch>(1);
+        LOG_DEBUG("Gen change sent-off!");
         if (dl != nullptr) {
+            LOG_DEBUG("Assembling {} threads.", dl->numThreads);
             genChangeAssemble = std::make_unique<std::latch>(dl->numThreads);
             // Wait for all threads to stop working.
             wakeupAllThreads();
             genChangeAssemble->wait();
+            LOG_DEBUG("Assembled threads.");
 
             // Wait for all memory to be returned from the dlpack consumer (i.e. jax, tf., pytorch).
             {
@@ -515,14 +422,14 @@ PrefetchItem ResourcePool::acquireAndGetNextBatch(const std::shared_ptr<DataLoad
         dl = dataLoader;
         prefetchCache = std::priority_queue<PrefetchItem>();
         allocator.reserveAtLeast(dataLoader->prefetchSize, dataLoader->outputBatchMemorySize);
-        threadPool.resize(dataLoader->numThreads);
+        threadPool.resize(dataLoader->numThreads, genIdx.load());
     }
 
     // Fetch the next batch.
     std::unique_lock lock(prefetchCacheMutex);
     prefetchCacheNotify.wait(lock, [this] { return !prefetchCache.empty(); });
 
-    const PrefetchItem &prefetchItem = prefetchCache.top();
+    const PrefetchItem prefetchItem = prefetchCache.top();
     prefetchCache.pop();
     LOG_DEBUG("acquireAndGetNextBatch datasetStartingOffset={}", prefetchItem.datasetStartingOffset);
     dl->batchedDataset.popWaitingBatch(prefetchItem.datasetStartingOffset);
@@ -532,10 +439,10 @@ PrefetchItem ResourcePool::acquireAndGetNextBatch(const std::shared_ptr<DataLoad
     return prefetchItem;
 }
 
-void ResourcePool::synchronizeConsumerStream(const Fence fence, const ConsumerStream consumerStream) {
-    device.synchronizeFenceWithConsumerStream(fence, consumerStream);
+void ResourcePool::synchronizeConsumerStream(const Fence fence, const ConsumerStream consumerStream) const {
+    device->synchronizeFenceWithConsumerStream(fence, consumerStream);
 }
 
-void ResourcePool::synchronizeHostDevice(const Fence fence) {
-    device.synchronizeFenceWithHostDevice(fence);
+void ResourcePool::synchronizeHostDevice(const Fence fence) const {
+    device->synchronizeFenceWithHostDevice(fence);
 }

@@ -6,7 +6,7 @@
 ThreadPool::ThreadPool(const NonblockingThreadMain &_threadMain, const size_t _threadCount,
                        WakeupForPoolResize _wakeupForPoolDownsize,
                        WakeupForPoolResize _wakeupForPoolShutdown)
-    : threadMain([_threadMain](size_t, const std::atomic_uint32_t &) { _threadMain(); }),
+    : threadMain([_threadMain](size_t, const std::atomic_uint32_t &, const uint64_t) { _threadMain(); }),
       desiredThreadCount(_threadCount),
       wakeupForPoolDownsize(std::move(_wakeupForPoolDownsize)),
       wakeupForPoolShutdown(std::move(_wakeupForPoolShutdown)) {
@@ -21,7 +21,7 @@ ThreadPool::ThreadPool(BlockingThreadMain _threadMain, const size_t _threadCount
       wakeupForPoolShutdown(std::move(_wakeupForPoolShutdown)) {
 }
 
-void ThreadPool::resize(const size_t newThreadCount) {
+void ThreadPool::resize(const size_t newThreadCount, const uint64_t initialGenIdx) {
     LOG_DEBUG("ThreadPool::resize from {} to {} begin", desiredThreadCount.load(), newThreadCount);
 
     // Use the actual number of running threads as the current size;
@@ -51,19 +51,19 @@ void ThreadPool::resize(const size_t newThreadCount) {
 
     // Upsize, if necessary.
     for (size_t i = oldThreadCount; i < newThreadCount; i++) {
-        threads.emplace_back(&ThreadPool::extendedThreadMain, this, i);
+        threads.emplace_back(&ThreadPool::extendedThreadMain, this, i, initialGenIdx);
     }
 
     LOG_DEBUG("ThreadPool::resize end");
 }
 
 ThreadPool::~ThreadPool() noexcept {
-    resize(0);
+    resize(0, 0);
 }
 
-void ThreadPool::extendedThreadMain(const size_t threadIdx) const {
+void ThreadPool::extendedThreadMain(const size_t threadIdx, const uint64_t initialGenIdx) const {
     try {
-        threadMain(threadIdx, desiredThreadCount);
+        threadMain(threadIdx, desiredThreadCount, initialGenIdx);
     } catch (const std::exception &e) {
         LOG_ERROR("Thread main threw exception: {}", e.what());
     }

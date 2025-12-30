@@ -44,7 +44,7 @@ Feature List (- not begun, w working, + solved):
     + make pipeline work; only bilinear resize for now
     + vectorisation api
     + tests for augmentations
-    - test augmentations with inconsistent input shapes
+    w test augmentations with inconsistent input shapes
 
     Compression:
     - enable compressed file format use in dataloader
@@ -55,7 +55,9 @@ Feature List (- not begun, w working, + solved):
     w proper memory arenas in all perf. critical areas
     - zero-copy augmentation output to pinned memory
     + fix item keys order
-    - graphics card backend (e.g. cuda) selectable at runtime
+    + graphics card backend (e.g. cuda) selectable at runtime (default to cuda though)
+    - enable clang-tidy for all const modernisations
+    w support jax, pytorch and tensorflow bindings for IDataLoader out of the box
 
 
 Plan for how to select the backend:

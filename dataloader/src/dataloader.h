@@ -3,9 +3,9 @@
 
 #include "dataio.h"
 #include "resource.h"
+#include "pybind11_includes.h"
 #include <atomic>
 #include <dlpack/dlpack.h>
-#include <pybind11/pybind11.h>
 
 class ResourceClient;
 
@@ -27,32 +27,32 @@ private:
 class DataLoader : public std::enable_shared_from_this<DataLoader> {
 public:
     DataLoader(
-        Dataset &_dataset,
+        const std::shared_ptr<Dataset> &_dataset,
         size_t _batchSize,
         size_t _numThreads,
         size_t _prefetchSize,
-        DataAugmentationPipe &_augPipe
+        const std::shared_ptr<DataAugmentationPipe> &_augPipe
     );
 
     DataLoader(const DataLoader &) = delete;
 
     DataLoader(DataLoader &&) = delete;
 
-    pybind11::dict getNextBatch();
+    std::pair<pybind11::dict, pybind11::dict> getNextBatch();
 
     static std::atomic_uint64_t nextId;
     static std::mutex concurrencyMutex; // TODO: Maybe this is not necessary. Maybe remove this later.
     uint64_t id;
     BatchedDataset batchedDataset;
-    DataAugmentationPipe augPipe;
+    std::shared_ptr<DataAugmentationPipe> augPipe;
     const size_t batchSize;
     const size_t numThreads;
     const size_t prefetchSize;
 
     // Metadata about inputs/outputs:
-    std::vector<size_t> maxBytesOfEveryInput;
-    std::vector<size_t> outputSizesPerBatchOfItem;
-    std::vector<size_t> outputMetadataSizesPerBatchOfItem;
+    std::vector<size_t> maxBytesOfInputPerItemOfItemKey;
+    std::vector<size_t> bytesOfOutputOfItemKey;
+    std::vector<size_t> bytesOfMetadataOutputPerItemOfItemKey;
     size_t maxInputBatchMemorySize{};
     size_t outputBatchMemorySize{};
 };

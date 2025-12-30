@@ -143,8 +143,8 @@ def run_clang_tidy(files: List[str]) -> bool:
         return all(results)
 
 
-def run_tests_with_asan(_: List[str]) -> bool:
-    print_info("→ Building with AddressSanitizer...")
+def run_selected_tests_with_san(_: List[str]) -> bool:
+    print_info("→ Building with Sanitizers...")
     if not run_command([f"make", "install-debug-asan"]):
         return False
 
@@ -153,6 +153,8 @@ def run_tests_with_asan(_: List[str]) -> bool:
         return False
     return True
 
+def run_other_tests(_: List[str]) -> bool:
+    pass # TODO 
 
 def main():
     print(f"{BOLD}{'═' * 50}{RESET}")
@@ -166,8 +168,10 @@ def main():
         checks.append(("CppCheck", run_cpp_check))
     if "SKIP_CLANGTIDY" not in os.environ:
         checks.append(("Clang-Tidy", run_clang_tidy))
-    if "SKIP_ASAN" not in os.environ:
-        checks.append(("Tests (ASan)", run_tests_with_asan))
+    if "SKIP_ASAN_USAN" not in os.environ:
+        checks.append(("Selected Tests (ASan, USan)", run_selected_tests_with_san))
+    if "SKIP_OTHER_TESTS" not in os.environ:
+        checks.append(("Other Tests", run_other_tests))
 
     files = get_all_h_cpp_files()
     if not files:

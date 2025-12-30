@@ -2,8 +2,7 @@
 #include "dataloader.h"
 #include "compression.h"
 #include "resource.h"
-#include <pybind11/numpy.h>
-#include <pybind11/stl.h>
+#include "pybind11_includes.h"
 
 #include "dataAugmenter/FlipAugmentation.h"
 #include "dataAugmenter/PadAugmentation.h"
@@ -23,9 +22,9 @@ static void bindDatasetRelated(const py::module &m) {
             .value("FLOAT32", DType::FLOAT32)
             .export_values();
 
-    py::class_<Dataset>(m, "Dataset")
+    py::class_<Dataset, std::shared_ptr<Dataset>>(m, "Dataset")
             .def(py::init<std::shared_ptr<IDataSource>,
-                std::vector<IDataAugmentation *>,
+                std::vector<std::shared_ptr<IDataAugmentation> >,
                 const pybind11::function &,
                 bool>())
             .def("getEntries", [](const Dataset &self) {
@@ -34,7 +33,7 @@ static void bindDatasetRelated(const py::module &m) {
             .def("splitTrainValidationTest", &Dataset::splitTrainValidationTest);
 
     py::class_<BatchedDataset>(m, "BatchedDataset")
-            .def(py::init<const Dataset &, size_t>())
+            .def(py::init<const std::shared_ptr<Dataset> &, size_t>())
             .def("getNextBatch", &BatchedDataset::getNextBatch)
             .def("__len__", &BatchedDataset::getNumberOfBatches);
 }
@@ -46,8 +45,11 @@ static void bindDataloaderRelated(const py::module &m) {
 
     // TODO Comment(getNextBatch): Important convention is that memory of the last batch gets invalid when you call getNextBatch!
     py::class_<DataLoader, std::shared_ptr<DataLoader> >(m, "DataLoader")
-            .def(py::init<Dataset &, int, int, int, DataAugmentationPipe &>())
-            .def("getNextBatch", &DataLoader::getNextBatch)
+            .def(py::init<const std::shared_ptr<Dataset> &, int, int, int, const std::shared_ptr<DataAugmentationPipe> &>())
+            .def("getNextBatch", [](DataLoader &self) {
+                std::pair<py::dict, py::dict> result = self.getNextBatch();
+                return py::make_tuple(result.first, result.second);
+            })
             .def("__len__", [](const DataLoader &self) -> size_t {
                 return self.batchedDataset.getNumberOfBatches();
             });
@@ -102,8 +104,16 @@ static void bindCompressionRelated(const py::module &m) {
 }
 
 static void bindDataSources(const py::module &m) {
+    py::enum_<ItemType>(m, "ItemType")
+            .value("NONE", ItemType::NONE)
+            .value("RASTER", ItemType::RASTER)
+            .value("POINTS", ItemType::POINTS)
+            .export_values();
+
     py::class_<SubdirToDictname>(m, "SubdirToDictname")
-            .def(py::init<std::string, std::string>());
+            .def(py::init<std::string, std::string, ItemType>());
+
+    py::class_<IDataSource, std::shared_ptr<IDataSource> >(m, "IDataSource"); // NOLINT(bugprone-unused-raii)
 
     py::class_<FlatDataSource, IDataSource, std::shared_ptr<FlatDataSource> >(m, "FlatDataSource")
             .def(py::init<std::string, std::vector<SubdirToDictname> >(),
@@ -133,15 +143,15 @@ static DType getAndAssertEqualityOfDType(const py::array &array1, const py::arra
 }
 
 static void bindAugmentations(const py::module &m) {
-    py::class_<IDataAugmentation>(m, "IDataAugmentation"); // NOLINT(bugprone-unused-raii)
+    py::class_<IDataAugmentation, std::shared_ptr<IDataAugmentation> >(m, "IDataAugmentation"); // NOLINT(bugprone-unused-raii)
 
-    py::class_<FlipAugmentation, IDataAugmentation>(m, "FlipAugmentation")
+    py::class_<FlipAugmentation, IDataAugmentation, std::shared_ptr<FlipAugmentation> >(m, "FlipAugmentation")
             .def(py::init<float, float>())
             .def("get_item_settings", [](const FlipAugmentation &self, const std::vector<uint32_t> &inputShape,
                                          const uint64_t itemSeed) {
                 const py::dict pyBatch;
                 const void *propPtr = self.getDataOutputSchema(inputShape, itemSeed).itemProp;
-                const FlipProp *prop = static_cast<const FlipProp *>(propPtr);
+                const auto prop = static_cast<const FlipProp *>(propPtr);
                 pyBatch["does_horizontal_flip"] = prop->doesHorizontalFlip;
                 pyBatch["does_vertical_flip"] = prop->doesVerticalFlip;
                 return pyBatch;
@@ -154,10 +164,11 @@ static void bindAugmentations(const py::module &m) {
             .value("PAD_BOTTOM_RIGHT", PadSettings::PAD_BOTTOM_RIGHT)
             .export_values();
 
-    py::class_<PadAugmentation, IDataAugmentation>(m, "PadAugmentation")
+    py::class_<PadAugmentation, IDataAugmentation, std::shared_ptr<PadAugmentation> >(m, "PadAugmentation")
             .def(py::init<size_t, size_t, PadSettings>());
 
-    py::class_<RandomCropAugmentation, IDataAugmentation>(m, "RandomCropAugmentation")
+    py::class_<RandomCropAugmentation, IDataAugmentation, std::shared_ptr<RandomCropAugmentation> >(
+                m, "RandomCropAugmentation")
             .def(py::init<size_t, size_t, size_t, size_t>())
             .def("get_item_settings", [](const RandomCropAugmentation &self, const std::vector<uint32_t> &inputShape,
                                          const uint64_t itemSeed) {
@@ -171,7 +182,7 @@ static void bindAugmentations(const py::module &m) {
                 return pyBatch;
             });
 
-    py::class_<ResizeAugmentation, IDataAugmentation>(m, "ResizeAugmentation")
+    py::class_<ResizeAugmentation, IDataAugmentation, std::shared_ptr<ResizeAugmentation> >(m, "ResizeAugmentation")
             .def(py::init<uint32_t, uint32_t>());
 }
 
@@ -210,8 +221,8 @@ static void verifyArraysIntegrity(const py::array &array, const Shape &shape, co
 }
 
 static void bindDataProcessingPipe(const py::module &m) {
-    py::class_<DataAugmentationPipe>(m, "DataAugmentationPipe")
-            .def(py::init([](std::vector<IDataAugmentation *> augs, const std::vector<uint32_t> &maxIn,
+    py::class_<DataAugmentationPipe, std::shared_ptr<DataAugmentationPipe> >(m, "DataAugmentationPipe")
+            .def(py::init([](std::vector<std::shared_ptr<IDataAugmentation> > augs, const std::vector<uint32_t> &maxIn,
                              const uint32_t maxNumPoints, const uint32_t maxBytes) {
                 return new DataAugmentationPipe(std::move(augs), maxIn, maxNumPoints, maxBytes);
             }), py::keep_alive<1, 2>())
@@ -227,7 +238,7 @@ static void bindDataProcessingPipe(const py::module &m) {
                      );
                  })
             .def("augment_raster",
-                 [](DataAugmentationPipe &self, const py::array &input, const py::array &output,
+                 [](const DataAugmentationPipe &self, const py::array &input, const py::array &output,
                     const py::capsule &schemaCap) {
                      const auto inInfo = input.request();
                      const auto outInfo = output.request();
@@ -236,30 +247,26 @@ static void bindDataProcessingPipe(const py::module &m) {
                      // Alloc temporary buffers
                      const size_t bufSize = self.getMaximumRequiredBufferSize();
                      std::vector<uint8_t> b1(bufSize), b2(bufSize);
-                     self.setBuffer(b1.data(), b2.data());
 
                      const auto inputShape = toUint32Shape(inInfo);
                      verifyArraysIntegrity(input, inputShape, schema->inputShapesPerAug[0]);
                      verifyArraysIntegrity(output, toUint32Shape(outInfo), schema->outputShapesPerAug.back());
 
-                     std::vector<size_t> maxBytesOfEveryInput;
                      const auto inpShapeWithoutBatch = std::span(inputShape).subspan(1);
                      const DType dtype = getAndAssertEqualityOfDType(input, output);
-                     const size_t inputShapeWithoutBatchSize = getShapeSize(inpShapeWithoutBatch) * getWidthOfDType(dtype);
-                     for (size_t i = 0; i < inputShape[0]; i++) {
-                         maxBytesOfEveryInput.push_back(inputShapeWithoutBatchSize);
-                     }
+                     const size_t maxBytesOfInput = getShapeSize(inpShapeWithoutBatch) * getWidthOfDType(dtype);
 
                      self.augmentWithRaster(
                          dtype,
                          static_cast<const uint8_t *>(inInfo.ptr),
                          static_cast<uint8_t *>(outInfo.ptr),
-                         maxBytesOfEveryInput,
+                         b1.data(), b2.data(),
+                         maxBytesOfInput,
                          *schema
                      );
                  })
             .def("augment_points",
-                 [](DataAugmentationPipe &self, const py::array &input, const py::array &output,
+                 [](const DataAugmentationPipe &self, const py::array &input, const py::array &output,
                     const py::capsule &schemaCap) {
                      const auto inInfo = input.request();
                      const auto outInfo = output.request();
@@ -268,7 +275,6 @@ static void bindDataProcessingPipe(const py::module &m) {
                      // Alloc temporary buffers
                      const size_t bufSize = self.getMaximumRequiredBufferSize();
                      std::vector<uint8_t> b1(bufSize), b2(bufSize);
-                     self.setBuffer(b1.data(), b2.data());
 
                      verifyArraysIntegrity(input, toUint32Shape(inInfo), toUint32Shape(outInfo));
 
@@ -284,6 +290,7 @@ static void bindDataProcessingPipe(const py::module &m) {
                          getAndAssertEqualityOfDType(input, output),
                          static_cast<const uint8_t *>(inInfo.ptr),
                          static_cast<uint8_t *>(outInfo.ptr),
+                         b1.data(), b2.data(),
                          *schema
                      );
                  });
@@ -313,23 +320,28 @@ PYBIND11_MODULE(_core, m) {
     bindDatasetRelated(m);
     bindDataloaderRelated(m);
     bindCompressionRelated(m);
-
-    py::class_<IDataSource, std::shared_ptr<IDataSource> >(m, "IDataSource"); // NOLINT(bugprone-unused-raii)
     bindDataSources(m);
 
     // Expose augmentations and pipe for testing:
     bindAugmentations(m);
     bindDataProcessingPipe(m);
 
+    // By default, we run with a Cuda device interface. You can change it to custom implementations though.
+    m.def("set_device_for_resource_pool", [](const std::shared_ptr<HostAndGpuDeviceInterface> &device) {
+        ResourcePool::setDeviceForNewResourcePool(device);
+    });
+
     // Expose explicit shutdown for the global resource pool.
-    m.def("shutdown_resource_pool", [] { ResourcePool::get().shutdown(); });
+    m.def("shutdown_resource_pool", [] {
+        ResourcePool::shutdownLazily();
+    });
 
     // Ensure automatic shutdown on interpreter exit.
     try {
         const py::module_ atexit = py::module_::import("atexit");
         atexit.attr("register")(py::cpp_function([] {
             LOG_DEBUG_FUN("atexit", "atexit has been called");
-            ResourcePool::get().shutdown();
+            ResourcePool::shutdownLazily();
         }));
     } catch (const std::exception &e) {
         // Swallow errors to avoid import-time failures if atexit is unavailable.

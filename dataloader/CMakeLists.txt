@@ -1,5 +1,6 @@
 cmake_minimum_required(VERSION 3.28.0)
-option(ENABLE_ASAN "Enable address sanitizer." OFF)
+option(IS_DEBUG "Is Debug build." OFF)
+option(ENABLE_ASAN_USAN "Enable address and undefined sanitizer." OFF)
 set(VECTOR_EXTENSIONS "AVX2" CACHE STRING "Vector instruction set to use")
 
 set(CMAKE_GENERATOR Ninja)
@@ -72,6 +73,7 @@ add_subdirectory("${SPDLOG_SUBMODULE_DIR}" EXCLUDE_FROM_ALL) # EXCLUDE_FROM_ALL 
 python_add_library(_core MODULE
         src/dataloader.cpp
         src/resource.cpp
+        src/hostAndGpuInterfaces/CudaHostAndGpuDeviceInterface.cpp
         src/utils.cpp
         src/library.cpp
         src/dataio.cpp
@@ -114,22 +116,23 @@ target_compile_options(_core PRIVATE -fvisibility=hidden -Wall -Wextra -Wpedanti
 # Pass parameters to the program:
 target_compile_definitions(_core PRIVATE VERSION_INFO=${PROJECT_VERSION})
 target_compile_definitions(_core PRIVATE PLATFORM_LINUX)
-target_compile_definitions(_core PRIVATE $<$<CONFIG:Debug>: ENABLE_DEBUG=1>)
 target_compile_definitions(_core PRIVATE SIMD_SSE)
 target_compile_definitions(_core PRIVATE SIMD_AVX2)
 
 # Set logging level based on build type.
-target_compile_definitions(_core PRIVATE
-        $<$<CONFIG:Debug>: SPDLOG_ACTIVE_LEVEL=SPDLOG_LEVEL_TRACE>
-        $<$<CONFIG:Release>: SPDLOG_ACTIVE_LEVEL=SPDLOG_LEVEL_OFF>
-)
+if (IS_DEBUG)
+    target_compile_definitions(_core PRIVATE ENABLE_DEBUG=1 SPDLOG_ACTIVE_LEVEL=SPDLOG_LEVEL_TRACE)
+else()
+    target_compile_definitions(_core PRIVATE SPDLOG_ACTIVE_LEVEL=SPDLOG_LEVEL_OFF)
+endif()
 
 target_link_options(_core PRIVATE -fuse-ld=mold)
 
 # Address sanitizer if enabled.
-if (ENABLE_ASAN)
-    target_compile_options(_core PRIVATE -fsanitize=address)
-    target_link_options(_core PRIVATE -fsanitize=address)
+if (ENABLE_ASAN_USAN)
+    set(SANITIZER_FLAGS address,undefined) # ,implicit-integer-truncation,implicit-integer-sign-change)
+    target_compile_options(_core PRIVATE -fsanitize=${SANITIZER_FLAGS})
+    target_link_options(_core PRIVATE -fsanitize=${SANITIZER_FLAGS})
 endif()
 
 # Vectorisation:

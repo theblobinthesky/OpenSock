@@ -390,7 +390,7 @@ Compressor::Compressor(const CompressorOptions &_options) : options(_options),
 }
 
 void Compressor::start() {
-    threadPool.resize(options.numThreads);
+    threadPool.resize(options.numThreads, 0);
 
     std::unique_lock lock(workMutex);
     workNotify.wait(lock, [this] {

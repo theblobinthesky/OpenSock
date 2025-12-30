@@ -99,7 +99,7 @@ bool ResizeAugmentation::isAugmentWithRasterSkipped(
 
 void ResizeAugmentation::augmentWithRaster(
     const Shape &inputShape,
-    const Shape &outputShape,
+    const Shape &,
     const DType dtype,
     const uint8_t *__restrict__ inputData, uint8_t *__restrict__ outputData,
     ItemProp &

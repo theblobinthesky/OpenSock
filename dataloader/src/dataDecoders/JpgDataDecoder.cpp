@@ -29,11 +29,10 @@ void readJpg(const uint8_t *inputData, const size_t inputSize,
         throw std::runtime_error("Jpg file could not start decompression.");
     }
 
-    size_t row_stride = static_cast<size_t>(comprInfo.output_width) * comprInfo.output_components;
-
     // Allocate a one-row-high sample array.
+    const size_t rowStride = static_cast<size_t>(comprInfo.output_width) * comprInfo.output_components;
     while (comprInfo.output_scanline < comprInfo.output_height) {
-        JSAMPROW rowPtr = outputData + row_stride * comprInfo.output_scanline;
+        JSAMPROW rowPtr = outputData + rowStride * comprInfo.output_scanline;
         jpeg_read_scanlines(&comprInfo, &rowPtr, 1);
     }
 

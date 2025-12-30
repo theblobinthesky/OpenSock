@@ -12,7 +12,7 @@ bool isInputShapeHWN(const std::vector<uint32_t> &inputShape, const size_t N) {
 }
 
 void calcMaxRequiredBufferSize(
-    const std::vector<IDataAugmentation *> &dataAugmentations,
+    const std::vector<std::shared_ptr<IDataAugmentation> > &dataAugmentations,
     const std::vector<uint32_t> &maxAlongAllAxesInputShape,
     const uint32_t maxBytesPerElement,
     const uint32_t maxNumPoints,
@@ -24,7 +24,7 @@ void calcMaxRequiredBufferSize(
 
     auto lastMaxShape = std::vector(maxAlongAllAxesInputShape.begin() + 1, maxAlongAllAxesInputShape.end());
     for (size_t i = 0; i < dataAugmentations.size(); i++) {
-        const IDataAugmentation *dataAugmentation = dataAugmentations[i];
+        const std::shared_ptr<IDataAugmentation> dataAugmentation = dataAugmentations[i];
         const auto outputMaxShape = dataAugmentation->getMaxOutputShapeAxesIfSupported(lastMaxShape);
         if (outputMaxShape.empty()) {
             throw std::runtime_error(std::format("Augmentation {} pipline does not support maximum input shape {}",
@@ -43,20 +43,20 @@ void calcMaxRequiredBufferSize(
 }
 
 Shape calcStaticOutputShape(
-    const std::vector<IDataAugmentation *> &dataAugs,
+    const std::vector<std::shared_ptr<IDataAugmentation> > &dataAugs,
     const Shape &inputShape
 ) {
-    Shape lastShape = inputShape;
-    for (const auto dataAug: dataAugs) {
+    auto lastShape = std::vector(inputShape.begin() + 1, inputShape.end());
+    for (const auto &dataAug: dataAugs) {
         lastShape = dataAug->getDataOutputSchema(lastShape, 0).outputShape;
     }
     return lastShape;
 }
 
 DataAugmentationPipe::DataAugmentationPipe(
-    std::vector<IDataAugmentation *> dataAugmentations,
+    std::vector<std::shared_ptr<IDataAugmentation> > dataAugmentations,
     const Shape &rasterMaxInputShape, const uint32_t maxNumPoints, const uint32_t maxBytesPerElement
-) : dataAugs(std::move(dataAugmentations)), buffer1(nullptr), buffer2(nullptr),
+) : dataAugs(std::move(dataAugmentations)), maxRequiredBufferSize(0), maxIntermediateSizeForItem(0),
     rasterMaxInputShape(rasterMaxInputShape), maxNumPoints(maxNumPoints),
     staticOutputShape(calcStaticOutputShape(dataAugs, rasterMaxInputShape)) {
     if (!isOutputShapeStatic()) {
@@ -83,11 +83,6 @@ Shape DataAugmentationPipe::getStaticOutputShape() const {
     return staticOutputShape;
 }
 
-void DataAugmentationPipe::setBuffer(uint8_t *_buffer1, uint8_t *_buffer2) {
-    buffer1 = _buffer1;
-    buffer2 = _buffer2;
-}
-
 DataProcessingSchema DataAugmentationPipe::getProcessingSchema(const Shapes &inputShapes,
                                                                const uint64_t itemSeed) const {
     Shape outerOutputShape;
@@ -102,7 +97,7 @@ DataProcessingSchema DataAugmentationPipe::getProcessingSchema(const Shapes &inp
         std::vector<Shape> inputShapesForSlice, outputShapesForSlice;
 
         for (size_t i = 0; i < dataAugs.size(); i++) {
-            const IDataAugmentation *dataAugmentation = dataAugs[i];
+            const std::shared_ptr<IDataAugmentation> dataAugmentation = dataAugs[i];
             auto [outputShape, itemProp] = dataAugmentation->getDataOutputSchema(lastShapeForSlice, itemSeed);
             if (outputShape.empty()) {
                 throw std::runtime_error(std::format("Augmenter {} does not support input shape {}.",
@@ -148,11 +143,11 @@ void DataAugmentationPipe::freeProcessingSchema(const DataProcessingSchema &proc
 
 template<typename Func, typename SkipCheck>
 void dispatchInLoop(
-    const std::vector<IDataAugmentation *> &dataAugs,
+    const std::vector<std::shared_ptr<IDataAugmentation> > &dataAugs,
     uint8_t *__restrict__ buffer1, uint8_t *__restrict__ buffer2,
     const uint8_t *__restrict__ inputData, uint8_t *__restrict__ outputData,
     const Shapes &inputShapes, const Shape &outputShape, const DType dtype,
-    const std::vector<size_t> &maxBytesOfEveryInput,
+    const size_t maxBytesOfInputPerItemOfItemKey,
     const uint32_t maxIntermediateSizeOfItem,
     SkipCheck skipCheck, Func func
 ) {
@@ -171,7 +166,6 @@ void dispatchInLoop(
     const uint32_t outputSize = getShapeSize(outputShapeNoBatch) * getWidthOfDType(dtype);
 
     for (size_t i = 0; i < dataAugs.size(); i++) {
-        size_t inputOffset = 0;
         for (size_t b = 0; b < B; b++) {
             bool doesLaterAugSwap = false;
             for (size_t j = i + 1; j < dataAugs.size(); j++) {
@@ -183,7 +177,7 @@ void dispatchInLoop(
 
             if (!skipCheck(b, i)) {
                 const uint8_t *sliceOfInputForAug = (i == 0 || outputBufferIsUntouchedForSlice[b])
-                                                        ? inputData + inputOffset
+                                                        ? inputData + b * maxBytesOfInputPerItemOfItemKey
                                                         : swapBuffers1[b];
                 uint8_t *sliceOfOutputForAug = (i == dataAugs.size() - 1 || !doesLaterAugSwap)
                                                    ? outputData + b * outputSize
@@ -195,12 +189,9 @@ void dispatchInLoop(
                 swapBuffers2[b] = tmp;
                 outputBufferIsUntouchedForSlice[b] = false;
             }
-
-            inputOffset += maxBytesOfEveryInput[b];
         }
     }
 
-    size_t inputOffset = 0;
     for (size_t b = 0; b < B; b++) {
         if (outputBufferIsUntouchedForSlice[b]) {
             if (std::span(inputShapes[b]) != outputShapeNoBatch) {
@@ -211,11 +202,10 @@ void dispatchInLoop(
             }
             memcpy(
                 outputData + b * outputSize,
-                inputData + inputOffset,
+                inputData + b * maxBytesOfInputPerItemOfItemKey,
                 outputSize
             );
         }
-        inputOffset += maxBytesOfEveryInput[b];
     }
 }
 
@@ -223,6 +213,7 @@ void DataAugmentationPipe::augmentWithPoints(
     const Shapes &shapes,
     const DType dtype,
     const uint8_t *__restrict__ inputData, uint8_t *__restrict__ outputData,
+    uint8_t *__restrict__ buffer1, uint8_t *__restrict__ buffer2,
     const DataProcessingSchema &schema
 ) const {
     if (isUnsignedDType(dtype)) {
@@ -252,17 +243,14 @@ void DataAugmentationPipe::augmentWithPoints(
         shapes[0][1]
     };
 
-    std::vector<size_t> maxBytesOfEveryInput;
+    std::vector<size_t> maxBytesOfInputPerItemOfItemKey;
     const std::span outputShapeNoBatch = std::span(outputShape).subspan(1);
-    const size_t outputBytes = getShapeSize(outputShapeNoBatch) * getWidthOfDType(dtype);
-    for (size_t i = 0; i < shapes.size(); i++) {
-        maxBytesOfEveryInput.push_back(outputBytes);
-    }
+    const size_t maxBytesOfInput = getShapeSize(outputShapeNoBatch) * getWidthOfDType(dtype);
 
     dispatchInLoop(dataAugs, buffer1, buffer2,
                    inputData, outputData,
                    shapes, outputShape,
-                   dtype, maxBytesOfEveryInput,
+                   dtype, maxBytesOfInput,
                    maxIntermediateSizeForItem,
                    [&](const size_t b, const size_t i) {
                        const auto dataAug = dataAugs[i];
@@ -279,7 +267,8 @@ void DataAugmentationPipe::augmentWithPoints(
 void DataAugmentationPipe::augmentWithRaster(
     const DType dtype,
     const uint8_t *__restrict__ inputData, uint8_t *__restrict__ outputData,
-    const std::vector<size_t> &maxBytesOfEveryInput,
+    uint8_t *__restrict__ buffer1, uint8_t *__restrict__ buffer2,
+    const size_t maxBytesOfInputPerItemOfItemKey,
     const DataProcessingSchema &schema
 ) const {
     // TODO: Shapes can be different!!!!!!!!!!!!!
@@ -288,7 +277,7 @@ void DataAugmentationPipe::augmentWithRaster(
     dispatchInLoop(dataAugs, buffer1, buffer2,
                    inputData, outputData,
                    inputShapes, schema.outputShape,
-                   dtype, maxBytesOfEveryInput,
+                   dtype, maxBytesOfInputPerItemOfItemKey,
                    maxIntermediateSizeForItem,
                    [&](const size_t b, const size_t i) {
                        const auto dataAug = dataAugs[i];
@@ -319,8 +308,8 @@ Shape DataAugmentationPipe::getRasterMaxInputShape() const {
 }
 
 bool DataAugmentationPipe::isOutputShapeStatic() const {
-    for (IDataAugmentation *dataAugmentation: dataAugs) {
-        if (dataAugmentation->isOutputShapeDetStaticExceptForBatchDim()) {
+    for (const auto &dataAug: dataAugs) {
+        if (dataAug->isOutputShapeDetStaticExceptForBatchDim()) {
             return true;
         }
     }

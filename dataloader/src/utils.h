@@ -60,7 +60,7 @@ std::string formatVector(const std::vector<T> &vals, const char joinChar = ',') 
 
 using NonblockingThreadMain = std::function<void()>;
 
-using BlockingThreadMain = std::function<void(size_t, const std::atomic_uint32_t &)>;
+using BlockingThreadMain = std::function<void(size_t, const std::atomic_uint32_t &, uint64_t)>;
 
 // Called by the pool when resizing down, so blocked workers can be woken up.
 using WakeupForPoolResize = std::function<void()>;
@@ -75,7 +75,7 @@ public:
                         WakeupForPoolResize _wakeupForPoolDownsize = {},
                         WakeupForPoolResize _wakeupForPoolShutdown = {});
 
-    void resize(size_t newThreadCount);
+    void resize(size_t newThreadCount, uint64_t initialGenIdx);
 
     ThreadPool &operator=(ThreadPool &&pool) noexcept = delete;
 
@@ -92,7 +92,7 @@ private:
     WakeupForPoolResize wakeupForPoolDownsize;
     WakeupForPoolResize wakeupForPoolShutdown;
 
-    void extendedThreadMain(size_t threadIdx) const;
+    void extendedThreadMain(size_t threadIdx, uint64_t initialGenIdx) const;
 };
 
 template<typename T>

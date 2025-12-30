@@ -43,6 +43,7 @@ def test_get_eroneous_dataset(tmp_path):
 
 def test_get_dataset(tmp_path):
     ds = make_dataset(tmp_path, erroneous=False)
+    assert all([all([path.__contains__(str(tmp_path)) for path in item]) for item in ds.entries])
     assert len(ds.entries) == 10
     assert all(len(entry) == 3 for entry in ds.entries)
 

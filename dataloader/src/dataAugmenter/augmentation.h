@@ -71,15 +71,14 @@ struct DataProcessingSchema {
 class DataAugmentationPipe {
 public:
     explicit DataAugmentationPipe(
-        std::vector<IDataAugmentation *> dataAugmentations,
+        std::vector<std::shared_ptr<IDataAugmentation>> dataAugmentations,
         const Shape &rasterMaxInputShape, uint32_t maxNumPoints, uint32_t maxBytesPerElement
     );
 
     [[nodiscard]] size_t getMaximumRequiredBufferSize() const;
 
+    // Returns no batch dimension.
     [[nodiscard]] Shape getStaticOutputShape() const;
-
-    void setBuffer(uint8_t *_buffer1, uint8_t *_buffer2);
 
     [[nodiscard]] DataProcessingSchema getProcessingSchema(const Shapes &inputShapes, uint64_t itemSeed) const;
 
@@ -91,23 +90,25 @@ public:
         const Shapes &shapes,
         DType dtype,
         const uint8_t *__restrict__ inputData, uint8_t *__restrict__ outputData,
+        uint8_t *__restrict__ buffer1, uint8_t *__restrict__ buffer2,
         const DataProcessingSchema &schema
     ) const;
 
     void augmentWithRaster(
         DType dtype,
         const uint8_t *__restrict__ inputData, uint8_t *__restrict__ outputData,
-        const std::vector<size_t> &maxBytesOfEveryInput,
+        uint8_t *__restrict__ buffer1, uint8_t *__restrict__ buffer2,
+        size_t maxBytesOfInputPerItemOfItemKey,
         const DataProcessingSchema &schema
     ) const;
 
+    // Returns with batch dimension.
     [[nodiscard]] Shape getRasterMaxInputShape() const;
 
     [[nodiscard]] uint32_t getMaxNumPoints() const;
 
 private:
-    std::vector<IDataAugmentation *> dataAugs;
-    uint8_t *buffer1, *buffer2;
+    std::vector<std::shared_ptr<IDataAugmentation>> dataAugs;
     uint32_t maxRequiredBufferSize;
     uint32_t maxIntermediateSizeForItem;
 

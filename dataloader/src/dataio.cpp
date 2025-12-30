@@ -23,7 +23,7 @@ bool checkTransformOperatesOnStandardNDShape(const std::vector<size_t> &inputSha
 }
 
 Dataset::Dataset(std::shared_ptr<IDataSource> _dataSource,
-                 std::vector<IDataAugmentation *> _dataAugmentations,
+                 std::vector<std::shared_ptr<IDataAugmentation> > _dataAugmentations,
                  const pybind11::function &createDatasetFunction, const bool isVirtualDataset
 ) : dataSource(std::move(_dataSource)), dataAugmentations(std::move(_dataAugmentations)) {
     if (dataSource->preInitDataset(existsEnvVar(INVALID_DS_ENV_VAR) && isVirtualDataset)) {
@@ -34,7 +34,7 @@ Dataset::Dataset(std::shared_ptr<IDataSource> _dataSource,
 }
 
 Dataset::Dataset(std::shared_ptr<IDataSource> _dataSource,
-                 std::vector<IDataAugmentation *> _dataAugmentations
+                 std::vector<std::shared_ptr<IDataAugmentation> > _dataAugmentations
 ) : dataSource(std::move(_dataSource)), dataAugmentations(std::move(_dataAugmentations)) {
     dataSource->initDataset();
 
@@ -52,8 +52,8 @@ Dataset::Dataset(std::shared_ptr<IDataSource> _dataSource,
     }
 }
 
-std::tuple<Dataset, Dataset, Dataset> Dataset::splitTrainValidationTest(
-    const float trainPercentage, const float validPercentage) const {
+std::tuple<std::shared_ptr<Dataset>, std::shared_ptr<Dataset>, std::shared_ptr<Dataset> >
+Dataset::splitTrainValidationTest(const float trainPercentage, const float validPercentage) const {
     if (trainPercentage <= 0.0f || validPercentage <= 0.0f) {
         throw std::runtime_error(
             "Train and validation set must contain more than 0% of elements.");
@@ -69,33 +69,34 @@ std::tuple<Dataset, Dataset, Dataset> Dataset::splitTrainValidationTest(
     }
 
     std::shared_ptr<IDataSource> trainSource;
+    std::shared_ptr<IDataSource> tmpSource;
     std::shared_ptr<IDataSource> validSource;
     std::shared_ptr<IDataSource> testSource;
-    dataSource->splitIntoTwoDataSources(numTrain, trainSource, validSource);
-    validSource->splitIntoTwoDataSources(numValid, validSource, testSource);
+    dataSource->splitIntoTwoDataSources(numTrain, trainSource, tmpSource);
+    tmpSource->splitIntoTwoDataSources(numValid, validSource, testSource);
 
     return std::make_tuple<>(
-        Dataset(trainSource, dataAugmentations),
-        Dataset(validSource, dataAugmentations),
-        Dataset(testSource, dataAugmentations)
+        std::make_shared<Dataset>(trainSource, dataAugmentations),
+        std::make_shared<Dataset>(validSource, dataAugmentations),
+        std::make_shared<Dataset>(testSource, dataAugmentations)
     );
 }
 
-IDataSource *Dataset::getDataSource() const {
-    return dataSource.get();
+std::shared_ptr<IDataSource> Dataset::getDataSource() const {
+    return dataSource;
 }
 
-std::vector<IDataAugmentation *> Dataset::getDataAugmentations() const {
+std::vector<std::shared_ptr<IDataAugmentation> > Dataset::getDataAugmentations() const {
     return dataAugmentations;
 }
 
-BatchedDataset::BatchedDataset(const Dataset &dataset, const size_t batchSize) : dataset(dataset),
-    batchSize(batchSize), currInFlightBatch(0), lastWaitingBatch(-static_cast<int>(batchSize)) {
+BatchedDataset::BatchedDataset(const std::shared_ptr<Dataset> &dataset, const size_t batchSize)
+    : dataset(dataset), batchSize(batchSize), currInFlightBatch(0), lastWaitingBatch(-static_cast<int>(batchSize)) {
 }
 
 DatasetBatch BatchedDataset::getNextInFlightBatch() {
     std::unique_lock lock(mutex);
-    IDataSource *source = dataset.getDataSource();
+    const std::shared_ptr<IDataSource> &source = dataset->getDataSource();
     const auto &entries = source->getEntries();
 
     std::vector<std::vector<std::string> > batchPaths;
@@ -151,7 +152,7 @@ void BatchedDataset::forgetInFlightBatches() {
     LOG_DEBUG("forgetInFlightBatches");
 }
 
-const Dataset &BatchedDataset::getDataset() const noexcept {
+const std::shared_ptr<Dataset> BatchedDataset::getDataset() const noexcept {
     return dataset;
 }
 
@@ -160,5 +161,5 @@ const std::atomic_int32_t &BatchedDataset::getLastWaitingBatch() const {
 }
 
 size_t BatchedDataset::getNumberOfBatches() const {
-    return (dataset.getDataSource()->getEntries().size() + batchSize - 1) / batchSize;
+    return (dataset->getDataSource()->getEntries().size() + batchSize - 1) / batchSize;
 }

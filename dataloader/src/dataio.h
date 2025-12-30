@@ -4,7 +4,7 @@
 #include <vector>
 #include <filesystem>
 #include <format>
-#include <pybind11/stl.h>
+#include "pybind11_includes.h"
 
 #include "utils.h"
 #include "dataAugmenter/augmentation.h"
@@ -48,7 +48,7 @@ public:
 
     virtual std::vector<std::vector<std::string> > getEntries() = 0;
 
-    virtual CpuAllocation loadItemSliceIntoContigousBatch(BumpAllocator<uint8_t *> alloc,
+    virtual CpuAllocation loadItemSliceIntoContigousBatch(BumpAllocator<uint8_t *> &alloc,
                                                           const std::vector<std::vector<std::string> > &batchPaths,
                                                           size_t itemKeysIdx, uint32_t bufferSize) = 0;
 
@@ -56,6 +56,7 @@ public:
 
     virtual void initDataset() = 0;
 
+    // Do *NOT* pass the data source itself as a parameter.
     virtual void splitIntoTwoDataSources(size_t aNumEntries, std::shared_ptr<IDataSource> &dataSourceA,
                                          std::shared_ptr<IDataSource> &dataSourceB) = 0;
 };
@@ -92,29 +93,30 @@ struct DatasetBatch {
 class Dataset {
 public:
     Dataset(std::shared_ptr<IDataSource> _dataSource,
-            std::vector<IDataAugmentation *> _dataAugmentations,
+            std::vector<std::shared_ptr<IDataAugmentation> > _dataAugmentations,
             const pybind11::function &createDatasetFunction, bool isVirtualDataset
     );
 
-    Dataset(std::shared_ptr<IDataSource> _dataSource, std::vector<IDataAugmentation *> _dataAugmentations);
+    Dataset(std::shared_ptr<IDataSource> _dataSource,
+            std::vector<std::shared_ptr<IDataAugmentation> > _dataAugmentations);
 
     Dataset(const Dataset &other) = default;
 
-    [[nodiscard]] std::tuple<Dataset, Dataset, Dataset> splitTrainValidationTest(
-        float trainPercentage, float validPercentage) const;
+    [[nodiscard]] std::tuple<std::shared_ptr<Dataset>, std::shared_ptr<Dataset>, std::shared_ptr<Dataset> >
+    splitTrainValidationTest(float trainPercentage, float validPercentage) const;
 
-    [[nodiscard]] IDataSource *getDataSource() const;
+    [[nodiscard]] std::shared_ptr<IDataSource> getDataSource() const;
 
-    [[nodiscard]] std::vector<IDataAugmentation *> getDataAugmentations() const;
+    [[nodiscard]] std::vector<std::shared_ptr<IDataAugmentation> > getDataAugmentations() const;
 
 private:
     std::shared_ptr<IDataSource> dataSource;
-    std::vector<IDataAugmentation *> dataAugmentations;
+    std::vector<std::shared_ptr<IDataAugmentation> > dataAugmentations;
 };
 
 class BatchedDataset {
 public:
-    BatchedDataset(const Dataset &dataset, size_t batchSize);
+    BatchedDataset(const std::shared_ptr<Dataset> &dataset, size_t batchSize);
 
     [[nodiscard]] DatasetBatch getNextInFlightBatch();
 
@@ -126,14 +128,14 @@ public:
 
     void forgetInFlightBatches();
 
-    [[nodiscard]] const Dataset &getDataset() const noexcept;
+    [[nodiscard]] const std::shared_ptr<Dataset> getDataset() const noexcept;
 
     [[nodiscard]] const std::atomic_int32_t &getLastWaitingBatch() const;
 
     [[nodiscard]] size_t getNumberOfBatches() const;
 
 private:
-    Dataset dataset;
+    std::shared_ptr<Dataset> dataset;
     size_t batchSize;
     std::mutex mutex;
     std::unordered_set<int32_t> inFlightBatches;

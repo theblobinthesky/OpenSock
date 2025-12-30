@@ -1,14 +1,18 @@
 from enum import Enum
 from typing import Callable, Tuple, List, Optional
 from . import _core as m
-import jax
-import jax.numpy as jnp
-
+from abc import abstractmethod, ABC
 
 class DType(Enum):
     UINT8 = m.DType.UINT8
     INT32 = m.DType.INT32
     FLOAT32 = m.DType.FLOAT32
+
+
+class ItemType(Enum):
+    NONE = m.ItemType.NONE
+    RASTER = m.ItemType.RASTER
+    POINTS = m.ItemType.POINTS
 
 
 class Dataset:
@@ -17,27 +21,42 @@ class Dataset:
         self.post_process_fn = post_process_fn
 
     @classmethod
-    def from_subdirs(cls,
-                     root_dir: str,
-                     subdir_to_dict: List[Tuple[str, str]],
-                     create_dataset_function: Callable,
-                     data_augs=None,
-                     post_process_fn: Optional[Callable[[dict], dict]] = None,
-                     is_virtual_dataset: bool = False) -> 'Dataset':
-        if data_augs is None: data_augs = [m.ResizeAugmentation(64, 64)]
+    def from_subdirs(
+            cls,
+            root_dir: str,
+            subdir_to_dict: List[Tuple[str, str, ItemType]],
+            create_dataset_function: Callable,
+            data_augs=None,
+            post_process_fn: Optional[Callable[[dict], dict]] = None,
+            is_virtual_dataset: bool = False,
+    ) -> "Dataset":
+        if data_augs is None:
+            data_augs = [m.ResizeAugmentation(64, 64)]
         native = m.Dataset(
-            m.FlatDataSource(root_dir, [m.SubdirToDictname(subdir, dictname) for (subdir, dictname) in subdir_to_dict]),
+            m.FlatDataSource(
+                root_dir,
+                [
+                    m.SubdirToDictname(subdir, dictname, itemtype.value)
+                    for (subdir, dictname, itemtype) in subdir_to_dict
+                ],
+            ),
             data_augs,
             create_dataset_function,
-            is_virtual_dataset
+            is_virtual_dataset,
         )
         return cls(native, post_process_fn)
 
-    def split_train_validation_test(self, train_percentage: float,
-                                    valid_percentage: float):
-        train, valid, test = self._native.splitTrainValidationTest(train_percentage, valid_percentage)
-        return Dataset(train, self.post_process_fn), Dataset(valid, self.post_process_fn), Dataset(
-            test, self.post_process_fn)
+    def split_train_validation_test(
+            self, train_percentage: float, valid_percentage: float
+    ):
+        train, valid, test = self._native.splitTrainValidationTest(
+            train_percentage, valid_percentage
+        )
+        return (
+            Dataset(train, self.post_process_fn),
+            Dataset(valid, self.post_process_fn),
+            Dataset(test, self.post_process_fn),
+        )
 
     @property
     def entries(self) -> List[List[str]]:
@@ -57,62 +76,32 @@ class BatchedDataset:
         return self._native.getNextBatch()
 
 
-class JaxSingleton:
-    _instance = None
-
-    def __new__(cls):
-        if cls._instance is None:
-            cls._instance = super().__new__(cls)
-            cls._instance.init()
-        return cls._instance
-
-    def init(self):
-        # Ensure Jax is using GPU; otherwise raise an error.
-        device = jax.devices('gpu')[0]
-
-        def jax_has_gpu():
-            try:
-                _ = jax.device_put(jax.numpy.ones(1), device=device)
-                return True
-            except Exception:
-                return False
-
-        if jax.default_backend() != 'gpu' or not jax_has_gpu():
-            raise EnvironmentError('Jax is not using the GPU!')
-
-        x = jnp.zeros((16, 16))
-        x = jax.device_put(x, device)
-        assert x.mean() == 0.0
-
-
-class DataLoader:
-    def __init__(self, dataset: Dataset, batch_size: int,
-                 num_threads: int = 4,
-                 prefetch_size: int = 4):
-        """Wrap native DataLoader and ensure Jax GPU is initialized."""
-        JaxSingleton()
+class IDataLoader(ABC):
+    def __init__(
+            self,
+            dataset: Dataset,
+            augPipe,
+            batch_size: int,
+            num_threads: int = 4,
+            prefetch_size: int = 4,
+    ):
         self.dataset = dataset
-        self._native = m.DataLoader(dataset._native, batch_size, num_threads, prefetch_size)
+        self._native = m.DataLoader(
+            dataset._native, augPipe, batch_size, num_threads, prefetch_size
+        )
 
     def __len__(self) -> int:
         """Return number of batches."""
         return len(self._native)
 
-    def get_next_batch(self) -> dict:
-        """Return next batch as a dict of jax arrays."""
+    @abstractmethod
+    def get_next_batch(self) -> Tuple[dict, dict]:
+        """Return next batch as a tuple of (primary_tensors, metadata_tensors).
 
-        def from_dlpack(x):
-            return jax.dlpack.from_dlpack(x, copy=False)
-
-        batch = self._native.getNextBatch()
-        batch = {key: from_dlpack(x) for key, x in batch.items()}
-
-        # Normalize uint8 inputs to float32 in [0,1]; leave other dtypes intact.
-        for key, arr in list(batch.items()):
-            if arr.dtype == jnp.uint8:
-                batch[key] = arr.astype(jnp.float32) / 255.0
-
-        return batch
+        primary_tensors: dict of jax arrays with the main data
+        metadata_tensors: dict of jax arrays with metadata (e.g., original point counts for POINTS type)
+        """
+        pass
 
 
 class Codec(Enum):
@@ -122,16 +111,18 @@ class Codec(Enum):
 
 
 class CompressorOptions:
-    def __init__(self,
-                 num_threads: int,
-                 input_directory: str,
-                 output_directory: str,
-                 shape: List[int],
-                 cast_to_fp16: bool,
-                 permutations: List[List[int]],
-                 with_bitshuffle: bool,
-                 allowed_codecs: List[Codec],
-                 tolerance_for_worse_codec: float):
+    def __init__(
+            self,
+            num_threads: int,
+            input_directory: str,
+            output_directory: str,
+            shape: List[int],
+            cast_to_fp16: bool,
+            permutations: List[List[int]],
+            with_bitshuffle: bool,
+            allowed_codecs: List[Codec],
+            tolerance_for_worse_codec: float,
+    ):
         """
         Options for configuring the Compressor.
         """
@@ -144,7 +135,7 @@ class CompressorOptions:
             permutations,
             with_bitshuffle,
             [c.value for c in allowed_codecs],
-            tolerance_for_worse_codec
+            tolerance_for_worse_codec,
         )
 
 
@@ -165,6 +156,10 @@ class Decompressor:
 
     def decompress(self, path: str):
         return self._native.decompress(path)
+
+
+def set_device_for_resource_pool(device) -> None:
+    m.set_device_for_resource_pool(device)
 
 
 def shutdown_resource_pool() -> None:

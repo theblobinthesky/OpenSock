@@ -10,23 +10,25 @@ std::mutex DataLoader::concurrencyMutex;
 
 void precomputeItemSizesInMemory(
     const BatchedDataset &bds,
-    const DataAugmentationPipe &augPipe,
+    const std::shared_ptr<DataAugmentationPipe> &augPipe,
     const size_t batchSize,
-    std::vector<size_t> &maxBytesOfEveryInput,
-    std::vector<size_t> &outputSizesPerBatchOfItem,
-    std::vector<size_t> &outputMetadataSizesPerBatchOfItem,
+    std::vector<size_t> &maxBytesOfInputPerItemOfItemKey,
+    std::vector<size_t> &bytesOfOutputOfItemKey,
+    std::vector<size_t> &bytesOfMetadataOutputPerItemOfItemKey,
     size_t &maxInputBatchMemorySize,
     size_t &outputBatchMemorySize
 ) {
-    const auto &itemKeys = bds.getDataset().getDataSource()->getItemKeys();
-    const auto rasterMaxInputShapeSize = getShapeSize(augPipe.getRasterMaxInputShape());
-    const auto augPipeRasterOutputShapeSize = getShapeSize(augPipe.getStaticOutputShape());
+    const auto &itemKeys = bds.getDataset()->getDataSource()->getItemKeys();
+    const auto &rasterMaxInputShape = augPipe->getRasterMaxInputShape();
+    const auto rasterMaxInputShapeNoBatch = std::span(rasterMaxInputShape).subspan(1);
+    const auto rasterMaxInputShapeNoBatchSize = getShapeSize(rasterMaxInputShapeNoBatch);
+    const auto augPipeRasterOutputShapeSize = getShapeSize(augPipe->getStaticOutputShape());
 
-    outputSizesPerBatchOfItem.clear();
-    outputMetadataSizesPerBatchOfItem.clear();
+    bytesOfOutputOfItemKey.clear();
+    bytesOfMetadataOutputPerItemOfItemKey.clear();
     maxInputBatchMemorySize = outputBatchMemorySize = 0;
     for (const auto &itemKey: itemKeys) {
-        const auto probeDTypeWidth = getWidthOfDType(itemKey.probeResult.dtype);
+        const auto probeDTypeWidth = getWidthOfDType(itemKey.probeResult.dtype); // TODO: Revert
         size_t maxBytesOfInputPerItem = probeDTypeWidth;
         size_t bytesOfOutputPerItem = probeDTypeWidth;
         size_t bytesOfMetaOutputPerItem;
@@ -40,31 +42,30 @@ void precomputeItemSizesInMemory(
             }
             break;
             case ItemType::RASTER:
-                maxBytesOfInputPerItem *= rasterMaxInputShapeSize;
+                maxBytesOfInputPerItem *= rasterMaxInputShapeNoBatchSize;
                 bytesOfOutputPerItem *= augPipeRasterOutputShapeSize;
                 bytesOfMetaOutputPerItem = 0;
                 break;
             case ItemType::POINTS:
-                maxBytesOfInputPerItem *= augPipe.getMaxNumPoints();
-                bytesOfOutputPerItem *= augPipe.getMaxNumPoints();
+                maxBytesOfInputPerItem *= augPipe->getMaxNumPoints();
+                bytesOfOutputPerItem *= augPipe->getMaxNumPoints();
 
                 // Points need a metadata tensor of lengths with shape (b,).
-                bytesOfMetaOutputPerItem = batchSize * getWidthOfDType(PointsLengthsTensorDType);
+                bytesOfMetaOutputPerItem = getWidthOfDType(PointsLengthsTensorDType);
                 break;
             default:
                 throw std::runtime_error("Item sizes cannot be computed because an item type is unknown.");
         }
 
-        maxBytesOfEveryInput.push_back(maxBytesOfInputPerItem);
-        maxInputBatchMemorySize += maxBytesOfInputPerItem;
+        maxBytesOfInputPerItemOfItemKey.push_back(maxBytesOfInputPerItem);
+        maxInputBatchMemorySize += batchSize * maxBytesOfInputPerItem;
 
-        const auto outputSize = batchSize * bytesOfOutputPerItem;
-        outputSizesPerBatchOfItem.push_back(outputSize);
-        outputBatchMemorySize += outputSize;
+        const size_t bytesOfOutput = batchSize * bytesOfOutputPerItem;
+        bytesOfOutputOfItemKey.push_back(bytesOfOutput);
+        outputBatchMemorySize += bytesOfOutput;
 
-        const auto outputMetadataSize = batchSize * bytesOfMetaOutputPerItem;
-        outputMetadataSizesPerBatchOfItem.push_back(outputMetadataSize);
-        outputBatchMemorySize += outputMetadataSize;
+        bytesOfMetadataOutputPerItemOfItemKey.push_back(bytesOfMetaOutputPerItem);
+        outputBatchMemorySize += batchSize * bytesOfMetaOutputPerItem;
     }
 
     maxInputBatchMemorySize = alignUp(maxInputBatchMemorySize, 16);
@@ -72,14 +73,14 @@ void precomputeItemSizesInMemory(
 }
 
 DataLoader::DataLoader(
-    Dataset &_dataset,
+    const std::shared_ptr<Dataset> &_dataset,
     const size_t _batchSize,
     const size_t _numThreads,
     const size_t _prefetchSize,
-    DataAugmentationPipe &_augPipe
+    const std::shared_ptr<DataAugmentationPipe> &_augPipe
 ) : id(nextId.fetch_add(1)),
-    batchedDataset(std::move(_dataset), _batchSize),
-    augPipe(std::move(_augPipe)),
+    batchedDataset(_dataset, _batchSize),
+    augPipe(_augPipe),
     batchSize(_batchSize),
     numThreads(_numThreads),
     prefetchSize(_prefetchSize) {
@@ -90,7 +91,7 @@ DataLoader::DataLoader(
 
     precomputeItemSizesInMemory(
         batchedDataset, augPipe, batchSize,
-        maxBytesOfEveryInput, outputSizesPerBatchOfItem, outputMetadataSizesPerBatchOfItem,
+        maxBytesOfInputPerItemOfItemKey, bytesOfOutputOfItemKey, bytesOfMetadataOutputPerItemOfItemKey,
         maxInputBatchMemorySize, outputBatchMemorySize
     );
 
@@ -105,7 +106,7 @@ DLWrapper::DLWrapper(const Fence fence,
 }
 
 pybind11::capsule DLWrapper::getDLpackCapsule(const pybind11::object &consumerStreamObject) const {
-    auto &resourcePool = ResourcePool::get();
+    const auto &resourcePool = ResourcePool::get();
 
     if (consumerStreamObject.is_none()) {
         resourcePool.synchronizeHostDevice(fence);
@@ -141,10 +142,10 @@ uint8_t getItemCode(const DType dtype) {
     }
 }
 
-DLWrapper *get(
+DLWrapper *getWrappedTensor(
     const uint32_t batchSize,
     const Shape &shape,
-    uint8_t *gpuAllocation,
+    uint8_t *gpuAllocation, // NOLINT(*-non-const-parameter)
     const DType dtype,
     const Fence &fence
 ) {
@@ -186,7 +187,7 @@ DLWrapper *get(
     return wrapper;
 }
 
-py::dict DataLoader::getNextBatch() {
+std::pair<py::dict, py::dict> DataLoader::getNextBatch() {
     std::unique_lock lock(concurrencyMutex);
     const auto [datasetStartingOffset, gpuAllocations, fences]
             = ResourcePool::get().acquireAndGetNextBatch(shared_from_this());
@@ -195,29 +196,50 @@ py::dict DataLoader::getNextBatch() {
               datasetStartingOffset, ResourcePool::get().getGenIdx());
 
     py::dict pyBatch;
-    const auto &itemKeys = batchedDataset.getDataset().getDataSource()->getItemKeys();
-    for (size_t i = 0; i < itemKeys.size(); i++) {
-        const ItemKey &itemKey = itemKeys[i];
+    py::dict pyMetadata;
+    const auto &itemKeys = batchedDataset.getDataset()->getDataSource()->getItemKeys();
+
+    size_t allocationIdx = 0;
+    for (const auto &itemKey: itemKeys) {
         const ProbeResult &probe = itemKey.probeResult;
-        uint8_t *gpuAllocation = gpuAllocations[i];
-        const Fence fence = fences[i];
+        uint8_t *gpuAllocation = gpuAllocations[allocationIdx];
+        const Fence fence = fences[allocationIdx];
         ResourcePool::get().getAllocator()->handOff(gpuAllocation);
+        allocationIdx++;
 
-        const Shape &shape = probe.shape; // TODO: This needs to contain the batch dimension.
-        auto wrapper = get(batchSize, shape, gpuAllocation, probe.dtype, fence);
-
-        // TODO
-        /* switch (itemKey.type) {
+        Shape shape;
+        switch (itemKey.type) {
             case ItemType::NONE:
+                shape = probe.shape;
+                break;
             case ItemType::RASTER:
+                shape = augPipe->getStaticOutputShape();
                 break;
             case ItemType::POINTS:
-                break;
+                /*shape = {
+                };*/
+                throw std::runtime_error("crashiiii..");
             default:
-                throw std::runtime_error("Next batch encountered unknown spatial hint..");
-        } // TODO*/
+                throw std::runtime_error("getNextBatch encountered unknown item key type.");
+        }
+
+        auto wrapper = getWrappedTensor(batchSize, shape, gpuAllocation, probe.dtype, fence);
         pyBatch[itemKey.keyName.c_str()] = py::cast(wrapper, py::return_value_policy::reference);
+
+        // For POINTS type, also return the metadata tensor with original lengths
+        /*if (itemKey.type == ItemType::POINTS) {
+            uint8_t *metaGpuAllocation = gpuAllocations[allocationIdx];
+            const Fence metaFence = fences[allocationIdx];
+            ResourcePool::get().getAllocator()->handOff(metaGpuAllocation);
+            allocationIdx++;
+
+            // Metadata shape is (batchSize,) containing original point counts
+            constexpr Shape metaShape = {};  // Empty shape means scalar per batch item -> (batchSize,)
+            auto metaWrapper = getWrappedTensor(batchSize, metaShape, metaGpuAllocation, PointsLengthsTensorDType, metaFence);
+            const std::string metaKeyName = itemKey.keyName + "_lengths";
+            pyMetadata[metaKeyName.c_str()] = py::cast(metaWrapper, py::return_value_policy::reference);
+        }*/
     }
 
-    return pyBatch;
+    return {pyBatch, pyMetadata};
 }

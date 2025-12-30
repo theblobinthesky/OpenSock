@@ -1,7 +1,6 @@
 #ifndef RESOURCE_H
 #define RESOURCE_H
 #include "utils.h"
-#include <cuda_runtime.h>
 #include <vector>
 #include <condition_variable>
 #include <latch>
@@ -54,7 +53,7 @@ public:
 
 class MirroredAllocator {
 public:
-    explicit MirroredAllocator(HostAndGpuDeviceInterface *device);
+    explicit MirroredAllocator(const std::shared_ptr<HostAndGpuDeviceInterface> &device);
 
     ~MirroredAllocator();
 
@@ -75,7 +74,7 @@ public:
     [[nodiscard]] bool isDrained() const;
 
 private:
-    HostAndGpuDeviceInterface *device;
+    std::shared_ptr<HostAndGpuDeviceInterface> device;
 
     uint8_t *hostData = nullptr;
     uint8_t *gpuData = nullptr;
@@ -93,40 +92,6 @@ public:
     std::atomic<uint64_t> memoryNotify;
 };
 
-
-// TODO: When i migrate to multi-gpu training, i will have to account for numa nodes on server cpus.
-// TODO: Not an issue just yet, though.
-
-class CudaHostAndGpuDeviceInterface final : public HostAndGpuDeviceInterface {
-public:
-    CudaHostAndGpuDeviceInterface();
-
-    uint8_t *hostMemoryChangeSizeAndInvalidateMemory(size_t size) override;
-
-    uint8_t *gpuMemoryIncreasePoolSizeAndInvalidateMemory(size_t size) override;
-
-    void freeEverything() override;
-
-    Fence insertNextFenceIntoStream() override;
-
-    void synchronizeFenceWithConsumerStream(Fence fence, ConsumerStream consumerStream) override;
-
-    void synchronizeFenceWithHostDevice(Fence fence) override;
-
-    void copyFromHostToGpuMemory(const uint8_t *host, uint8_t *gpu, uint32_t size) override;
-
-private:
-    void setGpuMemoryPoolReleaseThreshold(size_t bytes) const;
-
-    cudaMemPool_t pool = {};
-    uint8_t *hostData = nullptr;
-    uint8_t *gpuData = nullptr;
-    cudaStream_t stream = {};
-
-    std::unordered_map<uint64_t, cudaEvent_t> fenceToEventMap;
-    std::atomic_uint64_t eventIndex;
-};
-
 struct PrefetchItem {
     int32_t datasetStartingOffset;
     std::vector<uint8_t *> gpuAllocations;
@@ -142,21 +107,27 @@ public:
     // Explicitly-managed singleton. Lives for process lifetime unless shutdown() is called.
     static ResourcePool &get();
 
+    // Does not lazily initialize the pool, only to destroy it immediately.
+    // Makes us compatible with sanitizers like address sanitizer.
+    static void shutdownLazily();
+
+    static void setDeviceForNewResourcePool(const std::shared_ptr<HostAndGpuDeviceInterface> &device);
+
     // Explicit shutdown to release threads and device memory.
     void shutdown();
 
     PrefetchItem acquireAndGetNextBatch(const std::shared_ptr<DataLoader> &dataLoader);
 
-    void synchronizeConsumerStream(Fence fence, ConsumerStream consumerStream);
+    void synchronizeConsumerStream(Fence fence, ConsumerStream consumerStream) const;
 
-    void synchronizeHostDevice(Fence fence);
+    void synchronizeHostDevice(Fence fence) const;
 
     [[nodiscard]] MirroredAllocator *getAllocator() noexcept;
 
     [[nodiscard]] uint64_t getGenIdx() const noexcept;
 
 private:
-    explicit ResourcePool();
+    explicit ResourcePool(const std::shared_ptr<HostAndGpuDeviceInterface> &device);
 
     ~ResourcePool();
 
@@ -164,10 +135,13 @@ private:
 
     void wakeupAllThreads();
 
-    void threadMain(size_t threadIdx, const std::atomic_uint32_t &desiredThreadCount);
+    void threadMain(size_t threadIdx, const std::atomic_uint32_t &desiredThreadCount, const uint64_t initialGenIdx);
+
+    static std::shared_ptr<HostAndGpuDeviceInterface> deviceForNewResourcePool;
+    static ResourcePool *singleton;
 
     // Everything related to memory.
-    CudaHostAndGpuDeviceInterface device;
+    std::shared_ptr<HostAndGpuDeviceInterface> device;
     MirroredAllocator allocator;
 
     // Everything related to data sources.

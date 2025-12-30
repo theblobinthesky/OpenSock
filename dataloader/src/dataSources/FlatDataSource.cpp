@@ -110,8 +110,8 @@ std::string validateRootDirectory(std::string rootDirectory) {
     return rootDirectory;
 }
 
-SubdirToDictname::SubdirToDictname(std::string subdir, std::string dictname)
-    : subdir(std::move(subdir)), dictname(std::move(dictname)) {
+SubdirToDictname::SubdirToDictname(std::string subdir, std::string dictname, const ItemType type)
+    : subdir(std::move(subdir)), dictname(std::move(dictname)), type(type) {
 }
 
 FlatDataSource::FlatDataSource(std::string _rootDirectory,
@@ -137,7 +137,7 @@ std::vector<std::vector<std::string> > FlatDataSource::getEntries() {
     return entries;
 }
 
-CpuAllocation FlatDataSource::loadItemSliceIntoContigousBatch(BumpAllocator<uint8_t *> alloc,
+CpuAllocation FlatDataSource::loadItemSliceIntoContigousBatch(BumpAllocator<uint8_t *> &alloc,
                                                               const std::vector<std::vector<std::string> > &batchPaths,
                                                               const size_t itemKeysIdx, const uint32_t bufferSize) {
     const auto &itemKey = itemKeys[itemKeysIdx];
@@ -194,9 +194,11 @@ void FlatDataSource::splitIntoTwoDataSources(const size_t aNumEntries, std::shar
 
 void FlatDataSource::initDatasetFromRootDirectory() {
     std::vector<std::string> subDirs;
+    std::vector<ItemType> itemTypes;
     subDirs.reserve(subdirsToDictNames.size());
-    for (const auto &[subdir, _]: subdirsToDictNames) {
+    for (const auto &[subdir, _, type]: subdirsToDictNames) {
         subDirs.push_back(subdir);
+        itemTypes.push_back(type);
     }
 
     if (subDirs.empty()) {
@@ -237,7 +239,7 @@ void FlatDataSource::initDatasetFromRootDirectory() {
                 break;
             }
 
-            paths.push_back(std::move(newFile));
+            paths.push_back(newFile);
         }
 
         if (erroneousEntry) {
@@ -253,7 +255,7 @@ void FlatDataSource::initDatasetFromRootDirectory() {
     for (size_t i = 0; i < subDirs.size(); i++) {
         itemKeys.push_back({
             .keyName = subdirsToDictNames[i].dictname,
-            .type = ItemType::NONE,
+            .type = itemTypes[i],
             .probeResult = probeResults[i]
         });
     }
@@ -269,15 +271,9 @@ void FlatDataSource::verifyDatasetIsConsistent() {
             throw std::runtime_error("All batch items have to have exactly as many entries as the item keys.");
         }
 
-        for (auto &subPath: item) {
-            if (subPath.size() >= rootDirectory.size()) {
-                if (std::memcmp(subPath.data(), rootDirectory.data(), rootDirectory.size()) == 0) {
-                    subPath.erase(0, rootDirectory.size());
-                }
-
-                if (const std::string path = std::format("{}{}", rootDirectory, subPath); !fs::exists(path)) {
-                    throw std::runtime_error(std::format("Path does not exist: '{}'.", path));
-                }
+        for (auto &path: item) {
+            if (!fs::exists(path)) {
+                throw std::runtime_error(std::format("Path does not exist: '{}'.", path));
             }
         }
     }

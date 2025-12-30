@@ -6,8 +6,9 @@
 struct SubdirToDictname {
     std::string subdir;
     std::string dictname;
+    ItemType type;
 
-    SubdirToDictname(std::string subdir, std::string dictname);
+    SubdirToDictname(std::string subdir, std::string dictname, ItemType type);
 };
 
 class FlatDataSource final : public IDataSource {
@@ -22,7 +23,7 @@ public:
 
     std::vector<std::vector<std::string> > getEntries() override;
 
-    CpuAllocation loadItemSliceIntoContigousBatch(BumpAllocator<uint8_t *> alloc,
+    CpuAllocation loadItemSliceIntoContigousBatch(BumpAllocator<uint8_t *> &alloc,
                                                   const std::vector<std::vector<std::string> > &batchPaths,
                                                   size_t itemKeysIdx, uint32_t bufferSize) override;
 
