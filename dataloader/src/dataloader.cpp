@@ -14,7 +14,7 @@ void precomputeItemSizesInMemory(
     const size_t batchSize,
     std::vector<size_t> &maxBytesOfInputPerItemOfItemKey,
     std::vector<size_t> &bytesOfOutputOfItemKey,
-    std::vector<size_t> &bytesOfMetadataOutputPerItemOfItemKey,
+    std::vector<size_t> &bytesOfMetadataOutputOfItemKey,
     size_t &maxInputBatchMemorySize,
     size_t &outputBatchMemorySize
 ) {
@@ -25,7 +25,7 @@ void precomputeItemSizesInMemory(
     const auto augPipeRasterOutputShapeSize = getShapeSize(augPipe->getStaticOutputShape());
 
     bytesOfOutputOfItemKey.clear();
-    bytesOfMetadataOutputPerItemOfItemKey.clear();
+    bytesOfMetadataOutputOfItemKey.clear();
     maxInputBatchMemorySize = outputBatchMemorySize = 0;
     for (const auto &itemKey: itemKeys) {
         const auto probeDTypeWidth = getWidthOfDType(itemKey.probeResult.dtype); // TODO: Revert
@@ -46,13 +46,16 @@ void precomputeItemSizesInMemory(
                 bytesOfOutputPerItem *= augPipeRasterOutputShapeSize;
                 bytesOfMetaOutputPerItem = 0;
                 break;
-            case ItemType::POINTS:
-                maxBytesOfInputPerItem *= augPipe->getMaxNumPoints();
-                bytesOfOutputPerItem *= augPipe->getMaxNumPoints();
+            case ItemType::POINTS: {
+                const uint32_t d = itemKey.probeResult.shape.back();
+                const uint32_t pointsMaxInputSize = augPipe->getMaxNumPoints() * d;
+                maxBytesOfInputPerItem *= pointsMaxInputSize;
+                bytesOfOutputPerItem *= pointsMaxInputSize;
 
                 // Points need a metadata tensor of lengths with shape (b,).
                 bytesOfMetaOutputPerItem = getWidthOfDType(PointsLengthsTensorDType);
-                break;
+            }
+            break;
             default:
                 throw std::runtime_error("Item sizes cannot be computed because an item type is unknown.");
         }
@@ -64,8 +67,9 @@ void precomputeItemSizesInMemory(
         bytesOfOutputOfItemKey.push_back(bytesOfOutput);
         outputBatchMemorySize += bytesOfOutput;
 
-        bytesOfMetadataOutputPerItemOfItemKey.push_back(bytesOfMetaOutputPerItem);
-        outputBatchMemorySize += batchSize * bytesOfMetaOutputPerItem;
+        const size_t bytesOfMetadataOutput = batchSize * bytesOfMetaOutputPerItem;
+        bytesOfMetadataOutputOfItemKey.push_back(bytesOfMetadataOutput);
+        outputBatchMemorySize += bytesOfMetadataOutput;
     }
 
     maxInputBatchMemorySize = alignUp(maxInputBatchMemorySize, 16);
@@ -91,7 +95,7 @@ DataLoader::DataLoader(
 
     precomputeItemSizesInMemory(
         batchedDataset, augPipe, batchSize,
-        maxBytesOfInputPerItemOfItemKey, bytesOfOutputOfItemKey, bytesOfMetadataOutputPerItemOfItemKey,
+        maxBytesOfInputPerItemOfItemKey, bytesOfOutputOfItemKey, bytesOfMetaOutputOfItemKey,
         maxInputBatchMemorySize, outputBatchMemorySize
     );
 
@@ -152,6 +156,8 @@ DLWrapper *getWrappedTensor(
     const DType dtype,
     const Fence &fence
 ) {
+    LOG_INFO("getWrappedTensor with shape {}", formatVector(shape));
+
     const int ndim = static_cast<int>(shape.size()) + 1;
     // ReSharper disable once CppDFAMemoryLeak
     auto *const shapeArr = new int64_t[ndim]{};
@@ -192,56 +198,36 @@ DLWrapper *getWrappedTensor(
 
 std::pair<py::dict, py::dict> DataLoader::getNextBatch() {
     std::unique_lock lock(concurrencyMutex);
-    const auto [datasetStartingOffset, gpuAllocations, fences]
-            = ResourcePool::get().acquireAndGetNextBatch(shared_from_this());
+    const PrefetchItem prefetch = ResourcePool::get().acquireAndGetNextBatch(shared_from_this());
 
     LOG_DEBUG("Loading from; datasetStartingOffset: {}, genIdx: {}",
-              datasetStartingOffset, ResourcePool::get().getGenIdx());
+              prefetch.datasetStartingOffset, ResourcePool::get().getGenIdx());
 
     py::dict pyBatch;
     py::dict pyMetadata;
     const auto &itemKeys = batchedDataset.getDataset()->getDataSource()->getItemKeys();
 
     size_t allocationIdx = 0;
-    for (const auto &itemKey: itemKeys) {
+    for (size_t i = 0; i < itemKeys.size(); i++) {
+        const auto &itemKey = itemKeys[i];
         const ProbeResult &probe = itemKey.probeResult;
-        uint8_t *gpuAllocation = gpuAllocations[allocationIdx];
-        const Fence fence = fences[allocationIdx];
+        uint8_t *gpuAllocation = prefetch.gpuAllocations[allocationIdx];
+        const Fence fence = prefetch.fences[allocationIdx];
         ResourcePool::get().getAllocator()->handOff(gpuAllocation);
+
+        auto wrapper = getWrappedTensor(batchSize, prefetch.shapes[allocationIdx], gpuAllocation, probe.dtype, fence);
+        pyBatch[itemKey.keyName.c_str()] = py::cast(wrapper, py::return_value_policy::reference);
         allocationIdx++;
 
-        Shape shape;
-        switch (itemKey.type) {
-            case ItemType::NONE:
-                shape = probe.shape;
-                break;
-            case ItemType::RASTER:
-                shape = augPipe->getStaticOutputShape();
-                break;
-            case ItemType::POINTS:
-                /*shape = {
-                };*/
-                throw std::runtime_error("crashiiii..");
-            default:
-                throw std::runtime_error("getNextBatch encountered unknown item key type.");
-        }
-
-        auto wrapper = getWrappedTensor(batchSize, shape, gpuAllocation, probe.dtype, fence);
-        pyBatch[itemKey.keyName.c_str()] = py::cast(wrapper, py::return_value_policy::reference);
-
-        // For POINTS type, also return the metadata tensor with original lengths
-        /*if (itemKey.type == ItemType::POINTS) {
-            uint8_t *metaGpuAllocation = gpuAllocations[allocationIdx];
-            const Fence metaFence = fences[allocationIdx];
+        if (prefetch.hasMetaTensor[i]) {
+            uint8_t *metaGpuAllocation = prefetch.gpuAllocations[allocationIdx];
+            const Fence metaFence = prefetch.fences[allocationIdx];
             ResourcePool::get().getAllocator()->handOff(metaGpuAllocation);
-            allocationIdx++;
 
-            // Metadata shape is (batchSize,) containing original point counts
-            constexpr Shape metaShape = {};  // Empty shape means scalar per batch item -> (batchSize,)
-            auto metaWrapper = getWrappedTensor(batchSize, metaShape, metaGpuAllocation, PointsLengthsTensorDType, metaFence);
-            const std::string metaKeyName = itemKey.keyName + "_lengths";
-            pyMetadata[metaKeyName.c_str()] = py::cast(metaWrapper, py::return_value_policy::reference);
-        }*/
+            auto metaWrapper = getWrappedTensor(batchSize, prefetch.shapes[allocationIdx], metaGpuAllocation, prefetch.metaDType[i], metaFence);
+            pyMetadata[itemKey.keyName.c_str()] = py::cast(metaWrapper, py::return_value_policy::reference);
+            allocationIdx++;
+        }
     }
 
     return {pyBatch, pyMetadata};

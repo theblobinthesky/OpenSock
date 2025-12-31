@@ -85,16 +85,20 @@ Fence CudaHostAndGpuDeviceInterface::insertNextFenceIntoStream() {
     }
 
     auto fence = eventIndex.fetch_add(1);
+    fenceToEventMapMutex.lock();
     fenceToEventMap.emplace(fence, event);
+    fenceToEventMapMutex.unlock();
     return {fence};
 }
 
 void CudaHostAndGpuDeviceInterface::synchronizeFenceWithConsumerStream(const Fence fence,
                                                                        const ConsumerStream consumerStream) {
+    fenceToEventMapMutex.lock();
     const auto found = fenceToEventMap.find(fence.id);
     if (found == fenceToEventMap.end()) {
         throw std::runtime_error("Fence is invalid.");
     }
+    fenceToEventMapMutex.unlock();
 
     // NOLINTNEXTLINE(performance-no-int-to-ptr)
     auto consumer = reinterpret_cast<cudaStream_t>(consumerStream.id);
@@ -103,24 +107,33 @@ void CudaHostAndGpuDeviceInterface::synchronizeFenceWithConsumerStream(const Fen
         throw std::runtime_error(std::format("cudaStreamWaitEvent failed: {}", cudaGetErrorString(err)));
     }
 
+    fenceToEventMapMutex.lock();
     fenceToEventMap.erase(found);
+    fenceToEventMapMutex.unlock();
+
     if (cudaEventDestroy(event) != cudaSuccess) {
         throw std::runtime_error("cudaEventDestroy failed.");
     }
 }
 
 void CudaHostAndGpuDeviceInterface::synchronizeFenceWithHostDevice(const Fence fence) {
+    fenceToEventMapMutex.lock();
     const auto found = fenceToEventMap.find(fence.id);
     if (found == fenceToEventMap.end()) {
         throw std::runtime_error("Fence is invalid.");
     }
+    fenceToEventMapMutex.unlock();
 
     const cudaEvent_t event = found->second;
+
+    fenceToEventMapMutex.lock();
+    fenceToEventMap.erase(found);
+    fenceToEventMapMutex.unlock();
+
     if (const cudaError_t err = cudaEventSynchronize(event); err != cudaSuccess) {
         throw std::runtime_error(std::format("cudaEventSynchronize failed: {}", cudaGetErrorString(err)));
     }
 
-    fenceToEventMap.erase(found);
     if (cudaEventDestroy(event) != cudaSuccess) {
         throw std::runtime_error("cudaEventDestroy failed.");
     }

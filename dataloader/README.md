@@ -1,87 +1,287 @@
-How-to use:
-Install all the packages using uv and activate the virtual environment.
-```make install-debug```
-```pytest tests/```
+# Native Dataloader
 
-Memory bandwidth utilization in GB/s on RTX 4080 system:
-- JAX (default): 7.25
-- CUDA (pinned): 19.41
-- CUDA (malloc): 9.07
+**A modular, high-performance C++20 data engine for Python deep learning.**
 
-TODO (important improvements for production use):
-- Add support for compressed files in the dataloader
-- Cleanup all data options
-- Fix last races and improve test suite
-- Support WebDataset
-- Dataset refactor with probing/autodiscovery
-- Probing should happen after the augmentations have been applied... Idk??
-- Look at any race conditions chadgpt might have produced during the last refactor
-- Fix regression where subdir order does not matter.
+Native Dataloader replaces the standard Python-based data loading pipeline with a compiled, asynchronous C++ engine. It is designed for **predictability**: ensuring that data loading never causes memory spikes or thread contention that could interfere with your deep learning framework.
 
-Fixed:
-- Fix all sensible clang-tidy warnings
-- Write tests for different prefetch size, thread size configurations
-- Deal with parallel dataloaders (as that doesn't really make much sense)
-- Replace existing build system with something much faster and easier to debug
-- llm code context
+By moving the entire ETL (Extract, Transform, Load) pipeline outside the Python GIL and managing memory statically, it allows modern GPUs to consume data at their theoretical hardware limits via zero-copy DLPack transfers.
 
-Feature List (- not begun, w working, + solved):
-    I/O:
-    - tests for slow drives with custom fuse filesystem
-    - overlapped i/o
+---
 
-    Application:
-    - training with synthetic data
-    - document full pipeline for calib, train, inference, post-process
-    - solve for ground plane like in zhang method, masks have to be respected
+## 🚀 Key Features
 
-    Benchmark/Perf.:
-    - perf counters (with python apis)
-    - benchmark has to document theoretical max values for all pipline stages
-    - autotune option for dataloader (i.e. minimize #threads while keeping within an inch of max throughput.)
+*   **Zero-Copy Handover:** Outputs tensors via **DLPack**, enabling instant integration with **JAX** and **PyTorch** without data duplication.
+*   **Asynchronous Pipeline:** Decoupled I/O, decoding, augmentation, and GPU transfer stages.
+*   **Pinned Memory Management:** Custom allocators ensure data is decoded directly into pinned (page-locked) memory.
+*   **SIMD Accelerated Compression:** A custom **lossless** `.compressed` format pipeline optimized using AVX2 intrinsics.
+*   **Strict C++20 Implementation:** Built for stability using modern concurrency primitives (`std::latch`, `std::atomic`, `std::barrier`).
 
-    Augmentations:
-    + make pipeline work; only bilinear resize for now
-    + vectorisation api
-    + tests for augmentations
-    w test augmentations with inconsistent input shapes
+---
 
-    Compression:
-    - enable compressed file format use in dataloader
+## 🧠 Architecture: Static Memory & The Resource Pool
 
-    Misc:
-    + ensure easy setup with uv (both production and tests)
-    + apply more sanitizers
-    + proper memory arenas in all perf. critical areas; static memory footprint as far as possible in data sources, decoders, augmentation pipe, decompression and resource pool.
-    - zero-copy augmentation output to pinned memory
-    + fix item keys order
-    + graphics card backend (e.g. cuda) selectable at runtime (default to cuda though)
-    - enable clang-tidy for all const modernisations
-    + support jax and pytorch bindings for IDataLoader out of the box; no tensorflow, because me not like it
+Deep learning frameworks are extremely sensitive to resource contention. A sudden `cudaMalloc` or `pthread_create` in the middle of a training loop can cause frame jitters or OOM crashes.
 
+Native Dataloader eliminates this volatility via the **Global Resource Pool**:
 
-Plan for how to select the backend:
-Needs to happen before the resource pool is initialized, as you obviously cannot switch as soon as the resource pool is actually in use.
+### 1. The Global Mirrored Allocator
+To hide PCIe latency, the Resource Pool manages a global, fixed-size arena of **Mirrored Memory**.
+*   For every buffer allocated on the Host (CPU Pinned Memory), a corresponding buffer is pre-allocated on the Device (GPU).
+*   Transfers are initiated asynchronously using CUDA fences.
+*   The consumer receives a `DLManagedTensor` pointing to this pre-allocated GPU memory.
 
-TODO (IMPORTANT IF THE DATALOADER IS EVER SUPPOSED TO WORK; THINK ABOUT GENCHANGE): setBuffers for the augmentation pipe
+### 2. Thread-Local Static Scratch
+Unlike Python loaders that churn RAM, our worker threads operate on **Static Scratch Buffers**.
+*   Before the loader starts, every component (Decoder, Augmenter) reports its *maximum theoretical memory requirement* (e.g., "I need 40MB for the largest possible JPEG in this dataset").
+*   The Resource Pool allocates these scratch buffers **once per thread**.
+*   During the training loop, threads use simple **Bump Allocators** (resetting offset to 0) to utilize this memory.
+*   **Result:** Zero dynamic `malloc`/`free` calls during training.
 
-TODO (Document in README later): Enable address sanitizer to work in dbeug mode using LD_PRELOAD=$(gcc -print-file-name=libasan.so) ASAN_OPTIONS="detect_leaks=0:log_path=logs/asan_log".
+### 3. Thread Stability
+The Resource Pool maintains a fixed set of worker threads. When switching dataloaders (e.g., Train → Val), we use a **Generational Index** to cleanly "flush" old tasks and assign new ones without killing or recreating threads, preserving OS scheduler stability.
 
-TODO (Run tests using): uv run --group test pytest ./tests/test_dataloader.py
+---
 
-Tutorial (How to deal with debug-asan):
-make install-debug-asan
-LD_PRELOAD=$(gcc -print-file-name=libasan.so) ASAN_OPTIONS="detect_leaks=0:log_path=logs/asan_log" pytest tests/...
+## 🏗️ Modular Components
 
-Test results for the compressor:
+The engine is built on strict C++ interfaces. You can mix, match, or extend these components via `pybind11`.
+
+### Data Sources (`IDataSource`)
+*The Discovery Layer.*
+*   **`FlatDataSource`:** Recursively scans directories for files.
+*   **`WebDataset`:** (Planned) offsets into TAR archives.
+*   **Custom:** Implementable in C++ for S3/SQL sources.
+
+### Data Decoders (`IDataDecoder`)
+*The Parsing Layer.*
+Decoders are probed automatically based on file content.
+*   **`JpgDataDecoder`:** High-performance decoding via `libjpeg-turbo`.
+*   **`PngDataDecoder`:** Lossless decoding via `libpng`.
+*   **`ExrDataDecoder`:** Floating-point HDR decoding via `OpenEXR` and `Imath`.
+*   **`NpyDataDecoder`:** Standard numpy array loading via `cnpy`.
+*   **`CompressedDataDecoder`:** Our custom high-bandwidth format.
+
+### Augmentations (`IDataAugmentation`)
+*The Math Layer.*
+*   **`ResizeAugmentation`**: Bilinear interpolation.
+*   **`PadAugmentation`**: Padding with configurable alignment (Top-Left, Bottom-Right, etc.).
+*   **`RandomCropAugmentation`**: Deterministic cropping based on item seeds.
+*   **`FlipAugmentation`**: Horizontal/Vertical flips.
+
+---
+
+## 💾 Deep Dive: The Compression Pipeline
+
+Standard image formats (JPEG/PNG) are CPU-heavy to decode, and standard compression (GZIP) works poorly on floating-point tensors.
+
+We implement a custom `.compressed` format optimized for **lossless throughput**. The pipeline runs on the CPU but is designed to saturate disk bandwidth. 
+
+**The Pipeline Steps:**
+1.  **FP16 Cast (Optional):** Reduces bandwidth by 50% with minimal precision loss. *This is the only lossy step.*
+2.  **Bitshuffle (AVX2):** Floating point data has high entropy in the mantissa but low entropy in the exponent. We transpose the data block at the bit level, creating long runs of zeros.
+3.  **Dimensional Permutation:** We permute dimensions (e.g., `HWC` -> `CHW`) to align features in memory, optimizing the look-ahead for the compressor.
+4.  **ZSTD:** Finally, the reordered bitstream is compressed with Zstandard (Level 3, 7, or 22).
+
+*Result:* Smaller file sizes than raw binary floats with significantly faster decoding speeds than standard image codecs.
+
+### Compression Example
+
+You can compress your raw numpy arrays (`.npy`) into this format ahead of time:
+
+```python
+import native_dataloader as ndl
+
+options = ndl.CompressorOptions(
+    num_threads=16,
+    input_directory="data/raw_features",
+    output_directory="data/compressed_features",
+    shape=[300, 300, 32], # H, W, C
+    cast_to_fp16=True,    # Set to False for fully lossless mode
+    permutations=[[0, 1, 2], [2, 0, 1]], # Auto-select best permutation
+    with_bitshuffle=True,
+    allowed_codecs=[ndl.Codec.ZSTD_LEVEL_3],
+    tolerance_for_worse_codec=0.01
+)
+
+# Starts the C++ compression engine
+compressor = ndl.Compressor(options)
+compressor.start()
 ```
-config                      fp16 bshuf codecs                   compressed   ratio  comp(s)  c_in MB/s  c_out MB/s   dec(s)  d_in MB/s  d_out MB/s
---------------------------------------------------------------------------------------------------------------------------------------------------
-fp32_zstd7                 False False ZSTD_LEVEL_7              615.17 MB   0.875    6.348     110.76       96.90    2.703     227.56      260.09
-fp16_zstd7                  True False ZSTD_LEVEL_7              275.40 MB   0.392    5.398     130.26       51.02    2.433     113.19      144.49
-fp32_bshuf_zstd7           False  True ZSTD_LEVEL_7              516.59 MB   0.735    6.084     115.56       84.90    2.742     188.42      256.45
-fp16_bshuf_zstd7            True  True ZSTD_LEVEL_7              238.41 MB   0.339    5.154     136.41       46.25    2.436      97.88      144.33
-fp16_bshuf_zstd(3,7,22)     True  True ZSTD_LEVEL_3,7,22         236.77 MB   0.337   20.931      33.59       11.31    2.464      96.08      142.66
-fp16_bshuf_zstd22           True  True ZSTD_LEVEL_22             235.98 MB   0.336   20.030      35.10       11.78    2.494      94.62      140.97
-raw total:                                                       703.13 MB   1.000
+
+---
+
+## ✨ Integrated Spatial Augmentation System
+
+Native Dataloader enforces **Spatial Consistency** between inputs (images) and targets (masks, keypoints) using a strongly-typed `ItemType` system:
+
+*   **`ItemType.RASTER` (Anchor):** The primary image. When augmented (e.g., Random Crop), the system records the exact parameters used in a **Processing Schema**.
+*   **`ItemType.POINTS` (Follower):** Spatial data (keypoints, boxes). These items automatically reference the preceding Raster's schema. If the image is flipped/cropped, the points are mathematically transformed to match.
+*   **`ItemType.NONE` (Invariant):** Labels or metadata. These bypass spatial augmentations entirely.
+
+---
+
+## 🛠️ Installation & Build
+
+This project relies on `uv` for Python dependency management and `CMake` with `Ninja` for the C++ build.
+
+### Prerequisites
+*   C++20 compatible compiler (GCC/Clang)
+*   CUDA Toolkit
+*   Python 3.9+
+*   `uv`
+
+### Setup
+
+```bash
+# 1. Install dependencies and setup virtual environment
+uv sync
+
+# 2. Build and install in Debug mode (for development)
+make install-debug
+
+# OR. Build and install in Release mode (maximum performance)
+make install-release
 ```
+
+---
+
+## ⚙️ Configuration & Tuning
+
+The `DataLoader` exposes critical parameters to tune the pipeline for your specific hardware constraints.
+
+```python
+loader = DataLoader(
+    dataset=dataset,
+    batch_size=128,   # Standard batch size
+    num_threads=16,   # Number of C++ worker threads
+    prefetch_size=4,  # Pipeline depth
+    aug_pipe=aug_pipe
+)
+```
+
+| Parameter | Impact | Description |
+| :--- | :--- | :--- |
+| `num_threads` | **CPU & Throughput** | The size of the C++ worker pool. Unlike Python loaders, increasing this does not spawn new processes. It should be tuned to match your CPU core count and IO/Decoding complexity. |
+| `prefetch_size` | **GPU Memory** | The number of batches to prepare asynchronously ahead of time. Higher values hide latency better but linearly increase the reserved **VRAM**. |
+| `batch_size` | **Training Dynamics** | Standard batch size. Note that changing this will trigger a Resource Pool generation change (flushing pipelines). |
+
+**⚠️ Note on VRAM Usage:**
+Because the dataloader uses **Mirrored Allocation**, it reserves GPU memory upfront based on this formula:
+`Reserved VRAM ≈ batch_size * prefetch_size * max_item_size_bytes`
+If you encounter OOM errors on the GPU, reduce the `prefetch_size`.
+
+---
+
+## 🛡️ Testing & Quality Assurance
+
+The project maintains a comprehensive test suite covering correctness, memory safety, and concurrency.
+
+[View Test Suite Summary](TESTS.md)
+
+### Static Analysis & Sanitizers
+Code correctness is enforced strictly through static analysis and runtime sanitizers.
+
+*   **Static Analysis:** `clang-tidy` with `WarningsAsErrors` checks for concurrency issues, performance pitfalls, and modern C++ compliance.
+*   **Runtime Sanitizers:** A dedicated `DebugAsanUsan` preset injects **AddressSanitizer (ASan)** and **UndefinedBehaviorSanitizer (UBSan)** to catch memory leaks, race conditions, and undefined behavior during tests.
+
+```bash
+# Run tests with Sanitizers enabled
+make install-debug-asan-usan
+./scripts/run_tests_with_san.sh
+```
+
+---
+
+## ⚠️ Current Status & Stability
+
+While this project allows for high-performance data loading, it is currently considered **Beta** software.
+
+*   **Hardening:** The codebase is not yet 100% hardened.
+*   **Missing TSan:** While we strictly enforce ASan and UBSan, **ThreadSanitizer (TSan) has not yet been integrated**.
+*   **Concurrency Risks:** Given the complex nature of the lock-free and fine-grained synchronization primitives used in the `ResourcePool` (e.g., `std::latch`, `std::barrier`), rare race conditions may still exist in edge cases.
+
+---
+
+## 📊 Performance Benchmarks
+
+Detailed performance metrics, including memory bandwidth utilization and throughput analysis on various backend configurations, are maintained automatically by the test suite.
+
+[View Latest Benchmarks](BENCHMARKS.md)
+
+---
+
+## 📦 Usage Example
+
+The library provides specific bindings for **JAX** and **PyTorch**. These bindings automatically handle the conversion from the internal `DLManagedTensor` to the framework-specific tensor type.
+
+### 1. Setup Dataset & Augmentations
+
+```python
+import native_dataloader as ndl
+
+# Define the Augmentation Pipeline
+aug_pipe = ndl.DataAugmentationPipe(
+    augmentations=[
+        ndl.ResizeAugmentation(224, 224),
+        ndl.FlipAugmentation(0.5, 0.5) 
+    ],
+    max_input_shape=[16, 512, 512, 3], # B, H, W, C
+    max_num_points=128,
+    max_item_size=4 
+)
+
+# Define dataset
+dataset = ndl.Dataset.from_subdirs(
+    root_directory="data/imagenet",
+    subdir_to_dict=[
+        ("images", "img", ndl.ItemType.RASTER),
+        ("labels", "cls", ndl.ItemType.NONE)
+    ]
+)
+```
+
+### 2. Choose your Framework
+
+**Option A: JAX**
+
+```python
+# Import the JAX-specific binding
+from native_dataloader.jax_binding import DataLoader
+
+loader = DataLoader(
+    dataset=dataset,
+    batch_size=128,
+    num_threads=16,
+    prefetch_size=4,
+    aug_pipe=aug_pipe
+)
+
+for batch, metadata in loader:
+    # 'batch["img"]' is already a jax.Array
+    # Zero-copy, ready for jit/pmap
+    pass
+```
+
+**Option B: PyTorch**
+
+```python
+# Import the PyTorch-specific binding
+from native_dataloader.pytorch_binding import DataLoader
+
+loader = DataLoader(
+    dataset=dataset,
+    batch_size=128,
+    num_threads=16,
+    prefetch_size=4,
+    aug_pipe=aug_pipe
+)
+
+for batch, metadata in loader:
+    # 'batch["img"]' is already a torch.Tensor
+    # Zero-copy, on GPU
+    pass
+```
+
+---
+
+**License:** MIT

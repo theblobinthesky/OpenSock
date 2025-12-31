@@ -66,6 +66,7 @@ void ThreadPool::extendedThreadMain(const size_t threadIdx, const uint64_t initi
         threadMain(threadIdx, desiredThreadCount, initialGenIdx);
     } catch (const std::exception &e) {
         LOG_ERROR("Thread main threw exception: {}", e.what());
+        exit(1);
     }
 }
 
@@ -82,6 +83,7 @@ void loadFileIntoBuffer(const std::string &path, size_t &inputSize, uint8_t *buf
     }
     inputSize = ftell(f);
     if (inputSize > bufferSize) {
+        fclose(f);
         throw std::runtime_error("Load file would overflow the buffer.");
     }
 

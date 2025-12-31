@@ -11,7 +11,7 @@ PREFETCH_SIZE = 4
 @pytest.fixture(params=[
     ("jax", JaxDataLoader),
     ("pytorch", PyTorchDataLoader),
-], ids=lambda p: p[0]")
+], ids=lambda p: p[0])
 def loader_cfg(request):
     name, cls = request.param
     return {"name": name, "cls": cls}
@@ -36,7 +36,10 @@ def test_binding(tmp_path, loader_cfg):
     dl = cls(ds, 16, NUM_THREADS, PREFETCH_SIZE, get_empty_pipe())
 
     batch, _ = dl.get_next_batch()
-    np_data = batch["np"]
+    if loader_cfg['name'] == 'pytorch':
+        np_data = np.asarray(batch["np"].cpu())
+    else:
+        np_data = np.asarray(batch["np"])
     assert np.all(np.ones((16, 3, 3, 4)) == np_data)
 
     return ds, dl

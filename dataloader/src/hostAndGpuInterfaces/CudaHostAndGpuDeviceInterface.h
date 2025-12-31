@@ -35,6 +35,7 @@ private:
     cudaStream_t stream = {};
 
     std::unordered_map<uint64_t, cudaEvent_t> fenceToEventMap;
+    std::mutex fenceToEventMapMutex;
     std::atomic_uint64_t eventIndex;
 };
 

@@ -126,7 +126,9 @@ else()
     target_compile_definitions(_core PRIVATE SPDLOG_ACTIVE_LEVEL=SPDLOG_LEVEL_OFF)
 endif()
 
-target_link_options(_core PRIVATE -fuse-ld=mold)
+if (NOT ENABLE_ASAN_USAN)
+    target_link_options(_core PRIVATE -fuse-ld=mold)
+endif()
 
 # Address sanitizer if enabled.
 if (ENABLE_ASAN_USAN)

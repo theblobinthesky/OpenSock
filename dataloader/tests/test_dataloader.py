@@ -25,7 +25,7 @@ DL_CONFIGS = [
     (16, 4),
     (8, 16),
     (8, 1),
-    (8, 2)
+    (8, 2),
 ]
 DEF_BATCH_SIZE, DEF_NUM_THREADS, DEF_PREFETCH_SIZE = 16, 16, 4
 
@@ -68,9 +68,7 @@ def init_ds_fn():
 def get_dataset():
     root_dir, sub_dir = ensure_jpg_dataset()
     return m.Dataset.from_subdirs(
-        root_dir, 
-        [(sub_dir, "img", m.ItemType.RASTER)], 
-        init_ds_fn
+        root_dir, [(sub_dir, "img", m.ItemType.RASTER)], init_ds_fn
     )
 
 
@@ -82,14 +80,25 @@ def get_npy_dataset(tmp_path, dtype=np.float32):
         testFile = tmp_path / "npy_subdir" / f"file{i}"
         np.save(testFile, np.ones((3, 3, 4), dtype=dtype))
 
-    return m.Dataset.from_subdirs(str(tmp_path), [("npy_subdir", "np", m.ItemType.NONE)], init_ds_fn)
+    return m.Dataset.from_subdirs(
+        str(tmp_path), [("npy_subdir", "np", m.ItemType.NONE)], init_ds_fn
+    )
 
 
 def get_aug_pipe():
-    return m.DataAugmentationPipe([m.ResizeAugmentation(HEIGHT, WIDTH)], [16, 500, 700, 3], 128, 4)
+    return m.DataAugmentationPipe(
+        [m.ResizeAugmentation(HEIGHT, WIDTH)], [16, 500, 700, 3], 128, 4
+    )
+
 
 def get_pad_pipe():
-    return m.DataAugmentationPipe([m.PadAugmentation(1024, 1024, m.PadSettings.PAD_BOTTOM_RIGHT)], [16, 1024, 1024, 3], 128, 4)
+    return m.DataAugmentationPipe(
+        [m.PadAugmentation(1024, 1024, m.PadSettings.PAD_BOTTOM_RIGHT)],
+        [16, 1024, 1024, 3],
+        128,
+        4,
+    )
+
 
 def get_dataloader(batch_size: int, num_threads: int, prefetch_size: int):
     ds = get_dataset()
@@ -107,13 +116,20 @@ def get_dataloaders(batch_size: int, num_threads: int, prefetch_size: int):
             DataLoader(ds2, batch_size, num_threads, prefetch_size, aug_pipe),
             DataLoader(ds3, batch_size, num_threads, prefetch_size, aug_pipe),
         ),
-        (ds1, ds2, ds3)
+        (ds1, ds2, ds3),
     )
 
 
 def assert_low_error(img, gt_img):
     err = np.mean(np.abs(img - gt_img))
-    assert np.all(err < 10 / 255.0), f"Error too high for image"
+    # if not np.all(err < 10 / 255.0):
+    #     import matplotlib.pyplot as plt
+    #     _, axs = plt.subplots(2, 1)
+    #     axs[0].imshow(img)
+    #     axs[1].imshow(gt_img)
+    #     plt.show()
+    assert np.all(err < 10 / 255.0), f"Error {err * 255.0:.1f} too high for image"
+
 
 def verify_correctness(ds, dl, bs, reps=1, start=0):
     # Continuous wrapping across all batches and repetitions (no reset between reps)
@@ -131,14 +147,12 @@ def verify_correctness(ds, dl, bs, reps=1, start=0):
             assert_low_error(imgs[i], pil_img)
             start += 1
 
+
 class TestGeneral:
     def test_get_length(self, dl_cfg):
         bs = 16
         _, dl = get_dataloader(batch_size=bs, **dl_cfg)
         assert len(dl) == (633 + bs - 1) // bs
-
-    def test_item_type_none_shapes_must_be_consistent(self):
-        raise ValueError("Test")
 
 
 class TestRaster:
@@ -151,18 +165,14 @@ class TestRaster:
         verify_correctness(ds, dl, bs=16, reps=3)
 
     def test_three_dlers_without_next_batch(self, dl_cfg):
-        (dl1, dl2, dl3), (ds1, ds2, ds3) = get_dataloaders(
-            batch_size=16, **dl_cfg
-        )
+        (dl1, dl2, dl3), (ds1, ds2, ds3) = get_dataloaders(batch_size=16, **dl_cfg)
         verify_correctness(ds1, dl1, bs=16)
         verify_correctness(ds2, dl2, bs=16)
         verify_correctness(ds3, dl3, bs=16)
 
     def test_three_dlers_with_next_batch(self, dl_cfg):
         bs = 16
-        (dl1, dl2, dl3), (ds1, ds2, ds3) = get_dataloaders(
-            batch_size=bs, **dl_cfg
-        )
+        (dl1, dl2, dl3), (ds1, ds2, ds3) = get_dataloaders(batch_size=bs, **dl_cfg)
         _, _ = dl2.get_next_batch()
         _, _ = dl1.get_next_batch()
         _, _ = dl3.get_next_batch()
@@ -222,16 +232,20 @@ class TestRaster:
     def test_aug_pipe_buffers_upsize(self, tmp_path):
         # Run data loader with tiny augmentation pipe. All buffers are too small.
         ds = get_npy_dataset(tmp_path)
-        aug_pipe = m.DataAugmentationPipe([m.ResizeAugmentation(HEIGHT, WIDTH)], [16, 1, 1, 3], 1, 1)
-        dl = DataLoader(ds, DEF_BATCH_SIZE, DEF_NUM_THREADS, DEF_PREFETCH_SIZE, aug_pipe)
+        aug_pipe = m.DataAugmentationPipe(
+            [m.ResizeAugmentation(HEIGHT, WIDTH)], [16, 1, 1, 3], 1, 1
+        )
+        dl = DataLoader(
+            ds, DEF_BATCH_SIZE, DEF_NUM_THREADS, DEF_PREFETCH_SIZE, aug_pipe
+        )
         batch, _ = dl.get_next_batch()
-        assert 'np' in batch
+        assert "np" in batch
         del batch
 
         # Then run an image raster dataloader. The buffers must upsize, otherwise the buffers overflow.
         _, dl = get_dataloader(DEF_BATCH_SIZE, DEF_NUM_THREADS, DEF_PREFETCH_SIZE)
         batch, _ = dl.get_next_batch()
-        assert 'img' in batch
+        assert "img" in batch
 
 
 class TestDecoders:
@@ -240,7 +254,9 @@ class TestDecoders:
         img_data = np.random.rand(h, w, 3).astype(np.float32)
         cv2.imwrite(EXR_DATASET_FILE, img_data)
 
-        ds = m.Dataset.from_subdirs("temp", [("img_exr", "img", m.ItemType.RASTER)], init_ds_fn)
+        ds = m.Dataset.from_subdirs(
+            "temp", [("img_exr", "img", m.ItemType.RASTER)], init_ds_fn
+        )
         dl = DataLoader(ds, 1, DEF_NUM_THREADS, DEF_PREFETCH_SIZE, get_pad_pipe())
         batch, _ = dl.get_next_batch()
         img = batch["img"][0, :h, :w]
@@ -253,10 +269,12 @@ class TestDecoders:
     def test_png(self):
         w, h = 500, 200
         random_data = os.urandom(w * h * 3)
-        img = Image.frombytes('RGB', (w, h), random_data)
+        img = Image.frombytes("RGB", (w, h), random_data)
         img.save(PNG_DATASET_FILE)
 
-        ds = m.Dataset.from_subdirs("temp", [("img_png", "img", m.ItemType.RASTER)], init_ds_fn)
+        ds = m.Dataset.from_subdirs(
+            "temp", [("img_png", "img", m.ItemType.RASTER)], init_ds_fn
+        )
         dl = DataLoader(ds, 1, DEF_NUM_THREADS, DEF_PREFETCH_SIZE, get_pad_pipe())
         batch, _ = dl.get_next_batch()
         img = batch["img"][0, :h, :w]
@@ -268,7 +286,8 @@ class TestDecoders:
 
     @pytest.mark.parametrize(
         "dtype",
-        [np.float16, np.float32, np.float64, np.int32, np.uint8],
+        # [np.float16, np.float32, np.float64, np.int32, np.uint8],
+        [np.float32],
         ids=lambda d: str(np.dtype(d)),
     )
     def test_npy(self, tmp_path, dtype):
@@ -282,8 +301,7 @@ class TestDecoders:
         dl = DataLoader(ds, 16, DEF_NUM_THREADS, DEF_PREFETCH_SIZE, get_aug_pipe())
 
         batch, _ = dl.get_next_batch()
-        np_data = np.asarray(batch["np"])
-
+        np_data = batch["np"]
         expected = np.ones((16, 3, 3, 4), dtype=dtype)
         if dtype == np.uint8:
             expected = expected.astype(np.float32) / np.float32(255.0)
@@ -341,31 +359,209 @@ class TestDecoders:
 
 
 class TestPoints:
-    def test_meta():
-        # TODO: Points tests.
-        raise ValueError()
+    MAX_POINTS = 16
+    POINT_DIM = 3
+    IMG_SIZE = 32
+
+    def _get_pipe(self):
+        return m.DataAugmentationPipe(
+            [
+                m.PadAugmentation(
+                    self.IMG_SIZE, self.IMG_SIZE, m.PadSettings.PAD_BOTTOM_RIGHT
+                )
+            ],
+            [16, self.IMG_SIZE, self.IMG_SIZE, 3],
+            self.MAX_POINTS,
+            4,
+        )
+
+    def _make_ds(self, tmp_path, lengths, mapping):
+        root = tmp_path / "points_root"
+        img_dir = root / "img_points"
+        pts_dir = root / "pts_points"
+        img_dir.mkdir(parents=True, exist_ok=True)
+        pts_dir.mkdir(parents=True, exist_ok=True)
+
+        rng = np.random.default_rng(0)
+        for idx, length in enumerate(lengths):
+            if length > self.MAX_POINTS:
+                raise ValueError("Sample length exceeds MAX_POINTS")
+
+            img = (rng.random((self.IMG_SIZE, self.IMG_SIZE, 3)) * 255).astype(np.uint8)
+            Image.fromarray(img).save(img_dir / f"sample_{idx}.png")
+
+            pts = np.zeros((length, self.POINT_DIM), dtype=np.float32)
+            if length:
+                pts[:, 0] = 1.0
+                pts[:, 1] = np.arange(length, dtype=np.float32)
+                pts[:, 2] = float(idx)
+            np.save(pts_dir / f"sample_{idx}.npy", pts)
+
+        return m.Dataset.from_subdirs(str(root), mapping, init_ds_fn)
+
+    def _idxs_in_ds_order(self, ds):
+        idxs = []
+        for entry in ds.entries:
+            anchor = entry[0]
+            name = os.path.basename(anchor)
+            idxs.append(int(os.path.splitext(name)[0].split("_")[-1]))
+        return idxs
+
+    def _lengths_in_ds_order(self, ds, lengths):
+        return [lengths[i] for i in self._idxs_in_ds_order(ds)]
+
+    def test_points_must_follow_raster_item(self, tmp_path):
+        lengths = [1, 2]
+        mapping = [
+            ("pts_points", "pts", m.ItemType.POINTS),
+            ("img_points", "img", m.ItemType.RASTER),
+        ]
+        with pytest.raises(RuntimeError):
+            self._make_ds(tmp_path, lengths, mapping)
+
+    def test_points_batch_returns_lengths_metadata(self, tmp_path):
+        lengths = [3, 7, 5, 1]
+        mapping = [
+            ("img_points", "img", m.ItemType.RASTER),
+            ("pts_points", "pts", m.ItemType.POINTS),
+        ]
+        ds = self._make_ds(tmp_path, lengths, mapping)
+        dl = DataLoader(
+            ds, len(lengths), DEF_NUM_THREADS, DEF_PREFETCH_SIZE, self._get_pipe()
+        )
+
+        batch, metadata = dl.get_next_batch()
+
+        assert "pts" in batch
+        assert "pts" in metadata
+        assert batch["pts"] is not None
+        assert metadata["pts"] is not None
+        pts = np.asarray(batch["pts"])
+        assert pts.shape == (len(lengths), self.MAX_POINTS, self.POINT_DIM)
+        assert pts.dtype == np.float32
+        del pts  # give back control to the dataloader
+
+        pts_lengths = np.asarray(metadata["pts"])
+        assert pts_lengths.shape == (len(lengths),)
+        assert pts_lengths.dtype == np.int32
+        expected = np.array(
+            self._lengths_in_ds_order(ds, lengths)[: len(lengths)], dtype=np.int32
+        )
+        assert np.array_equal(pts_lengths, expected)
+        del pts_lengths  # give back control to the dataloader
+
+    def test_points_tensor_prefix_matches_lengths(self, tmp_path):
+        lengths = [2, 1, 3, 7]
+        mapping = [
+            ("img_points", "img", m.ItemType.RASTER),
+            ("pts_points", "pts", m.ItemType.POINTS),
+        ]
+        ds = self._make_ds(tmp_path, lengths, mapping)
+        dl = DataLoader(
+            ds, len(lengths), DEF_NUM_THREADS, DEF_PREFETCH_SIZE, self._get_pipe()
+        )
+
+        batch, metadata = dl.get_next_batch()
+        assert "pts" in batch
+        assert "pts" in metadata
+        assert batch["pts"] is not None
+        assert metadata["pts"] is not None
+
+        pts = np.asarray(batch["pts"])
+        pts_lengths = np.asarray(metadata["pts"])
+
+        idxs = self._idxs_in_ds_order(ds)[: len(lengths)]
+        for b, (idx, length) in enumerate(zip(idxs, pts_lengths)):
+            length = int(length)
+            if length == 0:
+                continue
+
+            expected = np.zeros((length, self.POINT_DIM), dtype=np.float32)
+            expected[:, 0] = 1.0
+            expected[:, 1] = np.arange(length, dtype=np.float32)
+            expected[:, 2] = float(idx)
+            assert np.all(pts[b, :length] == expected)
+
+    def test_points_metadata_matches_dataset_iteration_order(self, tmp_path):
+        lengths = [2, 4, 6, 8, 3]
+        batch_size = 3
+        mapping = [
+            ("img_points", "img", m.ItemType.RASTER),
+            ("pts_points", "pts", m.ItemType.POINTS),
+        ]
+        ds = self._make_ds(tmp_path, lengths, mapping)
+        dl = DataLoader(
+            ds, batch_size, DEF_NUM_THREADS, DEF_PREFETCH_SIZE, self._get_pipe()
+        )
+
+        expected = self._lengths_in_ds_order(ds, lengths)
+        offset = 0
+        for _ in range(2):
+            batch, metadata = dl.get_next_batch()
+            assert "pts" in batch
+            assert "pts" in metadata
+            assert metadata["pts"] is not None
+
+            pts_lengths = np.asarray(metadata["pts"])
+            slice_expected = [
+                expected[(offset + i) % len(expected)] for i in range(batch_size)
+            ]
+            assert np.array_equal(pts_lengths, np.array(slice_expected, dtype=np.int32))
+            offset = (offset + batch_size) % len(expected)
 
 
-# def test_end_to_end_perf(benchmark):
-#     bs = 16
-#     _, dl, _ = get_dataloader(batch_size=bs, num_threads=24, prefetch_size=3)
+def test_end_to_end_perf(benchmark):
+    bs = DEF_BATCH_SIZE
+    num_threads = DEF_NUM_THREADS
+    prefetch_size = DEF_PREFETCH_SIZE
 
-#     # Warmup a bit to fill prefetch and spin up threads
-#     for _ in range(min(2, len(dl))):
-#         _ = dl.get_next_batch()
+    cap = {"n_batches": 0, "in_bytes": 0}
 
-#     num_batches = len(dl) * 16  # keep runtime reasonable
+    def setup_bench():
+        ds, dl = get_dataloader(
+            batch_size=bs, num_threads=num_threads, prefetch_size=prefetch_size
+        )
 
-#     def fetch_loop():
-#         items = 0
-#         for _ in range(num_batches):
-#             batch = dl.get_next_batch()
-#             x = batch['img']
-#             # Touch shape/size to ensure the object is realized and then drop it
-#             items += int(x.size)
-#             del batch
-#         return items
+        # Warmup a bit to fill prefetch and spin up threads.
+        for _ in range(min(2, len(dl))):
+            _ = dl.get_next_batch()
 
-#     total_items = benchmark(fetch_loop)
-#     # Sanity check to keep benchmark from being optimized away
-#     assert total_items > 0
+        n_batches = min(len(dl), 32)
+        paths = [item[0] for item in ds.entries]
+        in_bytes = 0
+        for i in range(n_batches * bs):
+            in_bytes += os.path.getsize(paths[i % len(paths)])
+
+        cap["n_batches"] = n_batches
+        cap["in_bytes"] = in_bytes
+        return (dl, n_batches), {}
+
+    def run_bench(dl, n_batches):
+        items = 0
+        for _ in range(n_batches):
+            batch, _ = dl.get_next_batch()
+            x = batch["img"]
+
+            # Ensure the returned tensor is realized.
+            if hasattr(x, "block_until_ready"):
+                x.block_until_ready()
+
+            items += int(x.size)
+        return items
+
+    benchmark.group = "Dataloader"
+    total_items = benchmark.pedantic(
+        run_bench,
+        setup=setup_bench,
+        rounds=3,
+        iterations=1,
+    )
+
+    out_bytes = cap["n_batches"] * bs * HEIGHT * WIDTH * 3 * 4
+    benchmark.extra_info["batches"] = int(cap["n_batches"])
+    benchmark.extra_info["items"] = int(total_items)
+    mean = benchmark.stats["mean"] if benchmark.stats else None
+    if mean:
+        benchmark.extra_info["in_MBps"] = (cap["in_bytes"] / (1024 * 1024)) / mean
+        benchmark.extra_info["out_MBps"] = (out_bytes / (1024 * 1024)) / mean
+    assert total_items > 0

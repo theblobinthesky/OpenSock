@@ -22,23 +22,7 @@ bool checkTransformOperatesOnStandardNDShape(const std::vector<size_t> &inputSha
     return true;
 }
 
-Dataset::Dataset(std::shared_ptr<IDataSource> _dataSource,
-                 std::vector<std::shared_ptr<IDataAugmentation> > _dataAugmentations,
-                 const pybind11::function &createDatasetFunction, const bool isVirtualDataset
-) : dataSource(std::move(_dataSource)), dataAugmentations(std::move(_dataAugmentations)) {
-    if (dataSource->preInitDataset(existsEnvVar(INVALID_DS_ENV_VAR) && isVirtualDataset)) {
-        createDatasetFunction();
-    }
-
-    dataSource->initDataset();
-}
-
-Dataset::Dataset(std::shared_ptr<IDataSource> _dataSource,
-                 std::vector<std::shared_ptr<IDataAugmentation> > _dataAugmentations
-) : dataSource(std::move(_dataSource)), dataAugmentations(std::move(_dataAugmentations)) {
-    dataSource->initDataset();
-
-    // Defensive programming.
+void verifyPointsArePreceededByRasters(const std::shared_ptr<IDataSource> &dataSource) {
     const auto &itemKeys = dataSource->getItemKeys();
     bool rasterEncountered = false;
     for (const auto &itemKey: itemKeys) {
@@ -50,6 +34,25 @@ Dataset::Dataset(std::shared_ptr<IDataSource> _dataSource,
             break;
         }
     }
+}
+
+Dataset::Dataset(std::shared_ptr<IDataSource> _dataSource,
+                 std::vector<std::shared_ptr<IDataAugmentation> > _dataAugmentations,
+                 const pybind11::function &createDatasetFunction, const bool isVirtualDataset
+) : dataSource(std::move(_dataSource)), dataAugmentations(std::move(_dataAugmentations)) {
+    if (dataSource->preInitDataset(existsEnvVar(INVALID_DS_ENV_VAR) && isVirtualDataset)) {
+        createDatasetFunction();
+    }
+
+    dataSource->initDataset();
+    verifyPointsArePreceededByRasters(dataSource);
+}
+
+Dataset::Dataset(std::shared_ptr<IDataSource> _dataSource,
+                 std::vector<std::shared_ptr<IDataAugmentation> > _dataAugmentations
+) : dataSource(std::move(_dataSource)), dataAugmentations(std::move(_dataAugmentations)) {
+    dataSource->initDataset();
+    verifyPointsArePreceededByRasters(dataSource);
 }
 
 std::tuple<std::shared_ptr<Dataset>, std::shared_ptr<Dataset>, std::shared_ptr<Dataset> >

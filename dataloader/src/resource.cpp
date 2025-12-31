@@ -193,8 +193,6 @@ void ResourcePool::wakeupAllThreads() {
     // Wake threads waiting on allocator memory availability.
     allocator.memoryNotify.fetch_add(1);
     allocator.memoryNotify.notify_all();
-
-    // TODO (i don't think this is necessary): genChangeSendOff->count_down();
 }
 
 struct WorkingBuffers {
@@ -252,23 +250,27 @@ void ResourcePool::threadMain(const size_t threadIdx, const std::atomic_uint32_t
 
     while (!IS_SHUTDOWN_REQUIRED()) {
         if (IS_GENCHANGE_REQUIRED()) {
+            // Gen change protocol.
             genChangeAssemble->count_down();
             LOG_DEBUG("thread {} waiting for genchange", threadIdx);
             rememberedGenIdx = genIdx.load();
             genChangeSendOff->wait();
+
+            // *After* gen change, reinitialize the new buffers.
             buffers.emplace(dl, dl->batchedDataset.getDataset()->getDataSource());
             continue;
         }
 
 
         const auto [startingOffset, batchPaths] = dl->batchedDataset.getNextInFlightBatch();
-        auto &bds = dl->batchedDataset;
-        auto &ds = bds.getDataset();
+        const auto &bds = dl->batchedDataset;
+        const auto &ds = bds.getDataset();
         const std::vector<ItemKey> &itemKeys = ds->getDataSource()->getItemKeys();
 
         // For each head, load all batch items into one contigous cpu array.
         std::vector<CpuAllocation> inputAllocsOnHost;
         std::vector<uint8_t *> outputAllocsOnHost;
+        std::vector<uint8_t *> metaOutputAllocsOnHost;
         buffers->inputArena.reset();
         buffers->outputArena.reset();
         for (size_t i = 0; i < itemKeys.size(); i++) {
@@ -282,12 +284,14 @@ void ResourcePool::threadMain(const size_t threadIdx, const std::atomic_uint32_t
                 buffers->scratch1.get(), buffers->scratch2.get()
             ));
             outputAllocsOnHost.push_back(buffers->outputArena.allocate(dl->bytesOfOutputOfItemKey[i]));
+            metaOutputAllocsOnHost.push_back(buffers->outputArena.allocate(dl->bytesOfMetaOutputOfItemKey[i]));
         }
         DO_SHUTDOWN_OR_GENCHANGE_IF_NECESSARY()
 
 
         // TODO: Move augmentations further up.
         // TODO: Technically, no pair has to be available while we are still decoding and augmenting.
+        std::vector<Shape> shapes;
         bool lastSchemaIsLeakingMemory = false;
         DataProcessingSchema lastSchema;
         for (size_t i = 0; i < itemKeys.size(); i++) {
@@ -295,23 +299,38 @@ void ResourcePool::threadMain(const size_t threadIdx, const std::atomic_uint32_t
             const CpuAllocation &inputAlloc = inputAllocsOnHost[i];
             uint8_t *outputAlloc = outputAllocsOnHost[i];
             switch (itemKey.type) {
-                case ItemType::NONE:
+                case ItemType::NONE: {
+                    for (const auto &shape: inputAlloc.shapes) {
+                        if (itemKey.probeResult.shape != shape) {
+                            throw std::runtime_error(std::format(
+                                "Inconsistent shapes are not allowed for item type NONE. {} != {}",
+                                formatVector(itemKey.probeResult.shape), formatVector(shape)));
+                        }
+                    }
+
                     // TODO (Speed): Zero copy.
                     memcpy(outputAlloc, inputAlloc.batchBuffer.uint8, dl->bytesOfOutputOfItemKey[i]);
-                    break;
-                case ItemType::POINTS:
-                    throw std::runtime_error("done");
+                    shapes.push_back(itemKey.probeResult.shape); // Primary tensor.
+                }
+                break;
+                case ItemType::POINTS: {
                     ASSERT(!lastSchema.inputShapesPerAug.empty());
+                    uint8_t *metaOutputAlloc = metaOutputAllocsOnHost[i];
                     dl->augPipe->augmentWithPoints(
                         inputAlloc.shapes,
                         itemKey.probeResult.dtype,
                         inputAlloc.batchBuffer.uint8,
+                        outputAlloc, reinterpret_cast<int32_t *>(metaOutputAlloc),
                         buffers->scratch1.get(), buffers->scratch2.get(),
-                        outputAlloc,
                         lastSchema
                     );
-                    break;
-                case ItemType::RASTER:
+
+                    Shape primaryShape = {dl->augPipe->getMaxNumPoints(), inputAlloc.shapes[0][1]};
+                    shapes.push_back(primaryShape); // Primary tensor.
+                    shapes.emplace_back(); // Metadata tensor.
+                }
+                break;
+                case ItemType::RASTER: {
                     if (lastSchemaIsLeakingMemory) {
                         dl->augPipe->freeProcessingSchema(lastSchema);
                     }
@@ -325,7 +344,10 @@ void ResourcePool::threadMain(const size_t threadIdx, const std::atomic_uint32_t
                         dl->maxBytesOfInputPerItemOfItemKey[i],
                         lastSchema
                     );
-                    break;
+
+                    shapes.emplace_back(dl->augPipe->getStaticOutputShape()); // Primary tensor.
+                }
+                break;
                 default:
                     throw std::runtime_error("Unsupported spatial hint in worker thread loop.");
             }
@@ -368,22 +390,41 @@ void ResourcePool::threadMain(const size_t threadIdx, const std::atomic_uint32_t
 
         ASSERT(allocations.getArena().host != nullptr);
         std::vector<uint8_t *> gpuAllocations;
+        gpuAllocations.reserve(itemKeys.size());
         std::vector<Fence> fences;
+        fences.reserve(itemKeys.size());
+        std::vector<bool> hasMetaTensor(itemKeys.size());
+        std::vector<DType> metaDType(itemKeys.size());
         for (size_t itemKeyIdx = 0; itemKeyIdx < itemKeys.size(); itemKeyIdx++) {
-            const auto &batchBuffer = outputAllocsOnHost[itemKeyIdx];
-            const size_t batchBufferSize = dl->bytesOfOutputOfItemKey[itemKeyIdx];
-            const auto &[host, gpu, _2] = allocations.allocate(batchBufferSize);
-
             // Start async upload to gpu memory as soon as possible.
+
             // TODO: This also locked a mutex. Maybe this is still necessary?
-
-            std::memcpy(host, batchBuffer, batchBufferSize);
             // TODO: Think about pinned memory availabilty. I think this is right, but recheck.
-
-            device->copyFromHostToGpuMemory(host, gpu, batchBufferSize);
-            gpuAllocations.push_back(gpu);
             // TODO: This needs to be synchronized by mutex?
-            fences.push_back(device->insertNextFenceIntoStream());
+            {
+                const size_t bytesOfOutput = dl->bytesOfOutputOfItemKey[itemKeyIdx];
+                const auto &[host, gpu, _] = allocations.allocate(bytesOfOutput);
+                const uint8_t *batchBuffer = outputAllocsOnHost[itemKeyIdx];
+                std::memcpy(host, batchBuffer, bytesOfOutput);
+
+                device->copyFromHostToGpuMemory(host, gpu, bytesOfOutput);
+                gpuAllocations.push_back(gpu);
+                fences.push_back(device->insertNextFenceIntoStream());
+            }
+
+            const size_t bytesOfMetaOutput = dl->bytesOfMetaOutputOfItemKey[itemKeyIdx];
+            if (itemKeys[itemKeyIdx].type == ItemType::POINTS) {
+                // POINTS uniquely have metadata associated with them.
+                const auto &[host, gpu, _] = allocations.allocate(bytesOfMetaOutput);
+                const uint8_t *batchBuffer = metaOutputAllocsOnHost[itemKeyIdx];
+                std::memcpy(host, batchBuffer, bytesOfMetaOutput);
+                hasMetaTensor[itemKeyIdx] = true;
+                metaDType[itemKeyIdx] = PointsLengthsTensorDType;
+
+                device->copyFromHostToGpuMemory(host, gpu, bytesOfMetaOutput);
+                gpuAllocations.push_back(gpu);
+                fences.push_back(device->insertNextFenceIntoStream());
+            }
         }
         DO_SHUTDOWN_OR_GENCHANGE_IF_NECESSARY()
 
@@ -399,8 +440,11 @@ void ResourcePool::threadMain(const size_t threadIdx, const std::atomic_uint32_t
 
         prefetchCache.push({
             .datasetStartingOffset = startingOffset,
-            .gpuAllocations = gpuAllocations,
-            .fences = fences,
+            .gpuAllocations = std::move(gpuAllocations),
+            .fences = std::move(fences),
+            .shapes = std::move(shapes),
+            .hasMetaTensor = std::move(hasMetaTensor),
+            .metaDType = std::move(metaDType)
         });
         prefetchCacheNotify.notify_all();
     }
@@ -434,7 +478,7 @@ PrefetchItem ResourcePool::acquireAndGetNextBatch(const std::shared_ptr<DataLoad
             LOG_TRACE("Assembled threads.");
 
             // Wait for all memory to be returned from the dlpack consumer (i.e. jax, tf., pytorch).
-            {
+            LOG_TRACE("Draining memory from consumer."); {
                 std::unique_lock lock(allocator.getMutex());
                 allocator.getDrainCv().wait(lock, [this] { return allocator.isDrained(); });
             }

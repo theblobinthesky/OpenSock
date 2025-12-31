@@ -96,6 +96,9 @@ struct PrefetchItem {
     int32_t datasetStartingOffset;
     std::vector<uint8_t *> gpuAllocations;
     std::vector<Fence> fences;
+    std::vector<Shape> shapes;
+    std::vector<bool> hasMetaTensor;
+    std::vector<DType> metaDType;
 
     bool operator<(const PrefetchItem &other) const;
 };

@@ -313,6 +313,7 @@ static void bindDataProcessingPipe(const py::module &m) {
                          getAndAssertEqualityOfDType(input, output),
                          static_cast<const uint8_t *>(inInfo.ptr),
                          static_cast<uint8_t *>(outInfo.ptr),
+                         nullptr,
                          b1.data(), b2.data(),
                          *schema
                      );
@@ -321,6 +322,7 @@ static void bindDataProcessingPipe(const py::module &m) {
 
 PYBIND11_MODULE(_core, m) {
 #if defined(ENABLE_DEBUG)
+    spdlog::flush_on(spdlog::level::trace);
     spdlog::set_level(spdlog::level::trace);
     spdlog::set_pattern("[%Y-%m-%d %H:%M:%S.%e] %^[%l]%$ [%s:%# %!] %v");
 #else

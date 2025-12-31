@@ -52,7 +52,7 @@ public:
     // Metadata about inputs/outputs:
     std::vector<size_t> maxBytesOfInputPerItemOfItemKey;
     std::vector<size_t> bytesOfOutputOfItemKey;
-    std::vector<size_t> bytesOfMetadataOutputPerItemOfItemKey;
+    std::vector<size_t> bytesOfMetaOutputOfItemKey;
     size_t maxInputBatchMemorySize{};
     size_t outputBatchMemorySize{};
 };

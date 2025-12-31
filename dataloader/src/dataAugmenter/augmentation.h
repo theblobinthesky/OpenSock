@@ -34,7 +34,8 @@ public:
     virtual void augmentWithPoints(
         const Shape &shape,
         DType dtype,
-        const uint8_t *__restrict__ inputData, uint8_t *__restrict__ outputData,
+        const uint8_t *__restrict__ inputData,
+        uint8_t *__restrict__ outputData,
         ItemProp &itemProp
     ) = 0;
 
@@ -66,7 +67,7 @@ struct DataProcessingSchema {
 class DataAugmentationPipe {
 public:
     explicit DataAugmentationPipe(
-        std::vector<std::shared_ptr<IDataAugmentation>> dataAugmentations,
+        std::vector<std::shared_ptr<IDataAugmentation> > dataAugmentations,
         const Shape &rasterMaxInputShape, uint32_t maxNumPoints, uint32_t maxBytesPerElement
     );
 
@@ -85,6 +86,7 @@ public:
         const Shapes &shapes,
         DType dtype,
         const uint8_t *__restrict__ inputData, uint8_t *__restrict__ outputData,
+        int32_t *metaOutputData,
         uint8_t *__restrict__ buffer1, uint8_t *__restrict__ buffer2,
         const DataProcessingSchema &schema
     ) const;
@@ -103,7 +105,7 @@ public:
     [[nodiscard]] uint32_t getMaxNumPoints() const;
 
 private:
-    std::vector<std::shared_ptr<IDataAugmentation>> dataAugs;
+    std::vector<std::shared_ptr<IDataAugmentation> > dataAugs;
     uint32_t maxRequiredBufferSize;
     uint32_t maxIntermediateSizeForItem;
 

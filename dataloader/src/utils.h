@@ -261,4 +261,12 @@ inline size_t getGenericUncompressedFileSizeUpperBound(const Shape &maxShape, co
     return getShapeSize(maxShape) * maxBytesPerElement + 64000;
 }
 
+inline Shape addFirstDimToShape(const uint32_t firstDim, const std::span<const uint32_t> &shape) {
+    Shape out = {firstDim};
+    for (unsigned int i : shape) {
+        out.push_back(i);
+    }
+    return out;
+}
+
 #endif

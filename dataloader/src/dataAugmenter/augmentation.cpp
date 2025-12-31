@@ -149,7 +149,8 @@ void dispatchInLoop(
     const Shapes &inputShapes, const Shape &outputShape, const DType dtype,
     const size_t maxBytesOfInputPerItemOfItemKey,
     const uint32_t maxIntermediateSizeOfItem,
-    SkipCheck skipCheck, Func func
+    SkipCheck skipCheck, Func func,
+    const bool forceEqualityIfSkip
 ) {
     const auto outputShapeNoBatch = std::span(outputShape).subspan(1);
 
@@ -194,7 +195,7 @@ void dispatchInLoop(
 
     for (size_t b = 0; b < B; b++) {
         if (outputBufferIsUntouchedForSlice[b]) {
-            if (std::span(inputShapes[b]) != outputShapeNoBatch) {
+            if (forceEqualityIfSkip && std::span(inputShapes[b]) != outputShapeNoBatch) {
                 throw std::runtime_error(std::format(
                     "Pipeline did not modify buffers, but input shape {} != output shape {}",
                     formatVector(inputShapes[b]), formatVector(outputShape)
@@ -212,7 +213,9 @@ void dispatchInLoop(
 void DataAugmentationPipe::augmentWithPoints(
     const Shapes &shapes,
     const DType dtype,
-    const uint8_t *__restrict__ inputData, uint8_t *__restrict__ outputData,
+    const uint8_t *__restrict__ inputData,
+    uint8_t *__restrict__ outputData,
+    int32_t *__restrict__ metaOutputData,
     uint8_t *__restrict__ buffer1, uint8_t *__restrict__ buffer2,
     const DataProcessingSchema &schema
 ) const {
@@ -261,7 +264,15 @@ void DataAugmentationPipe::augmentWithPoints(
                        const auto dataAugmentation = dataAugs[i];
                        void *itemProp = schema.itemPropsPerAug[i][b];
                        return dataAugmentation->augmentWithPoints(shapes[b], dtype, input, output, itemProp);
-                   });
+                   }, false);
+
+    if (metaOutputData) {
+        // Fill metadata buffer with true lengths.
+        for (size_t i = 0; i < shapes.size(); i++) {
+            const uint32_t n = shapes[i][0];
+            metaOutputData[i] = static_cast<int32_t>(n);
+        }
+    }
 }
 
 void DataAugmentationPipe::augmentWithRaster(
@@ -296,7 +307,7 @@ void DataAugmentationPipe::augmentWithRaster(
                            schema.outputShapesPerAug[i][b],
                            dtype, input, output, itemProp
                        );
-                   });
+                   }, true);
 }
 
 Shape DataAugmentationPipe::getRasterMaxInputShape() const {

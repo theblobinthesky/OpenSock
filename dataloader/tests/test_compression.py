@@ -278,6 +278,8 @@ class TestBenchmarks:
         raw_files = self._gather_raw_feature_files()
         raw_total = sum(os.path.getsize(p) for p in raw_files)
         n_elems, out_dtype_bytes = HEIGHT * WIDTH * D_OUT, 2 if cast_to_fp16 else 4
-        benchmark.extra_info['d_in_MBps'] = (raw_total / (1024 * 1024)) / benchmark.stats['mean']
-        benchmark.extra_info['d_out_MBps'] = ((len(cap_outs[0]) * n_elems * out_dtype_bytes) / (1024 * 1024)) / benchmark.stats['mean']
+        mean = benchmark.stats['mean']
+        if mean:
+            benchmark.extra_info['d_in_MBps'] = (raw_total / (1024 * 1024)) / mean
+            benchmark.extra_info['d_out_MBps'] = ((len(cap_outs[0]) * n_elems * out_dtype_bytes) / (1024 * 1024)) / mean
         shutil.rmtree(tmp_path)
