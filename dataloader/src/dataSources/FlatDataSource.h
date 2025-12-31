@@ -23,16 +23,24 @@ public:
 
     std::vector<std::vector<std::string> > getEntries() override;
 
-    CpuAllocation loadItemSliceIntoContigousBatch(BumpAllocator<uint8_t *> &alloc,
-                                                  const std::vector<std::vector<std::string> > &batchPaths,
-                                                  size_t itemKeysIdx, uint32_t bufferSize) override;
+    CpuAllocation loadItemSliceIntoContigousBatch(
+        BumpAllocator<uint8_t *> &alloc,
+        const std::vector<std::vector<std::string> > &batchPaths,
+        size_t itemKeysIdx, uint32_t bufferSize,
+        uint8_t *__restrict__ rawFile, size_t rawFileBufferSize,
+        uint8_t *__restrict__ scratch1, uint8_t *__restrict__ scratch2
+    ) override;
 
     bool preInitDataset(bool forceInvalidation) override;
 
     void initDataset() override;
 
     void splitIntoTwoDataSources(size_t aNumEntries, std::shared_ptr<IDataSource> &dataSourceA,
-                                std::shared_ptr<IDataSource> &dataSourceB) override;
+                                 std::shared_ptr<IDataSource> &dataSourceB) override;
+
+    size_t getRequiredRawFileBufferSize(const Shape &maxInputShape) override;
+
+    size_t getRequiredScratchBufferSize(const Shape &maxInputShape) override;
 
 private:
     std::string rootDirectory;

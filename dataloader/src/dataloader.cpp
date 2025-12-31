@@ -136,7 +136,9 @@ uint8_t getItemCode(const DType dtype) {
     switch (dtype) {
         case DType::UINT8: return kDLUInt;
         case DType::INT32: return kDLInt;
-        case DType::FLOAT32: return kDLFloat;
+        case DType::FLOAT16:
+        case DType::FLOAT32:
+            return kDLFloat;
         default:
             throw std::runtime_error("DType cannot be converted to item code.");
     }

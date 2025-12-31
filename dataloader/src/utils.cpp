@@ -68,3 +68,37 @@ void ThreadPool::extendedThreadMain(const size_t threadIdx, const uint64_t initi
         LOG_ERROR("Thread main threw exception: {}", e.what());
     }
 }
+
+void loadFileIntoBuffer(const std::string &path, size_t &inputSize, uint8_t *buf, const size_t bufferSize) {
+    inputSize = 0;
+    FILE *f = fopen(path.c_str(), "rb");
+    if (!f) {
+        throw std::runtime_error("fopen failed.");
+    }
+
+    if (fseek(f, 0, SEEK_END) != 0) {
+        fclose(f);
+        throw std::runtime_error("fseek failed.");
+    }
+    inputSize = ftell(f);
+    if (inputSize > bufferSize) {
+        throw std::runtime_error("Load file would overflow the buffer.");
+    }
+
+    if (fseek(f, 0, SEEK_SET) != 0) {
+        fclose(f);
+        throw std::runtime_error("fseek failed.");
+    }
+
+    if (!buf) {
+        fclose(f);
+        throw std::runtime_error("bug is null.");
+    }
+
+    if (fread(buf, 1, inputSize, f) != inputSize) {
+        fclose(f);
+        throw std::runtime_error("fread failed.");
+    }
+
+    fclose(f);
+}

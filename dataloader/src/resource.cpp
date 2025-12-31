@@ -197,6 +197,41 @@ void ResourcePool::wakeupAllThreads() {
     // TODO (i don't think this is necessary): genChangeSendOff->count_down();
 }
 
+struct WorkingBuffers {
+    const Shape maxInputShape;
+
+    size_t rawFileBufferSize;
+    const std::unique_ptr<uint8_t[]> rawFileBuffer;
+
+    const std::unique_ptr<uint8_t[]> inputBuffer;
+    BumpAllocator<uint8_t *> inputArena;
+
+    const std::unique_ptr<uint8_t[]> outputBuffer;
+    BumpAllocator<uint8_t *> outputArena;
+
+    const size_t dsScratchBufSize;
+    const size_t augPipeBufSize;
+    const size_t scratchBufSize;
+
+    const std::unique_ptr<uint8_t[]> scratch1;
+    const std::unique_ptr<uint8_t[]> scratch2;
+
+    explicit WorkingBuffers(const std::shared_ptr<DataLoader> &dl, const std::shared_ptr<IDataSource> &ds)
+        : maxInputShape(dl->augPipe->getRasterMaxInputShape()),
+          rawFileBufferSize(ds->getRequiredRawFileBufferSize(maxInputShape)),
+          rawFileBuffer(std::make_unique<uint8_t[]>(rawFileBufferSize)),
+          inputBuffer(std::make_unique<uint8_t[]>(dl->maxInputBatchMemorySize)),
+          inputArena(inputBuffer.get(), dl->maxInputBatchMemorySize),
+          outputBuffer(std::make_unique<uint8_t[]>(dl->outputBatchMemorySize)),
+          outputArena(outputBuffer.get(), dl->outputBatchMemorySize),
+          dsScratchBufSize(ds->getRequiredScratchBufferSize(maxInputShape)),
+          augPipeBufSize(dl->augPipe->getMaximumRequiredBufferSize()),
+          scratchBufSize(std::max(dsScratchBufSize, augPipeBufSize)),
+          scratch1(std::make_unique<uint8_t[]>(scratchBufSize)),
+          scratch2(std::make_unique<uint8_t[]>(scratchBufSize)) {
+    }
+};
+
 void ResourcePool::threadMain(const size_t threadIdx, const std::atomic_uint32_t &desiredThreadCount,
                               const uint64_t initialGenIdx) {
 #define IS_SHUTDOWN_REQUIRED() (threadIdx >= desiredThreadCount.load())
@@ -212,16 +247,8 @@ void ResourcePool::threadMain(const size_t threadIdx, const std::atomic_uint32_t
 
     LOG_DEBUG("thread {} started", threadIdx);
     uint64_t rememberedGenIdx = initialGenIdx;
-
-    const auto inputBuffer = std::make_unique<uint8_t[]>(dl->maxInputBatchMemorySize);
-    auto inputArena = BumpAllocator(inputBuffer.get(), dl->maxInputBatchMemorySize);
-
-    const auto outputBuffer = std::make_unique<uint8_t[]>(dl->outputBatchMemorySize);
-    auto outputArena = BumpAllocator(outputBuffer.get(), dl->outputBatchMemorySize);
-
-    const size_t augPipeBufSize = dl->augPipe->getMaximumRequiredBufferSize();
-    const auto augPipeBuffer1 = std::make_unique<uint8_t[]>(augPipeBufSize);
-    const auto augPipeBuffer2 = std::make_unique<uint8_t[]>(augPipeBufSize);
+    std::optional<WorkingBuffers> buffers;
+    buffers.emplace(dl, dl->batchedDataset.getDataset()->getDataSource());
 
     while (!IS_SHUTDOWN_REQUIRED()) {
         if (IS_GENCHANGE_REQUIRED()) {
@@ -229,6 +256,7 @@ void ResourcePool::threadMain(const size_t threadIdx, const std::atomic_uint32_t
             LOG_DEBUG("thread {} waiting for genchange", threadIdx);
             rememberedGenIdx = genIdx.load();
             genChangeSendOff->wait();
+            buffers.emplace(dl, dl->batchedDataset.getDataset()->getDataSource());
             continue;
         }
 
@@ -241,17 +269,19 @@ void ResourcePool::threadMain(const size_t threadIdx, const std::atomic_uint32_t
         // For each head, load all batch items into one contigous cpu array.
         std::vector<CpuAllocation> inputAllocsOnHost;
         std::vector<uint8_t *> outputAllocsOnHost;
-        inputArena.reset();
-        outputArena.reset();
+        buffers->inputArena.reset();
+        buffers->outputArena.reset();
         for (size_t i = 0; i < itemKeys.size(); i++) {
             // The convention is that data sources always read into cpu memory, even if no
             // augmentations are applied. This is because we cannot guarantee,
             // that the decoders never read from pinned memory.
             // Reading from pinned memory can be very slow, as it is not always backed by RAM.
             inputAllocsOnHost.push_back(ds->getDataSource()->loadItemSliceIntoContigousBatch(
-                inputArena, batchPaths, i, dl->maxBytesOfInputPerItemOfItemKey[i]
+                buffers->inputArena, batchPaths, i, dl->maxBytesOfInputPerItemOfItemKey[i],
+                buffers->rawFileBuffer.get(), buffers->rawFileBufferSize,
+                buffers->scratch1.get(), buffers->scratch2.get()
             ));
-            outputAllocsOnHost.push_back(outputArena.allocate(dl->bytesOfOutputOfItemKey[i]));
+            outputAllocsOnHost.push_back(buffers->outputArena.allocate(dl->bytesOfOutputOfItemKey[i]));
         }
         DO_SHUTDOWN_OR_GENCHANGE_IF_NECESSARY()
 
@@ -266,13 +296,8 @@ void ResourcePool::threadMain(const size_t threadIdx, const std::atomic_uint32_t
             uint8_t *outputAlloc = outputAllocsOnHost[i];
             switch (itemKey.type) {
                 case ItemType::NONE:
-                    if (itemKey.probeResult.shape != inputAlloc.shapes[i]) {
-                        throw std::runtime_error("Item type NONE requires the shape to be constant across files.");
-                    }
-
                     // TODO (Speed): Zero copy.
                     memcpy(outputAlloc, inputAlloc.batchBuffer.uint8, dl->bytesOfOutputOfItemKey[i]);
-                    std::printf("probe.shape==%lu\n", dl->bytesOfOutputOfItemKey[i]);
                     break;
                 case ItemType::POINTS:
                     throw std::runtime_error("done");
@@ -281,7 +306,7 @@ void ResourcePool::threadMain(const size_t threadIdx, const std::atomic_uint32_t
                         inputAlloc.shapes,
                         itemKey.probeResult.dtype,
                         inputAlloc.batchBuffer.uint8,
-                        augPipeBuffer1.get(), augPipeBuffer2.get(),
+                        buffers->scratch1.get(), buffers->scratch2.get(),
                         outputAlloc,
                         lastSchema
                     );
@@ -296,7 +321,7 @@ void ResourcePool::threadMain(const size_t threadIdx, const std::atomic_uint32_t
                         itemKey.probeResult.dtype,
                         inputAlloc.batchBuffer.uint8,
                         outputAlloc,
-                        augPipeBuffer1.get(), augPipeBuffer2.get(),
+                        buffers->scratch1.get(), buffers->scratch2.get(),
                         dl->maxBytesOfInputPerItemOfItemKey[i],
                         lastSchema
                     );
@@ -397,22 +422,23 @@ PrefetchItem ResourcePool::acquireAndGetNextBatch(const std::shared_ptr<DataLoad
         // The protocol allows for a clean state transition:
         // Wait for all threads to exit their generational loops.
         // Only then can you safely reinitialize everything.
-        LOG_DEBUG("Waiting for Gen change send-off.");
+        LOG_TRACE("Waiting for Gen change send-off.");
         genChangeSendOff = std::make_unique<std::latch>(1);
-        LOG_DEBUG("Gen change sent-off!");
+        LOG_TRACE("Gen change sent-off!");
         if (dl != nullptr) {
-            LOG_DEBUG("Assembling {} threads.", dl->numThreads);
+            LOG_TRACE("Assembling {} threads.", dl->numThreads);
             genChangeAssemble = std::make_unique<std::latch>(dl->numThreads);
             // Wait for all threads to stop working.
             wakeupAllThreads();
             genChangeAssemble->wait();
-            LOG_DEBUG("Assembled threads.");
+            LOG_TRACE("Assembled threads.");
 
             // Wait for all memory to be returned from the dlpack consumer (i.e. jax, tf., pytorch).
             {
                 std::unique_lock lock(allocator.getMutex());
                 allocator.getDrainCv().wait(lock, [this] { return allocator.isDrained(); });
             }
+            LOG_TRACE("Drained memory from consumer.");
 
             // Reset and reinitialize everything.
             dl->batchedDataset.forgetInFlightBatches();

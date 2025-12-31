@@ -55,8 +55,11 @@ ProbeResult JpgDataDecoder::probeFromMemory(uint8_t *inputData, const size_t inp
     };
 }
 
-DecodingResult JpgDataDecoder::loadFromMemory(const uint32_t bufferSize, uint8_t *inputData, const size_t inputSize,
-                                              BumpAllocator<uint8_t *> &output) {
+DecodingResult JpgDataDecoder::loadFromMemory(
+    const uint32_t bufferSize, uint8_t *inputData, const size_t inputSize,
+    BumpAllocator<uint8_t *> &output,
+    uint8_t *__restrict__, uint8_t *__restrict__
+) {
     uint8_t *outputData = output.allocate(bufferSize);
     jpeg_decompress_struct comprInfo = {};
     readJpg(inputData, inputSize, comprInfo, outputData);

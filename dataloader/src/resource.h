@@ -135,7 +135,7 @@ private:
 
     void wakeupAllThreads();
 
-    void threadMain(size_t threadIdx, const std::atomic_uint32_t &desiredThreadCount, const uint64_t initialGenIdx);
+    void threadMain(size_t threadIdx, const std::atomic_uint32_t &desiredThreadCount, uint64_t initialGenIdx);
 
     static std::shared_ptr<HostAndGpuDeviceInterface> deviceForNewResourcePool;
     static ResourcePool *singleton;

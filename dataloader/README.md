@@ -50,14 +50,14 @@ Feature List (- not begun, w working, + solved):
     - enable compressed file format use in dataloader
 
     Misc:
-    - ensure easy setup with uv (both production and tests)
+    + ensure easy setup with uv (both production and tests)
     + apply more sanitizers
     w proper memory arenas in all perf. critical areas
     - zero-copy augmentation output to pinned memory
     + fix item keys order
     + graphics card backend (e.g. cuda) selectable at runtime (default to cuda though)
     - enable clang-tidy for all const modernisations
-    w support jax, pytorch and tensorflow bindings for IDataLoader out of the box
+    + support jax and pytorch bindings for IDataLoader out of the box; no tensorflow, because me not like it
 
 
 Plan for how to select the backend:
@@ -66,6 +66,8 @@ Needs to happen before the resource pool is initialized, as you obviously cannot
 TODO (IMPORTANT IF THE DATALOADER IS EVER SUPPOSED TO WORK; THINK ABOUT GENCHANGE): setBuffers for the augmentation pipe
 
 TODO (Document in README later): Enable address sanitizer to work in dbeug mode using LD_PRELOAD=$(gcc -print-file-name=libasan.so) ASAN_OPTIONS="detect_leaks=0:log_path=logs/asan_log".
+
+TODO (Run tests using): uv run --group test pytest ./tests/test_dataloader.py
 
 Tutorial (How to deal with debug-asan):
 make install-debug-asan

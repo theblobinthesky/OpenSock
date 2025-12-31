@@ -135,12 +135,11 @@ def assert_allclose_after_compress_decompress(outputDir: str, shape: list[int], 
     outs = [f for f in os.listdir(FEATURES_DIR)]
     assert outs
 
-    decompressor = m.Decompressor(shape)
     for file_name in outs:
         compressed_path = f"{outputDir}/{file_name}.compressed"
         npy_path = f"{FEATURES_DIR}/{file_name}"
 
-        decompressed_arr = decompressor.decompress(compressed_path)
+        decompressed_arr = m.decompress_path(compressed_path, shape)
         original_arr = np.astype(np.load(npy_path), original_dtype)
         # TODO: Maybe we should improve the precision of this.
         assert np.allclose(original_arr, decompressed_arr, atol=8e-1)
@@ -260,14 +259,13 @@ class TestBenchmarks:
         cap_outs = [None]
         def setup_bench():
             m.Compressor(options).start()
-            decomp = m.Decompressor(shape)
             outs = [os.path.join(tmp_path, f) for f in os.listdir(tmp_path) if f.endswith(".compressed")]
             cap_outs[0] = outs
-            return (decomp, outs), {}
+            return (outs,), {}
 
-        def run_bench(decomp, outs):
+        def run_bench(outs):
             for p in outs:
-                _ = decomp.decompress(p)
+                _ = m.decompress_path(p, shape)
 
         benchmark.group = 'Decompression'
         benchmark.pedantic(

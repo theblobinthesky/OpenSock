@@ -98,8 +98,11 @@ ProbeResult ExrDataDecoder::probeFromMemory(uint8_t *inputData, const size_t inp
     };
 }
 
-DecodingResult ExrDataDecoder::loadFromMemory(const uint32_t bufferSize, uint8_t *inputData, const size_t inputSize,
-                                              BumpAllocator<uint8_t *> &output) {
+DecodingResult ExrDataDecoder::loadFromMemory(
+    const uint32_t bufferSize, uint8_t *inputData, const size_t inputSize,
+    BumpAllocator<uint8_t *> &output,
+    uint8_t *__restrict__, uint8_t *__restrict__
+) {
     uint8_t *outputData = output.allocate(bufferSize);
     uint32_t width, height;
     readExr(inputData, inputSize, width, height, reinterpret_cast<float *>(outputData));

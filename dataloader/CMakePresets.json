@@ -8,23 +8,17 @@
             "binaryDir": "build/debug",
             "cacheVariables": {
                 "CMAKE_EXPORT_COMPILE_COMMANDS": "1",
-                "CMAKE_BUILD_TYPE": "Debug",
-                "Python_EXECUTABLE": "/usr/bin/python3.12",
-                "Python_INCLUDE_DIR": "/usr/include/python3.12",
-                "Python_LIBRARY": "/usr/lib/x86_64-linux-gnu/libpython3.12.so"
+                "CMAKE_BUILD_TYPE": "Debug"
             }
         },
         {
-            "name": "DebugAsan",
-            "displayName": "DebugAsan",
+            "name": "DebugAsanUsan",
+            "displayName": "DebugAsanUsan",
             "generator": "Ninja",
-            "binaryDir": "build/debug-asan",
+            "binaryDir": "build/debug-asan-usan",
             "cacheVariables": {
                 "CMAKE_EXPORT_COMPILE_COMMANDS": "1",
-                "CMAKE_BUILD_TYPE": "Debug",
-                "Python_EXECUTABLE": "/usr/bin/python3.12",
-                "Python_INCLUDE_DIR": "/usr/include/python3.12",
-                "Python_LIBRARY": "/usr/lib/x86_64-linux-gnu/libpython3.12.so"
+                "CMAKE_BUILD_TYPE": "Debug"
             }
         },
         {
@@ -34,10 +28,7 @@
             "binaryDir": "build/release",
             "cacheVariables": {
                 "CMAKE_EXPORT_COMPILE_COMMANDS": "1",
-                "CMAKE_BUILD_TYPE": "Release",
-                "Python_EXECUTABLE": "/usr/bin/python3.12",
-                "Python_INCLUDE_DIR": "/usr/include/python3.12",
-                "Python_LIBRARY": "/usr/lib/x86_64-linux-gnu/libpython3.12.so"
+                "CMAKE_BUILD_TYPE": "Release"
             }
         }
     ]

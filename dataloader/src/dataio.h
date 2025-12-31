@@ -48,9 +48,13 @@ public:
 
     virtual std::vector<std::vector<std::string> > getEntries() = 0;
 
-    virtual CpuAllocation loadItemSliceIntoContigousBatch(BumpAllocator<uint8_t *> &alloc,
-                                                          const std::vector<std::vector<std::string> > &batchPaths,
-                                                          size_t itemKeysIdx, uint32_t bufferSize) = 0;
+    virtual CpuAllocation loadItemSliceIntoContigousBatch(
+        BumpAllocator<uint8_t *> &alloc,
+        const std::vector<std::vector<std::string> > &batchPaths,
+        size_t itemKeysIdx, uint32_t bufferSize,
+        uint8_t *__restrict__ rawFile, size_t rawFileBufferSize,
+        uint8_t *__restrict__ scratch1, uint8_t *__restrict__ scratch2
+    ) = 0;
 
     virtual bool preInitDataset(bool forceInvalidation) = 0;
 
@@ -59,6 +63,10 @@ public:
     // Do *NOT* pass the data source itself as a parameter.
     virtual void splitIntoTwoDataSources(size_t aNumEntries, std::shared_ptr<IDataSource> &dataSourceA,
                                          std::shared_ptr<IDataSource> &dataSourceB) = 0;
+
+    virtual size_t getRequiredRawFileBufferSize(const Shape &maxInputShape) = 0;
+
+    virtual size_t getRequiredScratchBufferSize(const Shape &maxInputShape) = 0;
 };
 
 struct DecodingResult {
@@ -72,8 +80,21 @@ public:
 
     virtual ProbeResult probeFromMemory(uint8_t *inputData, size_t inputSize) = 0;
 
-    virtual DecodingResult loadFromMemory(uint32_t bufferSize, uint8_t *inputData, size_t inputSize,
-                                          BumpAllocator<uint8_t *> &output) = 0;
+    virtual DecodingResult loadFromMemory(
+        uint32_t bufferSize, uint8_t *inputData, size_t inputSize,
+        BumpAllocator<uint8_t *> &output,
+        uint8_t *__restrict__ scratch1, uint8_t *__restrict__ scratch2
+    ) = 0;
+
+    // Tighter upper bounds should be investigated.
+    [[nodiscard]] virtual size_t getRequiredRawFileBufferSize(const Shape &maxInputShape) const {
+        return getGenericUncompressedFileSizeUpperBound(maxInputShape, 8);
+    }
+
+    // Tighter memory controls on jpg and png decoding should be investigated.
+    [[nodiscard]] virtual size_t getRequiredScratchBufferSize(const Shape & /*maxInputShape*/) const {
+        return 0;
+    }
 
     virtual std::string getExtension() = 0;
 };

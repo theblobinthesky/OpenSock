@@ -157,11 +157,12 @@ class Decompressor:
     def decompress(self, path: str):
         return self._native.decompress(path)
 
-
 def set_device_for_resource_pool(device) -> None:
     m.set_device_for_resource_pool(device)
-
 
 def shutdown_resource_pool() -> None:
     """Shut down the global resource pool and free GPU/host memory."""
     m.shutdown_resource_pool()
+
+def decompress_path(path: str, maxShape) -> None:
+    return m.decompress_path(path, maxShape)

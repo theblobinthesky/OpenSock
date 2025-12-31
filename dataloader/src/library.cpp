@@ -22,7 +22,7 @@ static void bindDatasetRelated(const py::module &m) {
             .value("FLOAT32", DType::FLOAT32)
             .export_values();
 
-    py::class_<Dataset, std::shared_ptr<Dataset>>(m, "Dataset")
+    py::class_<Dataset, std::shared_ptr<Dataset> >(m, "Dataset")
             .def(py::init<std::shared_ptr<IDataSource>,
                 std::vector<std::shared_ptr<IDataAugmentation> >,
                 const pybind11::function &,
@@ -45,7 +45,8 @@ static void bindDataloaderRelated(const py::module &m) {
 
     // TODO Comment(getNextBatch): Important convention is that memory of the last batch gets invalid when you call getNextBatch!
     py::class_<DataLoader, std::shared_ptr<DataLoader> >(m, "DataLoader")
-            .def(py::init<const std::shared_ptr<Dataset> &, int, int, int, const std::shared_ptr<DataAugmentationPipe> &>())
+            .def(py::init<const std::shared_ptr<Dataset> &, int, int, int,
+                const std::shared_ptr<DataAugmentationPipe> &>())
             .def("getNextBatch", [](DataLoader &self) {
                 std::pair<py::dict, py::dict> result = self.getNextBatch();
                 return py::make_tuple(result.first, result.second);
@@ -55,7 +56,7 @@ static void bindDataloaderRelated(const py::module &m) {
             });
 }
 
-static void bindCompressionRelated(const py::module &m) {
+static void bindCompressionRelated(py::module &m) {
     py::enum_<Codec>(m, "Codec")
             .value("ZSTD_LEVEL_3", Codec::ZSTD_LEVEL_3)
             .value("ZSTD_LEVEL_7", Codec::ZSTD_LEVEL_7)
@@ -77,30 +78,52 @@ static void bindCompressionRelated(const py::module &m) {
             .def(py::init<CompressorOptions>())
             .def("start", &Compressor::start);
 
-    py::class_<Decompressor>(m, "Decompressor")
-            .def(py::init<std::vector<uint32_t> >())
-            .def("decompress", [](const Decompressor &self, const std::string &path) -> py::array {
-                // ReSharper disable once CppDFAMemoryLeak
-                const auto data = new std::vector<uint8_t>();
-                std::vector<size_t> shape;
-                int bytesPerItem;
-                self.decompress(path, *data, shape, bytesPerItem);
+    m.def("decompress_path", [](const std::string &path, const Shape &maxInputShape) -> py::array {
+        const CompressorSettings settings = probeCompressedFileSettings(path);
 
-                std::string dtypeString;
-                if (bytesPerItem == 2) {
-                    dtypeString = "float16";
-                } else if (bytesPerItem == 4) {
-                    dtypeString = "float32";
-                } else {
-                    throw std::runtime_error("Encountered unsupported dtype.");
-                }
-                const py::dtype dtype(dtypeString);
+        // Validate against decompressor's configured shape
+        const uint32_t outBytes = settings.getShapeSize() * settings.getItemSize();
+        const py::dtype dtype(settings.getItemSize() == 2 ? "float16" : "float32");
 
-                const py::capsule capsule(data, [](void *p) {
-                    delete static_cast<std::vector<uint8_t> *>(p);
-                });
-                return {dtype, shape, data->data(), capsule};
-            });
+        std::vector<size_t> pyShape;
+        for (uint32_t i = 0; i < settings.shapeLength; ++i) {
+            pyShape.push_back(settings.shape[i]);
+        }
+
+        // Compute C-contiguous strides (row-major) in bytes
+        std::vector<ssize_t> strides(settings.shapeLength);
+        if (settings.shapeLength > 0) {
+            strides[settings.shapeLength - 1] = static_cast<ssize_t>(settings.getItemSize());
+            for (int i = static_cast<int>(settings.shapeLength) - 2; i >= 0; --i) {
+                strides[i] = strides[i + 1] * static_cast<ssize_t>(settings.shape[i + 1]);
+            }
+        }
+
+        // Allocate temporary working buffers
+        const size_t rawFileSize = Decompressor::getMaximumRequiredRawFileBufferSize(maxInputShape);
+        std::vector<uint8_t> dataIn(rawFileSize);
+        const size_t scratchSize = Decompressor::getMaximumRequiredScratchBufferSize(maxInputShape);
+        std::vector<uint8_t> scratch1(scratchSize);
+        std::vector<uint8_t> scratch2(scratchSize);
+
+        // Execute decompression pipeline
+        auto *dataOut = new uint8_t[outBytes];
+        size_t inputSize;
+        loadFileIntoBuffer(path, inputSize, dataIn.data(), rawFileSize);
+        Decompressor::decompressArray(
+            dataIn.data(),
+            scratch1.data(),
+            scratch2.data(),
+            dataOut,
+            settings
+        );
+
+        const py::capsule capsule(dataOut, [](void *p) {
+            delete[] static_cast<uint8_t *>(p);
+        });
+
+        return {dtype, pyShape, strides, dataOut, capsule};
+    });
 }
 
 static void bindDataSources(const py::module &m) {
@@ -306,7 +329,7 @@ PYBIND11_MODULE(_core, m) {
 
     m.doc() = R"pbdoc(
         Native Dataloader that outputs tensors in the DLPack format.
-        Compatible with all major deep learning frameworks including jax, tensorflow and pytorch.
+        Compatible with all major deep learning frameworks including jax and pytorch.
         -----------------------
 
         .. currentmodule:: native_dataloader

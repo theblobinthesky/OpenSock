@@ -259,10 +259,3 @@ class TestPointCorrectness:
             gt[:, :, 1] *= 36.0 / 64
             gt = gt.astype(dtype)
             assert np.allclose(gt, output_array)
-
-# TODO: New tests
-# - data aug pipeline -> two white pixels are in the right place
-# - data aug pipeline test individual tests
-# - no data aug two differently sized images throw exception
-# - no data aug two similar sized images throw no exception
-# TODO: Mixed by batch augmentations are skipped test.

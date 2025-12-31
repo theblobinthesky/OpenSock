@@ -3,7 +3,6 @@
 #include <cstring>
 #include <filesystem>
 #include <format>
-#include <utility>
 #include <immintrin.h>
 #include <zstd.h>
 #include "cnpy.h"
@@ -199,6 +198,7 @@ void applyShapePermutationInternal(const uint32_t shape[MAX_SHAPE_SIZE], const u
         dataOut[newIdx] = dataIn[i];
     }
 }
+
 // NOLINTEND(clang-analyzer-core.uninitialized.ArraySubscript)
 
 void applyShapePermutation(const uint32_t shape[MAX_SHAPE_SIZE], const uint32_t permutation[MAX_SHAPE_SIZE],
@@ -206,13 +206,13 @@ void applyShapePermutation(const uint32_t shape[MAX_SHAPE_SIZE], const uint32_t 
                            const uint8_t *dataIn, uint8_t *dataOut) {
     const size_t itemSize = settings.getItemSize();
     if (itemSize == 1) {
-        applyShapePermutationInternal<uint8_t>(shape, permutation, settings.shapeSize, dataIn, dataOut);
+        applyShapePermutationInternal<uint8_t>(shape, permutation, settings.shapeLength, dataIn, dataOut);
     } else if (itemSize == 2) {
-        applyShapePermutationInternal<uint16_t>(shape, permutation, settings.shapeSize, dataIn, dataOut);
+        applyShapePermutationInternal<uint16_t>(shape, permutation, settings.shapeLength, dataIn, dataOut);
     } else if (itemSize == 4) {
-        applyShapePermutationInternal<uint32_t>(shape, permutation, settings.shapeSize, dataIn, dataOut);
+        applyShapePermutationInternal<uint32_t>(shape, permutation, settings.shapeLength, dataIn, dataOut);
     } else if (itemSize == 8) {
-        applyShapePermutationInternal<uint64_t>(shape, permutation, settings.shapeSize, dataIn, dataOut);
+        applyShapePermutationInternal<uint64_t>(shape, permutation, settings.shapeLength, dataIn, dataOut);
     } else {
         throw std::runtime_error("Cannot apply shape permutation to item size other than 1, 2, 4 or 8.");
     }
@@ -220,12 +220,12 @@ void applyShapePermutation(const uint32_t shape[MAX_SHAPE_SIZE], const uint32_t 
 
 void revertShapePermutation(const CompressorSettings &settings, const uint8_t *dataIn, uint8_t *dataOut) {
     uint32_t inverseShape[MAX_SHAPE_SIZE] = {};
-    for (size_t i = 0; i < settings.shapeSize; i++) {
+    for (size_t i = 0; i < settings.shapeLength; i++) {
         inverseShape[i] = settings.shape[settings.permutation[i]];
     }
 
     uint32_t inversePermutation[MAX_SHAPE_SIZE] = {};
-    for (size_t i = 0; i < settings.shapeSize; i++) {
+    for (size_t i = 0; i < settings.shapeLength; i++) {
         inversePermutation[settings.permutation[i]] = i;
     }
 
@@ -289,7 +289,7 @@ void applyAllShortOfCodec(uint8_t *dataIn,
                           const CompressorSettings &settings,
                           uint8_t *&bitshuffle_out,
                           uint8_t *&bitshuffle_scratch) {
-    const size_t length = settings.getShapeLength();
+    const size_t length = settings.getShapeSize();
     const bool doesCastToFP16 = settings.flags & static_cast<uint64_t>(CompressorFlags::CAST_TO_FP16);
 
     uint8_t *fp16_out, *fp16_scratch;
@@ -341,12 +341,13 @@ static std::vector<std::string> listAllFiles(const std::string &directoryPath) {
 }
 
 Compressor::Compressor(const CompressorOptions &_options) : options(_options),
-                                                     bufferSize(
-                                                         alignUp(getMaxSizeRequiredByCodec(options.shape), 16)
-                                                         + alignUp(sizeof(CompressorSettings), 16)),
-                                                     arenaSize(options.numThreads * 3 * bufferSize),
-                                                     allocator(new uint8_t[arenaSize], arenaSize),
-                                                     threadPool([this] { this->threadMain(); }, options.numThreads) {
+                                                            bufferSize(
+                                                                alignUp(getMaxSizeRequiredByCodec(options.shape), 16)
+                                                                + alignUp(sizeof(CompressorSettings), 16)),
+                                                            arenaSize(options.numThreads * 3 * bufferSize),
+                                                            allocator(new uint8_t[arenaSize], arenaSize),
+                                                            threadPool([this] { this->threadMain(); },
+                                                                       options.numThreads) {
     for (const auto dim: options.shape) {
         if (dim == 0) {
             throw std::runtime_error("The dimension of a shape cannot be non-positive.");
@@ -427,7 +428,7 @@ void Compressor::compressArray(const std::vector<uint32_t> &shape,
     uint8_t *bitshuffle_out, *bitshuffle_scratch;
     if (options.permutations.empty()) {
         // Set to identity.
-        for (size_t i = 0; i < settingsOut.shapeSize; i++) {
+        for (size_t i = 0; i < settingsOut.shapeLength; i++) {
             settingsOut.permutation[i] = i;
         }
     } else {
@@ -518,8 +519,10 @@ void Compressor::threadMain() {
         CompressorSettings settingsOut = {};
         uint8_t *dataOut;
         size_t dataSizeOut;
-        compressArray(options.shape, dataIn, dataScratch, dataScratch2,
-                      settingsOut, dataOut, dataSizeOut);
+        compressArray(
+            options.shape, dataIn, dataScratch, dataScratch2,
+            settingsOut, dataOut, dataSizeOut
+        );
 
         const size_t dataSizeOutAligned = alignUp(dataSizeOut, 16);
         *reinterpret_cast<CompressorSettings *>(dataOut + dataSizeOutAligned) = settingsOut;
@@ -532,100 +535,63 @@ void Compressor::threadMain() {
     workNotify.notify_all();
 }
 
-Decompressor::Decompressor(std::vector<uint32_t> _shape)
-    : shape(std::move(_shape)), bufferSize(
-          alignUp(getMaxSizeRequiredByCodec(shape), 16)
-          + alignUp(sizeof(CompressorSettings), 16)),
-      arenaSize(2 * bufferSize),
-      allocator(new uint8_t[arenaSize], arenaSize) {
-    for (const auto dim: shape) {
-        if (dim == 0) {
-            throw std::runtime_error("Shape is invalid.");
-        }
-    }
-
-    dataInBuffer = allocator.allocate(bufferSize);
-    dataScratchBuffer = allocator.allocate(bufferSize);
+size_t Decompressor::getMaximumRequiredRawFileBufferSize(const Shape &maxInputShape) {
+    return alignUp(getMaxSizeRequiredByCodec(maxInputShape), 16)
+           + alignUp(sizeof(CompressorSettings), 16);
 }
 
-Decompressor::~Decompressor() {
-    delete[] allocator.getArena();
+size_t Decompressor::getMaximumRequiredScratchBufferSize(const Shape &maxInputShape) {
+    return getShapeSize(maxInputShape) * getWidthOfDType(DType::FLOAT64);
 }
 
-void Decompressor::decompress(const std::string &path,
-                              std::vector<uint8_t> &outData, std::vector<size_t> &outShape,
-                              int &outBytesPerItem) const {
-    const size_t dataSize = readBinaryFileIntoBuffer(path.c_str(), dataInBuffer, bufferSize);
-    const CompressorSettings settings
-            = *reinterpret_cast<CompressorSettings *>(dataInBuffer + dataSize - sizeof(CompressorSettings));
-
-    if (settings.shapeSize != shape.size()) {
-        throw std::runtime_error("Encountered file with shape that does not match the decompressor shape.");
-    }
-
-    for (size_t i = 0; i < shape.size(); i++) {
-        if (settings.shape[i] != shape[i]) {
-            throw std::runtime_error("Encountered file with shape that does not match the decompressor shape.");
-        }
-    }
-
-    uint8_t *dataOut;
-    size_t dataSizeOut;
-    decompressArray(dataInBuffer, dataScratchBuffer, settings, dataOut, dataSizeOut);
-
-    outData.resize(dataSizeOut);
-    memcpy(outData.data(), dataOut, dataSizeOut);
-
-    outShape.clear();
-    for (size_t i = 0; i < settings.shapeSize; i++) {
-        outShape.push_back(settings.shape[i]);
-    }
-
-    outBytesPerItem = settings.getItemSize();
-}
-
-void Decompressor::decompressArray(uint8_t *dataIn, uint8_t *dataScratch,
-                                   const CompressorSettings &settings,
-                                   uint8_t *&dataOut,
-                                   size_t &dataSizeOut) {
-    if (settings.magic != MAGIC_NUMBER) {
+CompressorSettings Decompressor::probeArray(const uint8_t *dataIn, const size_t dataSize) {
+    const auto settings = reinterpret_cast<const CompressorSettings *>(dataIn + dataSize - sizeof(CompressorSettings));
+    if (settings->magic != MAGIC_NUMBER) {
         throw std::runtime_error("The compressed array contains an incorrect magic number.");
     }
 
-    // Revert codec.
-    uint8_t *codec_out, *codec_scratch;
-    size_t codec_out_size;
-    if (settings.codec == Codec::NONE) {
-        codec_out_size = settings.compressedSize;
-        codec_out = dataIn;
-        codec_scratch = dataScratch;
-    } else {
-        codec_out_size = revertCodec(settings.codec, dataIn, dataScratch, settings.compressedSize);
-        codec_out = dataScratch;
-        codec_scratch = dataIn;
+    return *settings;
+}
+
+void Decompressor::decompressArray(
+    const uint8_t *dataIn,
+    uint8_t *dataScratch,
+    uint8_t *dataScratch2,
+    uint8_t *dataOut,
+    const CompressorSettings &settings
+) {
+    if (settings.magic != MAGIC_NUMBER) {
+        throw std::runtime_error("The compressed array contains an incorrect magic number.");
+    }
+    if (settings.version != FILE_FORMAT_VERSION) {
+        throw std::runtime_error("The compressed array has an incorrect version.");
     }
 
-    // Revert bitshuffle.
-    uint8_t *bitshuffle_out, *bitshuffle_scratch;
-    if (settings.flags & static_cast<uint64_t>(CompressorFlags::BITSHUFFLE)) {
-        revertBitshuffle(codec_out, codec_scratch, settings.getShapeLength(), settings.getItemSize());
-        bitshuffle_out = codec_scratch;
-        bitshuffle_scratch = codec_out;
-    } else {
-        bitshuffle_out = codec_out;
-        bitshuffle_scratch = codec_scratch;
+    const uint8_t *src = dataIn;
+    const bool hasShuffle = settings.flags & static_cast<uint64_t>(CompressorFlags::BITSHUFFLE);
+    const bool hasPermute = settings.flags & static_cast<uint64_t>(CompressorFlags::SHAPE_PERMUTE);
+
+    // Revert codec
+    if (settings.codec != Codec::NONE) {
+        uint8_t *dst = (hasShuffle || hasPermute) ? dataScratch : dataOut;
+        revertCodec(settings.codec, src, dst, settings.compressedSize);
+        src = dst;
     }
 
-    // Revert permutation.
-    uint8_t *perm_out;
-    if (settings.flags & static_cast<uint64_t>(CompressorFlags::SHAPE_PERMUTE)) {
-        revertShapePermutation(settings, bitshuffle_out, bitshuffle_scratch);
-        perm_out = bitshuffle_scratch;
-    } else {
-        perm_out = bitshuffle_out;
+    // Revert Bitshuffle
+    if (hasShuffle) {
+        uint8_t *dst = hasPermute ? dataScratch2 : dataOut;
+        revertBitshuffle(src, dst, settings.getShapeSize(), settings.getItemSize());
+        src = dst;
     }
 
-    // Do not revert casting, as we can save on pcie-bandwidth and cannot recover the information loss anyway.
-    dataOut = perm_out;
-    dataSizeOut = codec_out_size;
+    // Revert Permutation
+    if (hasPermute) {
+        revertShapePermutation(settings, src, dataOut);
+        src = dataOut;
+    }
+
+    if (src != dataOut) {
+        std::memcpy(dataOut, src, settings.getShapeSize() * settings.getItemSize());
+    }
 }

@@ -152,16 +152,22 @@ struct ConsumerStream {
 enum class DType {
     UINT8,
     INT32,
-    FLOAT32
+    FLOAT16,
+    FLOAT32,
+    FLOAT64
 };
 
 inline size_t getWidthOfDType(const DType dtype) {
     switch (dtype) {
         case DType::UINT8:
             return 1;
+        case DType::FLOAT16:
+            return 2;
         case DType::INT32:
         case DType::FLOAT32:
             return 4;
+        case DType::FLOAT64:
+            return 8;
         default:
             throw std::runtime_error("DType not supported.");
     }
@@ -242,6 +248,17 @@ inline bool isUnsignedDType(const DType dtype) {
 template<typename T>
 bool operator==(std::span<T> a, std::span<T> b) {
     return std::ranges::equal(a, b);
+}
+
+using ItemProp = void *;
+using ItemProps = std::vector<ItemProp>;
+using Shape = std::vector<uint32_t>;
+using Shapes = std::vector<Shape>;
+
+void loadFileIntoBuffer(const std::string &path, size_t &inputSize, uint8_t *buf, size_t bufferSize);
+
+inline size_t getGenericUncompressedFileSizeUpperBound(const Shape &maxShape, const size_t maxBytesPerElement) {
+    return getShapeSize(maxShape) * maxBytesPerElement + 64000;
 }
 
 #endif

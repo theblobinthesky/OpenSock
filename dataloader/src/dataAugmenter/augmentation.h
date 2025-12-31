@@ -6,11 +6,6 @@
 
 bool isInputShapeHWN(const std::vector<uint32_t> &inputShape, size_t N);
 
-using ItemProp = void *;
-using ItemProps = std::vector<ItemProp>;
-using Shape = std::vector<uint32_t>;
-using Shapes = std::vector<Shape>;
-
 struct DataOutputSchema {
     Shape outputShape; // Empty, if input shape is not supported.
     ItemProp itemProp;

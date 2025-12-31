@@ -67,29 +67,37 @@ struct CompressorSettings {
     Codec codec = Codec::NONE;
 
     uint32_t shape[MAX_SHAPE_SIZE]{};
-    uint32_t shapeSize{};
+    uint32_t shapeLength{};
     uint32_t permutation[MAX_SHAPE_SIZE]{};
 
     uint32_t compressedSize{};
 
     void setShape(const std::vector<uint32_t> &newShape) {
-        shapeSize = newShape.size();
-        for (size_t i = 0; i < shapeSize; i++) {
+        shapeLength = newShape.size();
+        for (size_t i = 0; i < shapeLength; i++) {
             shape[i] = newShape[i];
         }
     }
 
     void setPermutation(const std::vector<int> &newPermutation) {
-        for (size_t i = 0; i < shapeSize; i++) {
+        for (size_t i = 0; i < shapeLength; i++) {
             permutation[i] = newPermutation[i];
         }
     }
 
-    [[nodiscard]] size_t getShapeLength() const noexcept {
-        size_t length = 1;
-        for (size_t i = 0; i < shapeSize; i++) length *= shape[i];
+    [[nodiscard]] size_t getShapeSize() const noexcept {
+        size_t size = 1;
+        for (size_t i = 0; i < shapeLength; i++) size *= shape[i];
+        return size;
+    }
 
-        return length;
+    [[nodiscard]] Shape getShape() const noexcept {
+        Shape sh;
+        sh.reserve(shapeLength);
+        for (size_t i = 0; i < shapeLength; i++) {
+            sh.push_back(shape[i]);
+        }
+        return sh;
     }
 
     [[nodiscard]] int getItemSize() const noexcept {
@@ -97,14 +105,11 @@ struct CompressorSettings {
     }
 
     [[nodiscard]] bool isIdentityPermutation() const noexcept {
-        for (size_t i = 0; i < shapeSize; i++) {
+        for (size_t i = 0; i < shapeLength; i++) {
             if (permutation[i] != i) return false;
         }
         return true;
     }
-};
-
-struct CompressionStatistics {
 };
 
 struct CompressionItem {
@@ -152,27 +157,19 @@ public:
 
 class Decompressor {
 public:
-    explicit Decompressor(std::vector<uint32_t> _shape);
+    [[nodiscard]] static size_t getMaximumRequiredRawFileBufferSize(const Shape &maxInputShape);
 
-    PREVENT_COPY_OR_MOVE(Decompressor)
+    [[nodiscard]] static size_t getMaximumRequiredScratchBufferSize(const Shape &maxInputShape);
 
-    ~Decompressor();
+    static CompressorSettings probeArray(const uint8_t *dataIn, size_t dataSize);
 
-    void decompress(const std::string &path, std::vector<uint8_t> &outData, std::vector<size_t> &outShape, int &outBytesPerItem) const;
-
-private:
-    static void decompressArray(uint8_t *dataIn, uint8_t *dataScratch,
-                                const CompressorSettings &settings,
-                                uint8_t *&dataOut,
-                                size_t &dataSizeOut);
-
-    std::vector<uint32_t> shape;
-    size_t bufferSize;
-    size_t arenaSize;
-    BumpAllocator<uint8_t *> allocator;
-
-    uint8_t *dataInBuffer;
-    uint8_t *dataScratchBuffer;
+    static void decompressArray(
+        const uint8_t *dataIn,
+        uint8_t *dataScratch,
+        uint8_t *dataScratch2,
+        uint8_t *dataOut,
+        const CompressorSettings &settings
+    );
 };
 
 CompressorSettings probeCompressedFileSettings(const std::string &path);

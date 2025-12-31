@@ -27,7 +27,7 @@ DL_CONFIGS = [
     (8, 1),
     (8, 2)
 ]
-DEF_NUM_THREADS, DEF_PREFETCH_SIZE = 16, 4
+DEF_BATCH_SIZE, DEF_NUM_THREADS, DEF_PREFETCH_SIZE = 16, 16, 4
 
 
 @pytest.fixture(params=DL_CONFIGS, ids=lambda p: f"threads={p[0]},prefetch={p[1]}")
@@ -73,6 +73,17 @@ def get_dataset():
         init_ds_fn
     )
 
+def get_npy_dataset(tmp_path):
+    subdir = tmp_path / "npy_subdir"
+    subdir.mkdir()
+
+    for i in range(16):
+        testFile = tmp_path / "npy_subdir" / f"file{i}"
+        np.save(testFile, np.ones((3, 3, 4), dtype=np.float32))
+
+    return m.Dataset.from_subdirs(str(tmp_path), [("npy_subdir", "np", m.ItemType.NONE)], init_ds_fn)
+
+
 def get_aug_pipe():
     return m.DataAugmentationPipe([m.ResizeAugmentation(HEIGHT, WIDTH)], [16, 500, 700, 3], 128, 4)
 
@@ -99,11 +110,6 @@ def get_dataloaders(batch_size: int, num_threads: int, prefetch_size: int):
     )
 
 
-def test_get_length(dl_cfg):
-    bs = 16
-    _, dl, _ = get_dataloader(batch_size=bs, **dl_cfg)
-    assert len(dl) == (633 + bs - 1) // bs
-
 def assert_low_error(img, gt_img):
     err = np.mean(np.abs(img - gt_img))
     assert np.all(err < 10 / 255.0), f"Error too high for image"
@@ -123,6 +129,15 @@ def verify_correctness(ds, dl, bs, reps=1, start=0):
             pil_img = np.array(pil_img.resize((WIDTH, HEIGHT)), np.float32) / 255.0
             assert_low_error(imgs[i], pil_img)
             start += 1
+
+class TestGeneral:
+    def test_get_length(self, dl_cfg):
+        bs = 16
+        _, dl = get_dataloader(batch_size=bs, **dl_cfg)
+        assert len(dl) == (633 + bs - 1) // bs
+
+    def test_item_type_none_shapes_must_be_consistent(self):
+        raise ValueError("Test")
 
 
 class TestRaster:
@@ -158,14 +173,12 @@ class TestRaster:
         ds, dl = get_dataloader(batch_size=16, **dl_cfg)
         ds2, dl2 = get_dataloader(batch_size=9, **dl_cfg)
         verify_correctness(ds, dl, bs=16)
-        verify_correctness(ds, dl2, bs=9)
-
+        verify_correctness(ds2, dl2, bs=9)
 
     def hash_array(self, tensor_like) -> str:
         arr = np.ascontiguousarray(np.asarray(tensor_like))
         meta = f"{arr.dtype}|{arr.shape}|".encode()
         return hashlib.sha256(meta + arr.tobytes()).hexdigest()
-
 
     def iter_images_once(self, dl, n):
         yielded = 0
@@ -177,10 +190,8 @@ class TestRaster:
                 yield img
                 yielded += 1
 
-
     def collect_hashes_once(self, dl, ds):
         return [self.hash_array(img) for img in self.iter_images_once(dl, len(ds))]
-
 
     def test_no_duplicates_within_jpg_dataloaders(self, dl_cfg):
         (dl1, dl2, dl3), (ds1, ds2, ds3) = get_dataloaders(batch_size=16, **dl_cfg)
@@ -192,7 +203,6 @@ class TestRaster:
             assert len(set(hashes)) == len(ds), (
                 f"Duplicate hash found within '{name}' dataloader."
             )
-
 
     def test_no_duplicates_across_jpg_dataloaders(self, dl_cfg):
         (dl1, dl2, dl3), (ds1, ds2, ds3) = get_dataloaders(batch_size=16, **dl_cfg)
@@ -207,6 +217,20 @@ class TestRaster:
                 overall[h] = name
         total = len(ds1) + len(ds2) + len(ds3)
         assert len(overall) == total
+
+    def test_aug_pipe_buffers_upsize(self, tmp_path):
+        # Run data loader with tiny augmentation pipe. All buffers are too small.
+        ds = get_npy_dataset(tmp_path)
+        aug_pipe = m.DataAugmentationPipe([m.ResizeAugmentation(HEIGHT, WIDTH)], [16, 1, 1, 3], 1, 1)
+        dl = DataLoader(ds, DEF_BATCH_SIZE, DEF_NUM_THREADS, DEF_PREFETCH_SIZE, aug_pipe)
+        batch, _ = dl.get_next_batch()
+        assert 'np' in batch
+        del batch
+
+        # Then run an image raster dataloader. The buffers must upsize, otherwise the buffers overflow.
+        _, dl = get_dataloader(DEF_BATCH_SIZE, DEF_NUM_THREADS, DEF_PREFETCH_SIZE)
+        batch, _ = dl.get_next_batch()
+        assert 'img' in batch
 
 
 class TestDecoders:
@@ -242,77 +266,67 @@ class TestDecoders:
         assert_low_error(img, pil_img)
 
     def test_npy(self, tmp_path):
-        subdir = tmp_path / "subdir"
-        subdir.mkdir()
-
-        for i in range(16):
-            testFile = tmp_path / "subdir" / f"file{i}"
-            np.save(testFile, np.ones((3, 3, 4), dtype=np.float32))
-
-        ds = m.Dataset.from_subdirs(str(tmp_path), [("subdir", "np", m.ItemType.NONE)], init_ds_fn)
-
+        ds = get_npy_dataset(tmp_path)
         dl = DataLoader(ds, 16, DEF_NUM_THREADS, DEF_PREFETCH_SIZE, get_aug_pipe())
 
         batch, _ = dl.get_next_batch()
         np_data = batch["np"]
         assert np.all(np.ones((16, 3, 3, 4)) == np_data)
 
+    def test_compressed(self, tmp_path):
+        shape = (2, 3, 1)
+        
+        in_sub = tmp_path / "in"
+        in_sub.mkdir()
+        for i in range(10):
+            arr = (np.arange(np.prod(shape), dtype=np.float32).reshape(shape) + i)
+            np.save(in_sub / f"file{i}.npy", arr)
 
-    # @pytest.mark.parametrize("cast_to_fp16", [True, False])
-    # def test_correctness_compressed_trivial(tmp_path, cast_to_fp16):
-    #     def _make_trivial_npy_dir(
-    #         root: str, subdir: str, n_files: int = 8, shape=(2, 3, 1)
-    #     ) -> str:
-    #         d = os.path.join(root, subdir)
-    #         os.makedirs(d, exist_ok=True)
-    #         H, W, C = shape
-    #         for i in range(n_files):
-    #             arr = np.arange(H * W * C, dtype=np.float32).reshape(H, W, C) + i
-    #             np.save(os.path.join(d, f"file{i}"), arr)
-    #         return d
+        out_sub = tmp_path / "out"
+        out_sub.mkdir()
 
-    #     # Prepare small npy inputs
-    #     in_sub = _make_trivial_npy_dir(str(tmp_path), "in", n_files=10, shape=(2, 3, 1))
-    #     out_sub = os.path.join(str(tmp_path), "out")
-    #     os.makedirs(out_sub, exist_ok=True)
+        options = m.CompressorOptions(
+            num_threads=4,
+            input_directory=str(in_sub),
+            output_directory=str(out_sub),
+            shape=list(shape),
+            cast_to_fp16=False,
+            permutations=[[0, 1, 2]],
+            with_bitshuffle=False,
+            allowed_codecs=[],
+            tolerance_for_worse_codec=0.01,
+        )
+        m.Compressor(options).start()
 
-    #     # Compress them using the native compressor
-    #     shape = [2, 3, 1]
-    #     options = m.CompressorOptions(
-    #         num_threads=4,
-    #         input_directory=in_sub,
-    #         output_directory=out_sub,
-    #         shape=shape,
-    #         cast_to_fp16=cast_to_fp16,
-    #         permutations=[[0, 1, 2]],
-    #         with_bitshuffle=False,
-    #         allowed_codecs=[],
-    #         tolerance_for_worse_codec=0.01,
-    #     )
-    #     m.Compressor(options).start()
+        mapping = [("out", "feat", m.ItemType.NONE)]
+        ds = m.Dataset.from_subdirs(str(tmp_path), mapping, init_ds_fn)
 
-    #     # Build dataset + dataloader consuming compressed files
-    #     ds = m.Dataset.from_subdirs(
-    #         str(tmp_path),
-    #         [m.Head(m.FileType.COMPRESSED, "feat", shape)],
-    #         ["out"],
-    #         init_ds_fn,
-    #     )
-    #     dl = DataLoader(ds, 4, 4, 2)
+        aug_pipe = m.DataAugmentationPipe(
+            [m.PadAugmentation(shape[0], shape[1], m.PadSettings.PAD_BOTTOM_RIGHT)], 
+            [16, shape[0], shape[1], shape[2]], 
+            1, 4
+        )
 
-    #     # Verify contents for one batch
-    #     batch, metadata = dl.get_next_batch()
-    #     feat = batch["feat"]
-    #     assert feat.shape[1:] == (2, 3, 1)
-    #     # Expect float32 output from dataloader for now
-    #     assert feat.dtype == np.float32
+        dl = DataLoader(ds, 4, 4, 2, aug_pipe)
 
-    #     # Compare to originals (allow tolerance if fp16)
-    #     tol = 1e-2 if cast_to_fp16 else 0.0
-    #     for i in range(min(4, len(ds))):
-    #         orig = np.load(os.path.join(in_sub, f"file{i}.npy")).astype(np.float32)
-    #         assert np.allclose(feat[i], orig, atol=tol, rtol=0)
+        batch, _ = dl.get_next_batch()
+        feat = batch["feat"]
+        
+        assert feat.shape == (4, *shape)
+        assert feat.dtype == np.float32
 
+        for i in range(4):
+            original_arr = np.load(in_sub / f"file{i}.npy")
+            print(feat)
+            print(original_arr)
+            exit(0)
+            assert np.allclose(feat[i], original_arr)
+
+
+class TestPoints:
+    def test_meta():
+        # TODO: Points tests.
+        raise ValueError()
 
 # def test_end_to_end_perf(benchmark):
 #     bs = 16
@@ -337,11 +351,3 @@ class TestDecoders:
 #     total_items = benchmark(fetch_loop)
 #     # Sanity check to keep benchmark from being optimized away
 #     assert total_items > 0
-
-# TODO: Points tests.
-# TODO: Test that increases the augpipe buffer size and would otherwise force a segfault
-
-
-# Idea for classes:
-class TestPoints:
-    pass

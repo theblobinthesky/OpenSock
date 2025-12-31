@@ -68,9 +68,10 @@ ProbeResult PngDataDecoder::probeFromMemory(uint8_t *inputData, const size_t inp
     };
 }
 
-DecodingResult PngDataDecoder::loadFromMemory(const uint32_t bufferSize,
-                                        uint8_t *inputData, const size_t inputSize,
-                                        BumpAllocator<uint8_t *> &output) {
+DecodingResult PngDataDecoder::loadFromMemory(
+    const uint32_t bufferSize, uint8_t *inputData, const size_t inputSize,
+    BumpAllocator<uint8_t *> &output,
+    uint8_t *__restrict__, uint8_t *__restrict__) {
     if (inputSize < 8 || png_sig_cmp(inputData, 0, 8)) {
         throw std::runtime_error("Invalid PNG signature");
     }

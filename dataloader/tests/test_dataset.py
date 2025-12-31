@@ -1,6 +1,6 @@
 from pathlib import PosixPath
 import pytest as t
-from native_dataloader import Dataset, BatchedDataset, DataLoader
+from native_dataloader import Dataset, BatchedDataset, ItemType
 import numpy as np
 from PIL import Image as pimg
 
@@ -10,7 +10,7 @@ def init_fn():
 
 def make_dataset(tmp_path: PosixPath, erroneous: bool, add_trailing_slash: bool=False) -> Dataset:
     exts = ["png", "jpg", "npy"]
-    mapping = [(f"subdir{i}", f"dictname{i + 1}") for i in range(3)]
+    mapping = [(f"subdir{i}", f"dictname{i + 1}", ItemType.NONE) for i in range(3)]
 
     for i, ext in list(zip(range(3), exts))[:2 if erroneous else 3]:
         subdir = tmp_path / f"subdir{i}"

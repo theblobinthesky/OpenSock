@@ -1,7 +1,6 @@
 #include "FlatDataSource.h"
 #include <algorithm>
 #include <random>
-#include <algorithm>
 #include <ranges>
 
 #include "dataDecoders/DecoderRegister.h"
@@ -22,36 +21,6 @@ static std::vector<std::string> listAllFiles(const std::string &directoryPath) {
 
 // TODO: There should be a global buffer, with a certain number of prefetched items.
 // TODO: We will add this once the flatdatasource is switched to overlapped io.
-static uint8_t *loadFileStoopid(const std::string &path, size_t &inputSize) {
-    inputSize = 0;
-    FILE *f = fopen(path.c_str(), "rb");
-    if (!f) return nullptr;
-
-    if (fseek(f, 0, SEEK_END) != 0) {
-        fclose(f);
-        return nullptr;
-    }
-    inputSize = ftell(f);
-    if (fseek(f, 0, SEEK_SET) != 0) {
-        fclose(f);
-        return nullptr;
-    }
-
-    void *buf = malloc(inputSize);
-    if (!buf) {
-        fclose(f);
-        return nullptr;
-    }
-
-    if (fread(buf, 1, inputSize, f) != inputSize) {
-        free(buf);
-        fclose(f);
-        return nullptr;
-    }
-
-    fclose(f);
-    return static_cast<uint8_t *>(buf);
-}
 
 static std::vector<ProbeResult> probeAllSubDirs(const std::string &rootDirectory,
                                                 const std::vector<std::string> &subDirs) {
@@ -70,9 +39,12 @@ static std::vector<ProbeResult> probeAllSubDirs(const std::string &rootDirectory
                 }
 
                 size_t inputSize;
-                uint8_t *inputData = loadFileStoopid(entry.path().string(), inputSize);
-                probeResults.push_back(dataDecoder->probeFromMemory(inputData, inputSize));
-                free(inputData); // TODO: Delete this once the switch to overlappedio is complete.
+                constexpr size_t rawFileBufferSize = 10000000000; // TODO: This is stupid.
+                const auto rawFile = new uint8_t[rawFileBufferSize];
+                loadFileIntoBuffer(entry.path().string(), inputSize, rawFile, rawFileBufferSize);
+                probeResults.push_back(dataDecoder->probeFromMemory(rawFile, inputSize));
+                delete[] rawFile;
+                // TODO: Delete this once the switch to overlappedio is complete.
                 break;
             }
         }
@@ -137,9 +109,13 @@ std::vector<std::vector<std::string> > FlatDataSource::getEntries() {
     return entries;
 }
 
-CpuAllocation FlatDataSource::loadItemSliceIntoContigousBatch(BumpAllocator<uint8_t *> &alloc,
-                                                              const std::vector<std::vector<std::string> > &batchPaths,
-                                                              const size_t itemKeysIdx, const uint32_t bufferSize) {
+CpuAllocation FlatDataSource::loadItemSliceIntoContigousBatch(
+    BumpAllocator<uint8_t *> &alloc,
+    const std::vector<std::vector<std::string> > &batchPaths,
+    const size_t itemKeysIdx, const uint32_t bufferSize,
+    uint8_t *__restrict__ rawFile, const size_t rawFileBufferSize,
+    uint8_t *__restrict__ scratch1, uint8_t *__restrict__ scratch2
+) {
     const auto &itemKey = itemKeys[itemKeysIdx];
     IDataDecoder *decoder = DecoderRegister::getInstance().getDataDecoderByExtension(itemKey.probeResult.extension);
     uint8_t *startOfBuffer = alloc.getCurrent();
@@ -149,10 +125,12 @@ CpuAllocation FlatDataSource::loadItemSliceIntoContigousBatch(BumpAllocator<uint
         const std::string &path = batchPath[itemKeysIdx];
 
         size_t inputSize;
-        uint8_t *inputData = loadFileStoopid(path, inputSize);
-        auto [_, shape] = decoder->loadFromMemory(bufferSize, inputData, inputSize, alloc);
+        loadFileIntoBuffer(path, inputSize, rawFile, rawFileBufferSize);
+        auto [_, shape] = decoder->loadFromMemory(
+            bufferSize, rawFile, inputSize, alloc,
+            scratch1, scratch2
+        );
         shapes.push_back(shape);
-        free(inputData); // TODO: Delete this once the switch to overlappedio is complete.
     }
 
     return {
@@ -259,6 +237,24 @@ void FlatDataSource::initDatasetFromRootDirectory() {
             .probeResult = probeResults[i]
         });
     }
+}
+
+static size_t getMaxBufferSize(const auto &itemKeys, const Shape &shape,
+                               size_t (IDataDecoder::*func)(const Shape &) const) {
+    size_t maxVal = 0;
+    for (const auto &key: itemKeys) {
+        const auto decoder = DecoderRegister::getInstance().getDataDecoderByExtension(key.probeResult.extension);
+        maxVal = std::max(maxVal, (decoder->*func)(shape));
+    }
+    return maxVal;
+}
+
+size_t FlatDataSource::getRequiredRawFileBufferSize(const Shape &maxInputShape) {
+    return getMaxBufferSize(itemKeys, maxInputShape, &IDataDecoder::getRequiredRawFileBufferSize);
+}
+
+size_t FlatDataSource::getRequiredScratchBufferSize(const Shape &maxInputShape) {
+    return getMaxBufferSize(itemKeys, maxInputShape, &IDataDecoder::getRequiredScratchBufferSize);
 }
 
 void FlatDataSource::verifyDatasetIsConsistent() {
