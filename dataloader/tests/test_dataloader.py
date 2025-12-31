@@ -73,13 +73,14 @@ def get_dataset():
         init_ds_fn
     )
 
-def get_npy_dataset(tmp_path):
+
+def get_npy_dataset(tmp_path, dtype=np.float32):
     subdir = tmp_path / "npy_subdir"
     subdir.mkdir()
 
     for i in range(16):
         testFile = tmp_path / "npy_subdir" / f"file{i}"
-        np.save(testFile, np.ones((3, 3, 4), dtype=np.float32))
+        np.save(testFile, np.ones((3, 3, 4), dtype=dtype))
 
     return m.Dataset.from_subdirs(str(tmp_path), [("npy_subdir", "np", m.ItemType.NONE)], init_ds_fn)
 
@@ -265,21 +266,38 @@ class TestDecoders:
 
         assert_low_error(img, pil_img)
 
-    def test_npy(self, tmp_path):
-        ds = get_npy_dataset(tmp_path)
+    @pytest.mark.parametrize(
+        "dtype",
+        [np.float16, np.float32, np.float64, np.int32, np.uint8],
+        ids=lambda d: str(np.dtype(d)),
+    )
+    def test_npy(self, tmp_path, dtype):
+        if dtype == np.float64:
+            import jax
+
+            if not jax.config.read("jax_enable_x64"):
+                pytest.skip("JAX x64 is disabled")
+
+        ds = get_npy_dataset(tmp_path, dtype=dtype)
         dl = DataLoader(ds, 16, DEF_NUM_THREADS, DEF_PREFETCH_SIZE, get_aug_pipe())
 
         batch, _ = dl.get_next_batch()
-        np_data = batch["np"]
-        assert np.all(np.ones((16, 3, 3, 4)) == np_data)
+        np_data = np.asarray(batch["np"])
+
+        expected = np.ones((16, 3, 3, 4), dtype=dtype)
+        if dtype == np.uint8:
+            expected = expected.astype(np.float32) / np.float32(255.0)
+            assert np.allclose(expected, np_data)
+        else:
+            assert np.all(expected == np_data)
 
     def test_compressed(self, tmp_path):
-        shape = (2, 3, 1)
-        
+        shape = (3, 3, 1)
+
         in_sub = tmp_path / "in"
         in_sub.mkdir()
         for i in range(10):
-            arr = (np.arange(np.prod(shape), dtype=np.float32).reshape(shape) + i)
+            arr = np.arange(np.prod(shape), dtype=np.float32).reshape(shape) + i
             np.save(in_sub / f"file{i}.npy", arr)
 
         out_sub = tmp_path / "out"
@@ -302,24 +320,23 @@ class TestDecoders:
         ds = m.Dataset.from_subdirs(str(tmp_path), mapping, init_ds_fn)
 
         aug_pipe = m.DataAugmentationPipe(
-            [m.PadAugmentation(shape[0], shape[1], m.PadSettings.PAD_BOTTOM_RIGHT)], 
-            [16, shape[0], shape[1], shape[2]], 
-            1, 4
+            [m.PadAugmentation(shape[0], shape[1], m.PadSettings.PAD_BOTTOM_RIGHT)],
+            [16, shape[0], shape[1], shape[2]],
+            1,
+            4,
         )
 
         dl = DataLoader(ds, 4, 4, 2, aug_pipe)
 
         batch, _ = dl.get_next_batch()
         feat = batch["feat"]
-        
+
         assert feat.shape == (4, *shape)
         assert feat.dtype == np.float32
 
-        for i in range(4):
-            original_arr = np.load(in_sub / f"file{i}.npy")
-            print(feat)
-            print(original_arr)
-            exit(0)
+        for i, paths in enumerate(ds.entries[:4]):
+            npy_path = paths[0][: -len(".compressed")].replace("/out/", "/in/")
+            original_arr = np.load(npy_path)
             assert np.allclose(feat[i], original_arr)
 
 
@@ -327,6 +344,7 @@ class TestPoints:
     def test_meta():
         # TODO: Points tests.
         raise ValueError()
+
 
 # def test_end_to_end_perf(benchmark):
 #     bs = 16

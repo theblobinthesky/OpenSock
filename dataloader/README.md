@@ -52,7 +52,7 @@ Feature List (- not begun, w working, + solved):
     Misc:
     + ensure easy setup with uv (both production and tests)
     + apply more sanitizers
-    w proper memory arenas in all perf. critical areas
+    + proper memory arenas in all perf. critical areas; static memory footprint as far as possible in data sources, decoders, augmentation pipe, decompression and resource pool.
     - zero-copy augmentation output to pinned memory
     + fix item keys order
     + graphics card backend (e.g. cuda) selectable at runtime (default to cuda though)

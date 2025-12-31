@@ -71,7 +71,7 @@ ProbeResult PngDataDecoder::probeFromMemory(uint8_t *inputData, const size_t inp
 DecodingResult PngDataDecoder::loadFromMemory(
     const uint32_t bufferSize, uint8_t *inputData, const size_t inputSize,
     BumpAllocator<uint8_t *> &output,
-    uint8_t *__restrict__, uint8_t *__restrict__) {
+    uint8_t *__restrict__ scratch1, uint8_t *__restrict__) {
     if (inputSize < 8 || png_sig_cmp(inputData, 0, 8)) {
         throw std::runtime_error("Invalid PNG signature");
     }
@@ -110,14 +110,19 @@ DecodingResult PngDataDecoder::loadFromMemory(
 
 
     // Set up row pointers directly into output buffer to avoid extra copies
+    if (!scratch1) {
+        png_destroy_read_struct(&png, &info, nullptr);
+        throw std::runtime_error("PNG decoder requires scratch buffer.");
+    }
+
     uint8_t *out = output.allocate(bufferSize);
-    std::vector<png_bytep> row_ptrs(height);
+    auto *row_ptrs = reinterpret_cast<png_bytep *>(scratch1);
     const size_t rowStride = static_cast<size_t>(width) * 3; // RGB8
     for (png_uint_32 y = 0; y < height; ++y) {
         row_ptrs[y] = out + static_cast<size_t>(y) * rowStride;
     }
 
-    png_read_image(png, row_ptrs.data());
+    png_read_image(png, row_ptrs);
     png_read_end(png, nullptr);
     png_destroy_read_struct(&png, &info, nullptr);
 
@@ -125,6 +130,21 @@ DecodingResult PngDataDecoder::loadFromMemory(
         .data = out,
         .shape = {height, width, 3}
     };
+}
+
+static uint32_t getMaxRasterHeightFromMaxInputShape(const Shape &maxInputShape) {
+    if (maxInputShape.size() >= 4) {
+        return maxInputShape[1];
+    }
+    if (maxInputShape.size() >= 1) {
+        return maxInputShape[0];
+    }
+    return 0;
+}
+
+size_t PngDataDecoder::getRequiredScratchBufferSize(const Shape &maxInputShape) const {
+    const uint32_t maxHeight = getMaxRasterHeightFromMaxInputShape(maxInputShape);
+    return static_cast<size_t>(maxHeight) * sizeof(png_bytep);
 }
 
 std::string PngDataDecoder::getExtension() {

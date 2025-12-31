@@ -13,6 +13,8 @@ public:
         uint8_t *__restrict__ scratch1, uint8_t *__restrict__ scratch2
     ) override;
 
+    [[nodiscard]] size_t getRequiredScratchBufferSize(const Shape &maxInputShape) const override;
+
     std::string getExtension() override;
 };
 

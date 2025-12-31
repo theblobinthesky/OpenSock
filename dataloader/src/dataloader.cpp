@@ -138,6 +138,7 @@ uint8_t getItemCode(const DType dtype) {
         case DType::INT32: return kDLInt;
         case DType::FLOAT16:
         case DType::FLOAT32:
+        case DType::FLOAT64:
             return kDLFloat;
         default:
             throw std::runtime_error("DType cannot be converted to item code.");

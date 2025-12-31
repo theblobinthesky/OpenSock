@@ -3,7 +3,7 @@
 
 ProbeResult CompressedDataDecoder::probeFromMemory(uint8_t *inputData, const size_t inputSize) {
     const CompressorSettings settings = Decompressor::probeArray(inputData, inputSize);
-    const DType dtype = (settings.magic & static_cast<uint64_t>(CompressorFlags::CAST_TO_FP16))
+    const DType dtype = (settings.flags & static_cast<uint64_t>(CompressorFlags::CAST_TO_FP16))
                      ? DType::FLOAT16
                      : DType::FLOAT32;
     return {
