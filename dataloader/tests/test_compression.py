@@ -285,3 +285,5 @@ class TestBenchmarks:
             benchmark.extra_info['d_in_MBps'] = (raw_total / (1024 * 1024)) / mean
             benchmark.extra_info['d_out_MBps'] = ((len(cap_outs[0]) * n_elems * out_dtype_bytes) / (1024 * 1024)) / mean
         shutil.rmtree(tmp_path)
+
+# TODO: Check with shape (,). This should crash atm i think.
