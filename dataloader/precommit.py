@@ -276,7 +276,7 @@ def run_tests_report(_: List[str]) -> bool:
         "pytest",
         "./tests/test_dataloader.py",
         "./tests/test_bindings.py",
-        "--benchmark-disable",
+        "--benchmark-skip",
         f"--junitxml={normal_xml}",
     ]
 
@@ -314,7 +314,7 @@ def run_tests_report(_: List[str]) -> bool:
         "tests/test_augmentations.py",
         "tests/test_compression.py",
         "-s",
-        "--benchmark-disable",
+        "--benchmark-skip",
         f"--junitxml={san_xml}",
     ]
 
@@ -341,8 +341,8 @@ def run_tests_report(_: List[str]) -> bool:
         Path("TESTS.md"),
         normal_rep,
         san_rep,
-        "pytest ./tests/test_dataloader.py ./tests/test_bindings.py --benchmark-disable",
-        "pytest tests/test_meta.py tests/test_dataset.py tests/test_augmentations.py tests/test_compression.py -xs --benchmark-disable (with ASan/USan)",
+        "pytest ./tests/test_dataloader.py ./tests/test_bindings.py --benchmark-skip",
+        "pytest tests/test_meta.py tests/test_dataset.py tests/test_augmentations.py tests/test_compression.py -xs --benchmark-skip (with ASan/USan)",
         normal_out,
         san_out,
     )

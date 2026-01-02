@@ -1,26 +1,19 @@
 # Test Report
 
-Generated: 2025-12-31 21:10:48
+Generated: 2026-01-02 14:46:20
 
 ## Normal
 
-Command: `pytest ./tests/test_dataloader.py ./tests/test_bindings.py --benchmark-disable`
+Command: `pytest ./tests/test_dataloader.py ./tests/test_bindings.py --benchmark-skip`
 
-- passed: 50
-- failed: 2
+- passed: 51
+- failed: 0
 - errors: 0
-- skipped: 0
+- skipped: 1
 
 ### Results
 
-- ✗ tests.test_dataloader.TestRaster::test_one_dataloader_once[threads=8,prefetch=16]: AssertionError: Error 74.0 too high for image
-assert np.False_
- +  where np.False_ = <function all at 0x734338395f70>(np.float32(0.29002872) < (10 / 255.0))
- +    where <function all at 0x734338395f70> = np.all
-- ✗ tests.test_dataloader.TestRaster::test_two_dlers_with_different_batch_sizes[threads=16,prefetch=16]: AssertionError: Error 72.8 too high for image
-assert np.False_
- +  where np.False_ = <function all at 0x734338395f70>(np.float32(0.28552464) < (10 / 255.0))
- +    where <function all at 0x734338395f70> = np.all
+- ⚠ tests.test_dataloader::test_end_to_end_perf: Skipping benchmark (--benchmark-skip active).
 - ✓ tests.test_bindings::test_binding[jax]
 - ✓ tests.test_bindings::test_binding[pytorch]
 - ✓ tests.test_dataloader.TestDecoders::test_compressed
@@ -49,6 +42,7 @@ assert np.False_
 - ✓ tests.test_dataloader.TestRaster::test_no_duplicates_within_jpg_dataloaders[threads=8,prefetch=2]
 - ✓ tests.test_dataloader.TestRaster::test_one_dataloader_once[threads=16,prefetch=16]
 - ✓ tests.test_dataloader.TestRaster::test_one_dataloader_once[threads=16,prefetch=4]
+- ✓ tests.test_dataloader.TestRaster::test_one_dataloader_once[threads=8,prefetch=16]
 - ✓ tests.test_dataloader.TestRaster::test_one_dataloader_once[threads=8,prefetch=1]
 - ✓ tests.test_dataloader.TestRaster::test_one_dataloader_once[threads=8,prefetch=2]
 - ✓ tests.test_dataloader.TestRaster::test_one_dataloader_trice[threads=16,prefetch=16]
@@ -66,21 +60,77 @@ assert np.False_
 - ✓ tests.test_dataloader.TestRaster::test_three_dlers_without_next_batch[threads=8,prefetch=16]
 - ✓ tests.test_dataloader.TestRaster::test_three_dlers_without_next_batch[threads=8,prefetch=1]
 - ✓ tests.test_dataloader.TestRaster::test_three_dlers_without_next_batch[threads=8,prefetch=2]
+- ✓ tests.test_dataloader.TestRaster::test_two_dlers_with_different_batch_sizes[threads=16,prefetch=16]
 - ✓ tests.test_dataloader.TestRaster::test_two_dlers_with_different_batch_sizes[threads=16,prefetch=4]
 - ✓ tests.test_dataloader.TestRaster::test_two_dlers_with_different_batch_sizes[threads=8,prefetch=16]
 - ✓ tests.test_dataloader.TestRaster::test_two_dlers_with_different_batch_sizes[threads=8,prefetch=1]
 - ✓ tests.test_dataloader.TestRaster::test_two_dlers_with_different_batch_sizes[threads=8,prefetch=2]
-- ✓ tests.test_dataloader::test_end_to_end_perf
 
 ## Sanitizers (ASan/USan)
 
-Command: `pytest tests/test_meta.py tests/test_dataset.py tests/test_augmentations.py tests/test_compression.py -xs --benchmark-disable (with ASan/USan)`
+Command: `pytest tests/test_meta.py tests/test_dataset.py tests/test_augmentations.py tests/test_compression.py -xs --benchmark-skip (with ASan/USan)`
 
-- passed: 0
+- passed: 44
 - failed: 0
-- errors: 1
-- skipped: 0
+- errors: 0
+- skipped: 12
 
 ### Results
 
+- ⚠ tests.test_compression.TestBenchmarks::test_compress[fp16_bshuf_zstd(3,7,22)]: Skipping benchmark (--benchmark-skip active).
+- ⚠ tests.test_compression.TestBenchmarks::test_compress[fp16_bshuf_zstd22]: Skipping benchmark (--benchmark-skip active).
+- ⚠ tests.test_compression.TestBenchmarks::test_compress[fp16_bshuf_zstd7]: Skipping benchmark (--benchmark-skip active).
+- ⚠ tests.test_compression.TestBenchmarks::test_compress[fp16_zstd7]: Skipping benchmark (--benchmark-skip active).
+- ⚠ tests.test_compression.TestBenchmarks::test_compress[fp32_bshuf_zstd7]: Skipping benchmark (--benchmark-skip active).
+- ⚠ tests.test_compression.TestBenchmarks::test_compress[fp32_zstd7]: Skipping benchmark (--benchmark-skip active).
+- ⚠ tests.test_compression.TestBenchmarks::test_decompress[fp16_bshuf_zstd(3,7,22)]: Skipping benchmark (--benchmark-skip active).
+- ⚠ tests.test_compression.TestBenchmarks::test_decompress[fp16_bshuf_zstd22]: Skipping benchmark (--benchmark-skip active).
+- ⚠ tests.test_compression.TestBenchmarks::test_decompress[fp16_bshuf_zstd7]: Skipping benchmark (--benchmark-skip active).
+- ⚠ tests.test_compression.TestBenchmarks::test_decompress[fp16_zstd7]: Skipping benchmark (--benchmark-skip active).
+- ⚠ tests.test_compression.TestBenchmarks::test_decompress[fp32_bshuf_zstd7]: Skipping benchmark (--benchmark-skip active).
+- ⚠ tests.test_compression.TestBenchmarks::test_decompress[fp32_zstd7]: Skipping benchmark (--benchmark-skip active).
+- ✓ tests.test_augmentations.TestAugmentationRules::test_flip_fails_if_disabled
+- ✓ tests.test_augmentations.TestAugmentationRules::test_flip_tries_different_settings
+- ✓ tests.test_augmentations.TestAugmentationRules::test_random_crop_fails_with_different_min_max
+- ✓ tests.test_augmentations.TestAugmentationRules::test_random_crop_succeedes_with_same_min_max
+- ✓ tests.test_augmentations.TestAugmentationRules::test_resize_fails_if_not_three_channels
+- ✓ tests.test_augmentations.TestBasics::test_augment_raster_executes_successfully
+- ✓ tests.test_augmentations.TestBasics::test_augment_raster_fails_for_unsupported_dtype
+- ✓ tests.test_augmentations.TestBasics::test_augment_raster_fails_with_incorrect_shape
+- ✓ tests.test_augmentations.TestBasics::test_augment_raster_fails_with_mismatched_dtype
+- ✓ tests.test_augmentations.TestBasics::test_augment_raster_succeedes_for_supported_dtype[dtype=float32]
+- ✓ tests.test_augmentations.TestBasics::test_augment_raster_succeedes_for_supported_dtype[dtype=int32]
+- ✓ tests.test_augmentations.TestBasics::test_augment_raster_succeedes_for_supported_dtype[dtype=uint8]
+- ✓ tests.test_augmentations.TestBasics::test_augmentations_are_skipped[1_skip]
+- ✓ tests.test_augmentations.TestBasics::test_augmentations_are_skipped[1_skip_2_skip]
+- ✓ tests.test_augmentations.TestBasics::test_augmentations_are_skipped[1_skip_2_swap]
+- ✓ tests.test_augmentations.TestBasics::test_augmentations_are_skipped[1_swap_2_skip]
+- ✓ tests.test_augmentations.TestBasics::test_augmentations_are_skipped[1_swap_2_skip_3_swap]
+- ✓ tests.test_augmentations.TestBasics::test_pipe_fails_with_no_augmentation
+- ✓ tests.test_augmentations.TestPointCorrectness::test_flip[dtype=float32]
+- ✓ tests.test_augmentations.TestPointCorrectness::test_flip[dtype=int32]
+- ✓ tests.test_augmentations.TestPointCorrectness::test_random_crop[dtype=float32]
+- ✓ tests.test_augmentations.TestPointCorrectness::test_random_crop[dtype=int32]
+- ✓ tests.test_augmentations.TestPointCorrectness::test_resize[dtype=float32]
+- ✓ tests.test_augmentations.TestPointCorrectness::test_resize[dtype=int32]
+- ✓ tests.test_augmentations.TestRasterCorrectness::test_flip[dtype=float32]
+- ✓ tests.test_augmentations.TestRasterCorrectness::test_flip[dtype=int32]
+- ✓ tests.test_augmentations.TestRasterCorrectness::test_flip[dtype=uint8]
+- ✓ tests.test_augmentations.TestRasterCorrectness::test_random_crop[dtype=float32]
+- ✓ tests.test_augmentations.TestRasterCorrectness::test_random_crop[dtype=int32]
+- ✓ tests.test_augmentations.TestRasterCorrectness::test_random_crop[dtype=uint8]
+- ✓ tests.test_augmentations.TestRasterCorrectness::test_resize[dtype=float32]
+- ✓ tests.test_augmentations.TestRasterCorrectness::test_resize[dtype=uint8]
+- ✓ tests.test_compression::test_compress_many_files[fp16]
+- ✓ tests.test_compression::test_compress_many_files[fp16_permute]
+- ✓ tests.test_compression::test_compress_many_files[fp16_permute_bitshuffle]
+- ✓ tests.test_compression::test_compress_many_files[fp16_permute_bitshuffle_compress]
+- ✓ tests.test_compression::test_compress_many_files[fp32]
+- ✓ tests.test_compression::test_compress_many_files[fp32_permute]
+- ✓ tests.test_compression::test_prepare_dense_features_jpg_only
+- ✓ tests.test_dataset::test_dataset_works_with_trailing_slash
+- ✓ tests.test_dataset::test_get_dataset
+- ✓ tests.test_dataset::test_get_eroneous_dataset
+- ✓ tests.test_dataset::test_split_dataset
+- ✓ tests.test_meta::test_version
 

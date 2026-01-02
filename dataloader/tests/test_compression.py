@@ -236,8 +236,10 @@ class TestBenchmarks:
         comp_bytes = sum(os.path.getsize(p) for p in outs)
         compressed_bytes=comp_bytes
         benchmark.extra_info['ratio'] = compressed_bytes / max(1, raw_total)
-        benchmark.extra_info['c_in_MBps'] = (raw_total / (1024 * 1024)) / benchmark.stats['mean']
-        benchmark.extra_info['c_out_MBps'] = (compressed_bytes / (1024 * 1024)) / benchmark.stats['mean']
+
+        mean = benchmark.stats['mean']
+        benchmark.extra_info['c_in_MBps'] = (raw_total / (1024 * 1024)) / mean
+        benchmark.extra_info['c_out_MBps'] = (compressed_bytes / (1024 * 1024)) / mean
 
     def test_decompress(self, benchmark, tmp_path, settings):
         _, cast_to_fp16, permutations, with_bitshuffle, allowed_codecs = settings

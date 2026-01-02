@@ -561,7 +561,6 @@ def test_end_to_end_perf(benchmark):
     benchmark.extra_info["batches"] = int(cap["n_batches"])
     benchmark.extra_info["items"] = int(total_items)
     mean = benchmark.stats["mean"] if benchmark.stats else None
-    if mean:
-        benchmark.extra_info["in_MBps"] = (cap["in_bytes"] / (1024 * 1024)) / mean
-        benchmark.extra_info["out_MBps"] = (out_bytes / (1024 * 1024)) / mean
+    benchmark.extra_info["in_MBps"] = (cap["in_bytes"] / (1024 * 1024)) / mean
+    benchmark.extra_info["out_MBps"] = (out_bytes / (1024 * 1024)) / mean
     assert total_items > 0
