@@ -29,16 +29,94 @@ To hide PCIe latency, the Resource Pool manages a global, fixed-size arena of **
 *   For every buffer allocated on the Host (CPU Pinned Memory), a corresponding buffer is pre-allocated on the Device (GPU).
 *   Transfers are initiated asynchronously using CUDA fences.
 *   The consumer receives a `DLManagedTensor` pointing to this pre-allocated GPU memory.
+*   Data loaders reuse the global resource pool. So switching from one data loader to another with the same or lower memory requirements, say train to validation, does not trigger new allocations or temporary spikes in usage.
 
 ### 2. Thread-Local Static Scratch
 Unlike Python loaders that churn RAM, our worker threads operate on **Static Scratch Buffers**.
 *   Before the loader starts, every component (Decoder, Augmenter) reports its *maximum theoretical memory requirement* (e.g., "I need 40MB for the largest possible JPEG in this dataset").
 *   The Resource Pool allocates these scratch buffers **once per thread**.
 *   During the training loop, threads use simple **Bump Allocators** (resetting offset to 0) to utilize this memory.
-*   **Result:** Zero dynamic `malloc`/`free` calls during training.
+*   **Result:** Zero dynamic `malloc`/`free` calls for large buffers during training. For now, insignificant allocations are still going on like `std::string`.
 
 ### 3. Thread Stability
 The Resource Pool maintains a fixed set of worker threads. When switching dataloaders (e.g., Train → Val), we use a **Generational Index** to cleanly "flush" old tasks and assign new ones without killing or recreating threads, preserving OS scheduler stability.
+
+### 4. Data Flow Visualisation
+```mermaid
+graph LR
+    %% --- Styling Definitions ---
+    classDef storage fill:#eceff1,stroke:#455a64,stroke-width:2px;
+    classDef worker fill:#fff,stroke:#333,stroke-dasharray: 5 5;
+    
+    %% Memory Colors
+    classDef cpuMem fill:#fff9c4,stroke:#fbc02d,stroke-width:2px;
+    classDef gpuMem fill:#b3e5fc,stroke:#0277bd,stroke-width:2px;
+    classDef consumer fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px;
+
+    %% --- Node Definitions ---
+
+    subgraph IO ["1. Overlapped I/O"]
+        Disk[("Disk / Network")]
+    end
+
+    subgraph Compute ["2. Worker Pool"]
+        W1["Thread 1"]
+        W2["Thread 2"]
+        W3["Thread 3"]
+        Scratch["Thread Scratch<br/>(Bump Alloc)"]
+        
+        W1 & W2 & W3 --- Scratch
+    end
+
+    subgraph Pipeline ["3. Mirrored Memory Pipeline (Prefetch Size = 3)"]
+        direction LR
+        
+        %% Just use numbered slots to make the count obvious
+        subgraph Batch2 ["Slot 2 (Filling)"]
+            direction TB
+            H2[Host Pinned]
+            G2[GPU Reserved]
+        end
+
+        subgraph Batch1 ["Slot 1 (Transferring)"]
+            direction TB
+            H1[Host Pinned]
+            G1[GPU Reserved]
+            H1 -.->|"Async DMA"| G1
+        end
+
+        subgraph Batch0 ["Slot 0 (Ready)"]
+            direction TB
+            H0[Host Pinned]
+            G0[GPU Ready]
+            H0 -.- G0
+        end
+    end
+
+    subgraph Framework ["4. Framework"]
+        PyTorch["PyTorch / JAX"]
+    end
+
+    %% --- Connections ---
+    
+    %% Data Flow
+    Disk == "Parallel Reads" ==> W1 & W2 & W3
+    W1 & W2 & W3 -- "Write" --> H2
+    
+    %% Pipeline Movement (Time)
+    Batch2 ==> Batch1 ==> Batch0
+    
+    %% Consumption
+    G0 == "DLPack Pointer" ==> PyTorch
+
+    %% --- Apply Styles ---
+    class Disk storage;
+    class W1,W2,W3,Scratch worker;
+    class H2,H1,H0 cpuMem;
+    class G2,G1,G0 gpuMem;
+    class PyTorch consumer;
+
+```
 
 ---
 
@@ -50,7 +128,7 @@ The engine is built on strict C++ interfaces. You can mix, match, or extend thes
 *The Discovery Layer.*
 *   **`FlatDataSource`:** Recursively scans directories for files.
 *   **`WebDataset`:** (Planned) offsets into TAR archives.
-*   **Custom:** Implementable in C++ for S3/SQL sources.
+*   **Custom:** Implementable in C++.
 
 ### Data Decoders (`IDataDecoder`)
 *The Parsing Layer.*
@@ -63,6 +141,7 @@ Decoders are probed automatically based on file content.
 
 ### Augmentations (`IDataAugmentation`)
 *The Math Layer.*
+Augmentations transform the tensor *shape*. Others like color transforms should still happen on the GPU.
 *   **`ResizeAugmentation`**: Bilinear interpolation.
 *   **`PadAugmentation`**: Padding with configurable alignment (Top-Left, Bottom-Right, etc.).
 *   **`RandomCropAugmentation`**: Deterministic cropping based on item seeds.
@@ -82,7 +161,7 @@ We implement a custom `.compressed` format optimized for **lossless throughput**
 3.  **Dimensional Permutation:** We permute dimensions (e.g., `HWC` -> `CHW`) to align features in memory, optimizing the look-ahead for the compressor.
 4.  **ZSTD:** Finally, the reordered bitstream is compressed with Zstandard (Level 3, 7, or 22).
 
-*Result:* Smaller file sizes than raw binary floats with significantly faster decoding speeds than standard image codecs.
+*Result:* Smaller file sizes than raw binary float tensors and fast decoding speeds.
 
 ### Compression Example
 
@@ -199,6 +278,8 @@ While this project allows for high-performance data loading, it is currently con
 *   **Hardening:** The codebase is not yet 100% hardened. Some race conditions still exist and an hour-long stress test with many dataloader switches etc. is still missing and would likely fail at this moment in time.
 *   **Missing Sanitization:** While we strictly enforce ASan and UBSan, **ThreadSanitizer (TSan) has not yet been integrated**. Also, a cuda-free backend is coming in future updates that will enable us to test the entire end-to-end dataloader with sanitizers, not just subunits like the compressor, augmentations and dataset.
 *   **Multi GPU Training:** While the architecture supports multi-gpu training in principle, the ability is not yet integrated into the dataloader. This is very feasible though and is also coming in future updates.
+*   **Network drives:** The `overlapped_io` implementation of the flat data source is still missing. In future updates, we will add a custom `FUSE` filesystem that emulates high latency network drives in testing. This will ensure input i/o is properly pipelined with the decode/augment computations. For now, this is not supported.
+*   **Auto-tuning:** To get the most performance out of the dataloader, we will add an automatic tuning utility that will tune the data source (e.g. io queue sizes), dataloader parameters (e.g. prefetch size, thread count) to maximize performance, while constraining the vram usage.
 
 ---
 
@@ -240,7 +321,22 @@ dataset = ndl.Dataset.from_subdirs(
 )
 ```
 
-### 2. Choose your Framework
+### 2. Directory Structure for `FlatDataSource`
+The `FlatDataSource` matches files across subdirectories based on their **filenames** (excluding extensions).
+
+```text
+data/imagenet/
+├── images/           # Source A (ItemType.RASTER)
+│   ├── 001.jpg
+│   ├── 002.jpg
+│   └── ...
+└── labels/           # Source B (ItemType.NONE)
+    ├── 001.npy       # Numpy array containing class index/one-hot
+    ├── 002.npy
+    └── ...
+```
+
+### 3. Choose your Framework
 
 **Option A: JAX**
 

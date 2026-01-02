@@ -22,14 +22,14 @@ bool checkTransformOperatesOnStandardNDShape(const std::vector<size_t> &inputSha
     return true;
 }
 
-void verifyPointsArePreceededByRasters(const std::shared_ptr<IDataSource> &dataSource) {
+void verifyPointsArePrecededByRasters(const std::shared_ptr<IDataSource> &dataSource) {
     const auto &itemKeys = dataSource->getItemKeys();
     bool rasterEncountered = false;
     for (const auto &itemKey: itemKeys) {
         rasterEncountered |= itemKey.type == ItemType::RASTER;
         if (itemKey.type == ItemType::POINTS) {
             if (!rasterEncountered) {
-                throw std::runtime_error("ItemKey of type POINTS must be preceeded by type RASTER to latch onto it.");
+                throw std::runtime_error("ItemKey of type POINTS must be preceded by type RASTER to latch onto it.");
             }
             break;
         }
@@ -45,14 +45,14 @@ Dataset::Dataset(std::shared_ptr<IDataSource> _dataSource,
     }
 
     dataSource->initDataset();
-    verifyPointsArePreceededByRasters(dataSource);
+    verifyPointsArePrecededByRasters(dataSource);
 }
 
 Dataset::Dataset(std::shared_ptr<IDataSource> _dataSource,
                  std::vector<std::shared_ptr<IDataAugmentation> > _dataAugmentations
 ) : dataSource(std::move(_dataSource)), dataAugmentations(std::move(_dataAugmentations)) {
     dataSource->initDataset();
-    verifyPointsArePreceededByRasters(dataSource);
+    verifyPointsArePrecededByRasters(dataSource);
 }
 
 std::tuple<std::shared_ptr<Dataset>, std::shared_ptr<Dataset>, std::shared_ptr<Dataset> >
