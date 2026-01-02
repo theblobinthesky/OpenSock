@@ -506,10 +506,8 @@ void Compressor::threadMain() {
     uint8_t *dataScratch2 = allocator.allocate(bufferSize);
     mutex.unlock();
 
-    while (true) {
+    while (workQueue.size() > 0) {
         mutex.lock();
-        if (workQueue.empty()) break;
-
         const auto [fileName] = workQueue.front();
         workQueue.pop();
         --workQueueSize;

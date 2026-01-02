@@ -5,7 +5,6 @@ import platform
 from pathlib import Path
 from typing import List
 from concurrent.futures import ThreadPoolExecutor
-from functools import partial
 from datetime import datetime
 import xml.etree.ElementTree as ET
 
@@ -265,14 +264,10 @@ def run_tests_report(_: List[str]) -> bool:
     normal_xml = Path(".tests_normal.xml")
     san_xml = Path(".tests_san.xml")
 
-    if not run_command_capture(["make", "install-debug"]):
+    if not run_command_capture(["make", "install-release"]):
         return False
 
     normal_cmd_list = [
-        "uv",
-        "run",
-        "python",
-        "-m",
         "pytest",
         "./tests/test_dataloader.py",
         "./tests/test_bindings.py",

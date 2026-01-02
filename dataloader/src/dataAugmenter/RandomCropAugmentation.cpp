@@ -18,6 +18,10 @@ bool RandomCropAugmentation::isOutputShapeDetStaticExceptForBatchDim() {
     return minCropHeight == maxCropHeight && minCropWidth == maxCropWidth;
 }
 
+bool RandomCropAugmentation::isOutputShapeDetStaticGivenStaticInputShape() {
+    return isOutputShapeDetStaticExceptForBatchDim();
+}
+
 static bool isInputShapeSupported(const std::vector<uint32_t> &inputShape) {
     return inputShape.size() == 3;
 }

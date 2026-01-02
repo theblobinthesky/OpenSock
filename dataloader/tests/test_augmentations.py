@@ -88,6 +88,24 @@ class TestBasics:
         with pytest.raises(RuntimeError):
             DataAugmentationPipe(augmentations, DEF_MAX_INPUT_SHAPE, DEF_MAX_NUM_POINTS, DEF_MAX_ITEM_SIZE)
 
+    @pytest.mark.parametrize("augs", [
+            [RandomCropAugmentation(16, 16, 24, 24)],
+            [ResizeAugmentation(128, 128), RandomCropAugmentation(16, 16, 24, 24)],
+        ], ids=["random-crop", "resize/random-crop"])
+    def test_pipe_fails_with_dynamic_output_shape(self, augs):
+        with pytest.raises(RuntimeError):
+            DataAugmentationPipe(augs, DEF_MAX_INPUT_SHAPE, DEF_MAX_NUM_POINTS, DEF_MAX_ITEM_SIZE)
+
+    @pytest.mark.parametrize("augs", [
+            [ResizeAugmentation(128, 128)],
+            [ResizeAugmentation(128, 128), FlipAugmentation(0.5, 0.5)],
+            [RandomCropAugmentation(18, 24, 18, 24), ResizeAugmentation(128, 128)],
+        ], ids=["resize", "resize/flip", "random-crop/resize"])
+    def test_pipe_succeedes_with_static_output_shape(self, augs):
+        DataAugmentationPipe(augs, DEF_MAX_INPUT_SHAPE, DEF_MAX_NUM_POINTS, DEF_MAX_ITEM_SIZE)
+
+
+
     BR = PadSettings.PAD_BOTTOM_RIGHT
     @pytest.mark.parametrize("augs", [
             [PadAugmentation(128, 128, BR)],

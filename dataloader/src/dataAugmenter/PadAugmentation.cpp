@@ -12,6 +12,10 @@ bool PadAugmentation::isOutputShapeDetStaticExceptForBatchDim() {
     return true;
 }
 
+bool PadAugmentation::isOutputShapeDetStaticGivenStaticInputShape() {
+    return true;
+}
+
 static bool isInputShapeSupported(const std::vector<uint32_t> &inputShape, const uint32_t padHeight,
                                   const uint32_t padWidth) {
     return inputShape.size() == 3 && inputShape[0] <= padHeight && inputShape[1] <= padWidth;

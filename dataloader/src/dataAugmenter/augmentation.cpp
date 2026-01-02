@@ -319,10 +319,22 @@ Shape DataAugmentationPipe::getRasterMaxInputShape() const {
 }
 
 bool DataAugmentationPipe::isOutputShapeStatic() const {
-    for (const auto &dataAug: dataAugs) {
-        if (dataAug->isOutputShapeDetStaticExceptForBatchDim()) {
-            return true;
+    int lastStaticOutputIdx = -1;
+    for (int i = static_cast<int>(dataAugs.size() - 1); i >= 0; i--) {
+        if (dataAugs[i]->isOutputShapeDetStaticExceptForBatchDim()) {
+            lastStaticOutputIdx = i;
+            break;
         }
     }
-    return false;
+
+    if (lastStaticOutputIdx == -1) {
+        return false;
+    }
+
+    for (size_t i = static_cast<size_t>(lastStaticOutputIdx); i < dataAugs.size(); i++) {
+        if (!dataAugs[i]->isOutputShapeDetStaticGivenStaticInputShape()) {
+            return false;
+        }
+    }
+    return true;
 }

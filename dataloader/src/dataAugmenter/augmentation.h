@@ -17,6 +17,8 @@ public:
 
     virtual bool isOutputShapeDetStaticExceptForBatchDim() = 0;
 
+    virtual bool isOutputShapeDetStaticGivenStaticInputShape() = 0;
+
     [[nodiscard]] virtual DataOutputSchema getDataOutputSchema(const Shape &inputShape, uint64_t itemSeed) const = 0;
 
     // TODO: I don't love the manual free api here, but we'll go with it for now.

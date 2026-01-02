@@ -16,6 +16,8 @@ public:
 
     bool isOutputShapeDetStaticExceptForBatchDim() override;
 
+    bool isOutputShapeDetStaticGivenStaticInputShape() override;
+
     [[nodiscard]] DataOutputSchema getDataOutputSchema(const std::vector<uint32_t> &inputShape, uint64_t itemSeed) const override;
 
     void freeItemProp(ItemProp &itemProp) const override;

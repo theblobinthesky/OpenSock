@@ -1,6 +1,6 @@
 # Test Report
 
-Generated: 2026-01-02 14:46:20
+Generated: 2026-01-02 17:39:56
 
 ## Normal
 
@@ -9,11 +9,34 @@ Command: `pytest ./tests/test_dataloader.py ./tests/test_bindings.py --benchmark
 - passed: 51
 - failed: 0
 - errors: 0
-- skipped: 1
+- skipped: 24
 
 ### Results
 
-- ⚠ tests.test_dataloader::test_end_to_end_perf: Skipping benchmark (--benchmark-skip active).
+- ⚠ tests.test_dataloader::test_end_to_end_perf[batch_size=16,num_threads=16,prefetch_size=16]: Skipping benchmark (--benchmark-skip active).
+- ⚠ tests.test_dataloader::test_end_to_end_perf[batch_size=16,num_threads=16,prefetch_size=1]: Skipping benchmark (--benchmark-skip active).
+- ⚠ tests.test_dataloader::test_end_to_end_perf[batch_size=16,num_threads=16,prefetch_size=2]: Skipping benchmark (--benchmark-skip active).
+- ⚠ tests.test_dataloader::test_end_to_end_perf[batch_size=16,num_threads=16,prefetch_size=4]: Skipping benchmark (--benchmark-skip active).
+- ⚠ tests.test_dataloader::test_end_to_end_perf[batch_size=16,num_threads=8,prefetch_size=16]: Skipping benchmark (--benchmark-skip active).
+- ⚠ tests.test_dataloader::test_end_to_end_perf[batch_size=16,num_threads=8,prefetch_size=1]: Skipping benchmark (--benchmark-skip active).
+- ⚠ tests.test_dataloader::test_end_to_end_perf[batch_size=16,num_threads=8,prefetch_size=2]: Skipping benchmark (--benchmark-skip active).
+- ⚠ tests.test_dataloader::test_end_to_end_perf[batch_size=16,num_threads=8,prefetch_size=4]: Skipping benchmark (--benchmark-skip active).
+- ⚠ tests.test_dataloader::test_end_to_end_perf[batch_size=32,num_threads=16,prefetch_size=16]: Skipping benchmark (--benchmark-skip active).
+- ⚠ tests.test_dataloader::test_end_to_end_perf[batch_size=32,num_threads=16,prefetch_size=1]: Skipping benchmark (--benchmark-skip active).
+- ⚠ tests.test_dataloader::test_end_to_end_perf[batch_size=32,num_threads=16,prefetch_size=2]: Skipping benchmark (--benchmark-skip active).
+- ⚠ tests.test_dataloader::test_end_to_end_perf[batch_size=32,num_threads=16,prefetch_size=4]: Skipping benchmark (--benchmark-skip active).
+- ⚠ tests.test_dataloader::test_end_to_end_perf[batch_size=32,num_threads=8,prefetch_size=16]: Skipping benchmark (--benchmark-skip active).
+- ⚠ tests.test_dataloader::test_end_to_end_perf[batch_size=32,num_threads=8,prefetch_size=1]: Skipping benchmark (--benchmark-skip active).
+- ⚠ tests.test_dataloader::test_end_to_end_perf[batch_size=32,num_threads=8,prefetch_size=2]: Skipping benchmark (--benchmark-skip active).
+- ⚠ tests.test_dataloader::test_end_to_end_perf[batch_size=32,num_threads=8,prefetch_size=4]: Skipping benchmark (--benchmark-skip active).
+- ⚠ tests.test_dataloader::test_end_to_end_perf[batch_size=64,num_threads=16,prefetch_size=16]: Skipping benchmark (--benchmark-skip active).
+- ⚠ tests.test_dataloader::test_end_to_end_perf[batch_size=64,num_threads=16,prefetch_size=1]: Skipping benchmark (--benchmark-skip active).
+- ⚠ tests.test_dataloader::test_end_to_end_perf[batch_size=64,num_threads=16,prefetch_size=2]: Skipping benchmark (--benchmark-skip active).
+- ⚠ tests.test_dataloader::test_end_to_end_perf[batch_size=64,num_threads=16,prefetch_size=4]: Skipping benchmark (--benchmark-skip active).
+- ⚠ tests.test_dataloader::test_end_to_end_perf[batch_size=64,num_threads=8,prefetch_size=16]: Skipping benchmark (--benchmark-skip active).
+- ⚠ tests.test_dataloader::test_end_to_end_perf[batch_size=64,num_threads=8,prefetch_size=1]: Skipping benchmark (--benchmark-skip active).
+- ⚠ tests.test_dataloader::test_end_to_end_perf[batch_size=64,num_threads=8,prefetch_size=2]: Skipping benchmark (--benchmark-skip active).
+- ⚠ tests.test_dataloader::test_end_to_end_perf[batch_size=64,num_threads=8,prefetch_size=4]: Skipping benchmark (--benchmark-skip active).
 - ✓ tests.test_bindings::test_binding[jax]
 - ✓ tests.test_bindings::test_binding[pytorch]
 - ✓ tests.test_dataloader.TestDecoders::test_compressed
@@ -70,7 +93,7 @@ Command: `pytest ./tests/test_dataloader.py ./tests/test_bindings.py --benchmark
 
 Command: `pytest tests/test_meta.py tests/test_dataset.py tests/test_augmentations.py tests/test_compression.py -xs --benchmark-skip (with ASan/USan)`
 
-- passed: 44
+- passed: 49
 - failed: 0
 - errors: 0
 - skipped: 12
@@ -106,7 +129,12 @@ Command: `pytest tests/test_meta.py tests/test_dataset.py tests/test_augmentatio
 - ✓ tests.test_augmentations.TestBasics::test_augmentations_are_skipped[1_skip_2_swap]
 - ✓ tests.test_augmentations.TestBasics::test_augmentations_are_skipped[1_swap_2_skip]
 - ✓ tests.test_augmentations.TestBasics::test_augmentations_are_skipped[1_swap_2_skip_3_swap]
+- ✓ tests.test_augmentations.TestBasics::test_pipe_fails_with_dynamic_output_shape[random-crop]
+- ✓ tests.test_augmentations.TestBasics::test_pipe_fails_with_dynamic_output_shape[resize/random-crop]
 - ✓ tests.test_augmentations.TestBasics::test_pipe_fails_with_no_augmentation
+- ✓ tests.test_augmentations.TestBasics::test_pipe_succeedes_with_static_output_shape[random-crop/resize]
+- ✓ tests.test_augmentations.TestBasics::test_pipe_succeedes_with_static_output_shape[resize/flip]
+- ✓ tests.test_augmentations.TestBasics::test_pipe_succeedes_with_static_output_shape[resize]
 - ✓ tests.test_augmentations.TestPointCorrectness::test_flip[dtype=float32]
 - ✓ tests.test_augmentations.TestPointCorrectness::test_flip[dtype=int32]
 - ✓ tests.test_augmentations.TestPointCorrectness::test_random_crop[dtype=float32]

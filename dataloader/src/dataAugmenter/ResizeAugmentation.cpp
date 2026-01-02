@@ -12,6 +12,10 @@ bool ResizeAugmentation::isOutputShapeDetStaticExceptForBatchDim() {
     return true;
 }
 
+bool ResizeAugmentation::isOutputShapeDetStaticGivenStaticInputShape() {
+    return true;
+}
+
 static bool isInputShapeSupported(const std::vector<uint32_t> &inputShape) {
     return isInputShapeHWN(inputShape, 3);
 }

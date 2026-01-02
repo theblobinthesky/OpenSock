@@ -365,8 +365,8 @@ PYBIND11_MODULE(_core, m) {
     try {
         const py::module_ atexit = py::module_::import("atexit");
         atexit.attr("register")(py::cpp_function([] {
-            // LOG_DEBUG_FUN("atexit", "atexit has been called");
-            // ResourcePool::shutdownLazily();
+            LOG_DEBUG_FUN("atexit", "atexit has been called");
+            ResourcePool::shutdownLazily();
         }));
     } catch (const std::exception &e) {
         // Swallow errors to avoid import-time failures if atexit is unavailable.

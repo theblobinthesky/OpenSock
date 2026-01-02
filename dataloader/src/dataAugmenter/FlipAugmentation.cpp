@@ -14,6 +14,10 @@ bool FlipAugmentation::isOutputShapeDetStaticExceptForBatchDim() {
     return false;
 }
 
+bool FlipAugmentation::isOutputShapeDetStaticGivenStaticInputShape() {
+    return true;
+}
+
 static bool isInputShapeSupported(const std::vector<uint32_t> &inputShape) {
     return inputShape.size() == 3;
 }
