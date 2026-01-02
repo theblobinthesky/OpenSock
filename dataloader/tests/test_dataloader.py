@@ -510,10 +510,9 @@ class TestPoints:
             offset = (offset + batch_size) % len(expected)
 
 
-def test_end_to_end_perf(benchmark):
+def test_end_to_end_perf(benchmark, dl_cfg):
     bs = DEF_BATCH_SIZE
-    num_threads = DEF_NUM_THREADS
-    prefetch_size = DEF_PREFETCH_SIZE
+    num_threads, prefetch_size = dl_cfg['num_threads'], dl_cfg['prefetch_size']
 
     cap = {"n_batches": 0, "in_bytes": 0}
 
@@ -521,10 +520,6 @@ def test_end_to_end_perf(benchmark):
         ds, dl = get_dataloader(
             batch_size=bs, num_threads=num_threads, prefetch_size=prefetch_size
         )
-
-        # Warmup a bit to fill prefetch and spin up threads.
-        for _ in range(min(2, len(dl))):
-            _ = dl.get_next_batch()
 
         n_batches = min(len(dl), 32)
         paths = [item[0] for item in ds.entries]
@@ -538,7 +533,7 @@ def test_end_to_end_perf(benchmark):
 
     def run_bench(dl, n_batches):
         items = 0
-        for _ in range(n_batches):
+        for _ in range(5 * n_batches):
             batch, _ = dl.get_next_batch()
             x = batch["img"]
 
@@ -553,7 +548,8 @@ def test_end_to_end_perf(benchmark):
     total_items = benchmark.pedantic(
         run_bench,
         setup=setup_bench,
-        rounds=3,
+        warmup_rounds=5,
+        rounds=10,
         iterations=1,
     )
 
