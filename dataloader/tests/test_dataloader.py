@@ -1,13 +1,17 @@
-import os, requests
-import io, tarfile, hashlib
+import cv2  # for exr
+import os
+import requests
+import io
+import tarfile
+import hashlib
 import pytest
 import native_dataloader as m
 from native_dataloader.jax_binding import DataLoader
 import numpy as np
 from PIL import Image
+import itertools
 
 os.environ["OPENCV_IO_ENABLE_OPENEXR"] = "1"
-import cv2  # for exr
 
 JPG_DATASET_URL = "https://storage.googleapis.com/download.tensorflow.org/example_images/flower_photos.tgz"
 JPG_DATASET_DIR = os.path.join("temp", "jpg_dataset")
@@ -45,7 +49,8 @@ def ensure_jpg_dataset():
         response = requests.get(JPG_DATASET_URL)
         response.raise_for_status()
         with tarfile.open(fileobj=io.BytesIO(response.content), mode="r:gz") as tar:
-            tar.extractall(path=JPG_DATASET_DIR, filter=lambda tarinfo, _: tarinfo)
+            tar.extractall(path=JPG_DATASET_DIR,
+                           filter=lambda tarinfo, _: tarinfo)
 
     return "temp/jpg_dataset/flower_photos", "daisy"
 
@@ -128,7 +133,8 @@ def assert_low_error(img, gt_img):
     #     axs[0].imshow(img)
     #     axs[1].imshow(gt_img)
     #     plt.show()
-    assert np.all(err < 10 / 255.0), f"Error {err * 255.0:.1f} too high for image"
+    assert np.all(
+        err < 10 / 255.0), f"Error {err * 255.0:.1f} too high for image"
 
 
 def verify_correctness(ds, dl, bs, reps=1, start=0):
@@ -143,7 +149,8 @@ def verify_correctness(ds, dl, bs, reps=1, start=0):
         for i in range(bs):
             path = paths[start % len(ds)]
             pil_img = Image.open(path).convert("RGB")
-            pil_img = np.array(pil_img.resize((WIDTH, HEIGHT)), np.float32) / 255.0
+            pil_img = np.array(pil_img.resize(
+                (WIDTH, HEIGHT)), np.float32) / 255.0
             assert_low_error(imgs[i], pil_img)
             start += 1
 
@@ -243,7 +250,8 @@ class TestRaster:
         del batch
 
         # Then run an image raster dataloader. The buffers must upsize, otherwise the buffers overflow.
-        _, dl = get_dataloader(DEF_BATCH_SIZE, DEF_NUM_THREADS, DEF_PREFETCH_SIZE)
+        _, dl = get_dataloader(
+            DEF_BATCH_SIZE, DEF_NUM_THREADS, DEF_PREFETCH_SIZE)
         batch, _ = dl.get_next_batch()
         assert "img" in batch
 
@@ -257,11 +265,13 @@ class TestDecoders:
         ds = m.Dataset.from_subdirs(
             "temp", [("img_exr", "img", m.ItemType.RASTER)], init_ds_fn
         )
-        dl = DataLoader(ds, 1, DEF_NUM_THREADS, DEF_PREFETCH_SIZE, get_pad_pipe())
+        dl = DataLoader(ds, 1, DEF_NUM_THREADS,
+                        DEF_PREFETCH_SIZE, get_pad_pipe())
         batch, _ = dl.get_next_batch()
         img = batch["img"][0, :h, :w]
 
-        gt_img = cv2.imread(EXR_DATASET_FILE, cv2.IMREAD_UNCHANGED).astype(np.float32)
+        gt_img = cv2.imread(
+            EXR_DATASET_FILE, cv2.IMREAD_UNCHANGED).astype(np.float32)
         gt_img = cv2.cvtColor(gt_img, cv2.COLOR_BGR2RGB)
 
         assert_low_error(img, gt_img)
@@ -275,11 +285,13 @@ class TestDecoders:
         ds = m.Dataset.from_subdirs(
             "temp", [("img_png", "img", m.ItemType.RASTER)], init_ds_fn
         )
-        dl = DataLoader(ds, 1, DEF_NUM_THREADS, DEF_PREFETCH_SIZE, get_pad_pipe())
+        dl = DataLoader(ds, 1, DEF_NUM_THREADS,
+                        DEF_PREFETCH_SIZE, get_pad_pipe())
         batch, _ = dl.get_next_batch()
         img = batch["img"][0, :h, :w]
 
-        pil_img = np.array(Image.open(PNG_DATASET_FILE).convert("RGB"), np.float32)
+        pil_img = np.array(Image.open(
+            PNG_DATASET_FILE).convert("RGB"), np.float32)
         pil_img = pil_img / 255.0
 
         assert_low_error(img, pil_img)
@@ -298,7 +310,8 @@ class TestDecoders:
                 pytest.skip("JAX x64 is disabled")
 
         ds = get_npy_dataset(tmp_path, dtype=dtype)
-        dl = DataLoader(ds, 16, DEF_NUM_THREADS, DEF_PREFETCH_SIZE, get_aug_pipe())
+        dl = DataLoader(ds, 16, DEF_NUM_THREADS,
+                        DEF_PREFETCH_SIZE, get_aug_pipe())
 
         batch, _ = dl.get_next_batch()
         np_data = batch["np"]
@@ -315,7 +328,8 @@ class TestDecoders:
         in_sub = tmp_path / "in"
         in_sub.mkdir()
         for i in range(10):
-            arr = np.arange(np.prod(shape), dtype=np.float32).reshape(shape) + i
+            arr = np.arange(
+                np.prod(shape), dtype=np.float32).reshape(shape) + i
             np.save(in_sub / f"file{i}.npy", arr)
 
         out_sub = tmp_path / "out"
@@ -338,7 +352,8 @@ class TestDecoders:
         ds = m.Dataset.from_subdirs(str(tmp_path), mapping, init_ds_fn)
 
         aug_pipe = m.DataAugmentationPipe(
-            [m.PadAugmentation(shape[0], shape[1], m.PadSettings.PAD_BOTTOM_RIGHT)],
+            [m.PadAugmentation(shape[0], shape[1],
+                               m.PadSettings.PAD_BOTTOM_RIGHT)],
             [16, shape[0], shape[1], shape[2]],
             1,
             4,
@@ -387,7 +402,8 @@ class TestPoints:
             if length > self.MAX_POINTS:
                 raise ValueError("Sample length exceeds MAX_POINTS")
 
-            img = (rng.random((self.IMG_SIZE, self.IMG_SIZE, 3)) * 255).astype(np.uint8)
+            img = (rng.random((self.IMG_SIZE, self.IMG_SIZE, 3))
+                   * 255).astype(np.uint8)
             Image.fromarray(img).save(img_dir / f"sample_{idx}.png")
 
             pts = np.zeros((length, self.POINT_DIM), dtype=np.float32)
@@ -445,7 +461,8 @@ class TestPoints:
         assert pts_lengths.shape == (len(lengths),)
         assert pts_lengths.dtype == np.int32
         expected = np.array(
-            self._lengths_in_ds_order(ds, lengths)[: len(lengths)], dtype=np.int32
+            self._lengths_in_ds_order(ds, lengths)[
+                : len(lengths)], dtype=np.int32
         )
         assert np.array_equal(pts_lengths, expected)
         del pts_lengths  # give back control to the dataloader
@@ -506,13 +523,24 @@ class TestPoints:
             slice_expected = [
                 expected[(offset + i) % len(expected)] for i in range(batch_size)
             ]
-            assert np.array_equal(pts_lengths, np.array(slice_expected, dtype=np.int32))
+            assert np.array_equal(pts_lengths, np.array(
+                slice_expected, dtype=np.int32))
             offset = (offset + batch_size) % len(expected)
 
 
-def test_end_to_end_perf(benchmark, dl_cfg):
-    bs = DEF_BATCH_SIZE
-    num_threads, prefetch_size = dl_cfg['num_threads'], dl_cfg['prefetch_size']
+PERF_CONFIGS = [
+]
+
+
+@pytest.mark.parametrize("settings",
+                         list(itertools.product(
+                             [16, 32, 64],  # BATCH_SIZE
+                             [8, 16],  # NUM_THREADS
+                             [16, 4, 2, 1]  # PREFETCH_SIZE
+                         )), ids=lambda s: f"batch_size={s[0]},num_threads={s[1]},prefetch_size={s[2]}")
+def test_end_to_end_perf(benchmark, settings):
+    print(settings)
+    bs, num_threads, prefetch_size = settings
 
     cap = {"n_batches": 0, "in_bytes": 0}
 
@@ -521,7 +549,7 @@ def test_end_to_end_perf(benchmark, dl_cfg):
             batch_size=bs, num_threads=num_threads, prefetch_size=prefetch_size
         )
 
-        n_batches = min(len(dl), 32)
+        n_batches = len(dl) * 10
         paths = [item[0] for item in ds.entries]
         in_bytes = 0
         for i in range(n_batches * bs):
@@ -533,7 +561,7 @@ def test_end_to_end_perf(benchmark, dl_cfg):
 
     def run_bench(dl, n_batches):
         items = 0
-        for _ in range(5 * n_batches):
+        for _ in range(n_batches):
             batch, _ = dl.get_next_batch()
             x = batch["img"]
 

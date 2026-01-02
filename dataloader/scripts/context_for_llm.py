@@ -11,7 +11,7 @@ filters = [
     "Makefile",
     "pyproject.toml",
     "pytest.ini",
-    "README.md"
+    "*.md"
 ]
 
 if __name__ == "__main__":
