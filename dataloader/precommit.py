@@ -157,17 +157,6 @@ def run_clang_tidy(files: List[str]) -> bool:
         return all(results)
 
 
-def run_selected_tests_with_san(_: List[str]) -> bool:
-    print_info("→ Building with Sanitizers...")
-    if not run_command([f"make", "install-debug-asan-usan"]):
-        return False
-
-    print_info("→ Running tests with AddressSanitizer...")
-    if not run_command([f"scripts/run_tests_with_san.sh"]):
-        return False
-    return True
-
-
 def parse_junit_report(path: Path):
     tests = []
     try:
@@ -276,6 +265,9 @@ def run_tests_report(_: List[str]) -> bool:
     normal_xml = Path(".tests_normal.xml")
     san_xml = Path(".tests_san.xml")
 
+    if not run_command_capture(["make", "install-debug"]):
+        return False
+
     normal_cmd_list = [
         "uv",
         "run",
@@ -316,16 +308,12 @@ def run_tests_report(_: List[str]) -> bool:
     env["ASAN_OPTIONS"] = "detect_leaks=0:log_path=logs/asan_log"
 
     san_cmd_list = [
-        "uv",
-        "run",
-        "python",
-        "-m",
         "pytest",
         "tests/test_meta.py",
         "tests/test_dataset.py",
         "tests/test_augmentations.py",
         "tests/test_compression.py",
-        "-xs",
+        "-s",
         "--benchmark-disable",
         f"--junitxml={san_xml}",
     ]
@@ -431,10 +419,6 @@ def run_benchmarks(_: List[str]) -> bool:
     bench_json = Path(".benchmark.json")
     out = run_command(
         [
-            "uv",
-            "run",
-            "python",
-            "-m",
             "pytest",
             "./tests",
             "--benchmark-only",

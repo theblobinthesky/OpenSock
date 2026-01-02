@@ -103,6 +103,12 @@ class IDataLoader(ABC):
         """
         pass
 
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        return self.get_next_batch()
+
 
 class Codec(Enum):
     ZSTD_LEVEL_3 = m.Codec.ZSTD_LEVEL_3

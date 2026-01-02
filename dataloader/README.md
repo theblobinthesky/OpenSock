@@ -196,9 +196,9 @@ make install-debug-asan-usan
 
 While this project allows for high-performance data loading, it is currently considered **Beta** software.
 
-*   **Hardening:** The codebase is not yet 100% hardened.
-*   **Missing TSan:** While we strictly enforce ASan and UBSan, **ThreadSanitizer (TSan) has not yet been integrated**.
-*   **Concurrency Risks:** Given the complex nature of the lock-free and fine-grained synchronization primitives used in the `ResourcePool` (e.g., `std::latch`, `std::barrier`), rare race conditions may still exist in edge cases.
+*   **Hardening:** The codebase is not yet 100% hardened. Some race conditions still exist and an hour-long stress test with many dataloader switches etc. is still missing and would likely fail at this moment in time.
+*   **Missing Sanitization:** While we strictly enforce ASan and UBSan, **ThreadSanitizer (TSan) has not yet been integrated**. Also, a cuda-free backend is coming in future updates that will enable us to test the entire end-to-end dataloader with sanitizers, not just subunits like the compressor, augmentations and dataset.
+*   **Multi GPU Training:** While the architecture supports multi-gpu training in principle, the ability is not yet integrated into the dataloader. This is very feasible though and is also coming in future updates.
 
 ---
 
